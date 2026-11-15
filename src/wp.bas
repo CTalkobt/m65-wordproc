@@ -100,6 +100,9 @@ waitkey:
     sys {wp_cmd}, CMD_PGUP
   case 26
     sys {wp_cmd}, CMD_PGDN
+  case 12
+    ' CTRL+L: the whole screen drawn again
+    sys {wp_redraw}
   case 27
     sys {wp_get}, GET_SEL : rreg se
     if se then sys {wp_cmd}, CMD_UNMARK : else call menu
@@ -110,7 +113,7 @@ waitkey:
 
 ' ---- the menu (ESC) ----
 proc menu
-  call say(p"N)ew  L)oad  S)ave  I)mport  E)xport  D)irectory  H)elp  Q)uit   ESC: back")
+  call say(p"N)ew L)oad S)ave I)mport E)xport D)ir H)elp R)edraw Q)uit  ESC: back")
   getkey m$
   m = asc(m$) and 127
   select m
@@ -128,6 +131,9 @@ proc menu
     call showdir
   case 72
     call loadhelp
+  case 82
+    call say("")
+    sys {wp_redraw}
   case 81
     call quit
   case else

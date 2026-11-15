@@ -84,7 +84,8 @@ static const struct run help[] = {
     { 0, "\r" },
     { MONO, "N new     L load     S save\r"
             "I import  E export   (plain PETSCII text)\r"
-            "D directory   H this help   Q quit\r" },
+            "D directory   H this help   Q quit\r"
+            "R redraw the screen (also CTRL+L)\r" },
     { 0, "Saved Writer documents keep their fonts and styles.\r" },
 };
 

@@ -51,7 +51,8 @@ keyboard buffer and saves a screenshot, e.g.
 | CTRL + cursor keys | start a selection at the cursor, or extend the one there is |
 | F10 / F11 / F12 | copy / cut / paste |
 | F8 or HELP | the help (`WRITER.HELP`) as the document (after asking about unsaved changes) |
-| ESC | menu: New, Load, Save, Import text, Export text, Directory, Help, Quit (ESC also ends a selection) |
+| ESC | menu: New, Load, Save, Import text, Export text, Directory, Help, Redraw, Quit (ESC also ends a selection) |
+| CTRL+L | redraw the whole screen |
 
 Styles and fonts apply to the selection, or to what you type next.
 
@@ -82,9 +83,12 @@ name) by `POKE`ing them into C buffers (`{msg}`, `{fname}`).
   out; the rest is laid out while no key is waiting (BASIC polls with `GET`
   and calls `wp_idle`), and the page count reads `?` until it is done.
 - **Drawing** is cached: each band of screen rows (a line, blank page, desk,
-  a page number) has a CRC of what it shows; a band the same as in the last
-  frame, in the same place, is not drawn again. The bars are redrawn only
-  when their text changes.
+  a page number) has a hash of what it shows; a band the same as in the
+  last frame, in the same place, is not drawn again. The bars are redrawn
+  only when their text changes. The hash is two 8-bit running sums
+  (Fletcher-style: two adds a byte, no table): one byte changed, or two
+  neighbours swapped, always changes it; other changes could, rarely,
+  leave a line showing its old text, which CTRL+L (redraw) puts right.
 
 About 10 ms a key in a short document and 80 ms in one of 10,000
 characters (40 MHz, measured in xemu).

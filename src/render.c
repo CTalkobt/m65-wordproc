@@ -36,8 +36,6 @@ struct seg {
 static struct seg segs[2][MAXSEG];     /* this frame's and the last one's, in screen order */
 static u8 nseg[2], set, prev_i;
 static char bar_text[2][COLS + 2];     /* what each bar shows ("" : unknown) */
-static u16 crc_tab[256];
-static void crc_init(void);
 
 extern u8 npages;
 
@@ -54,7 +52,6 @@ static void init_rows(void) {
         row_page[i] = (i < PAGE_X / 8 || i >= (PAGE_X + PAGE_W) / 8) ? 0xFF : 0;
     }
     for (i = 0; i < ROWS; i++) rowcol[i] = 0xFF;
-    crc_init();
     inited = 1;
 }
 
@@ -92,46 +89,49 @@ static u8 seg_same(u16 sy, u8 kind, u8 r0, u16 n, u16 hash) {
     return same;
 }
 
-/* CRC-16-CCITT of the bytes of v (two characters' changes never cancel) */
-static u16 hmix(u16 h, u16 v) {
-    h = (u16)((h << 8) ^ crc_tab[(u8)((h >> 8) ^ (u8)v)]);
-    return (u16)((h << 8) ^ crc_tab[(u8)((h >> 8) ^ (u8)(v >> 8))]);
-}
+/* A line's hash: a Fletcher-style pair of sums of its bytes (s1 their sum,
+ * s2 the sum of the running s1), two 8-bit adds a byte. Any one byte
+ * changed changes s1; two neighbours swapped change s2. */
+static u8 hs1, hs2;
 
-static void crc_init(void) {
-    u16 i, c;
-    u8 k;
-    for (i = 0; i < 256; i++) {
-        c = (u16)(i << 8);
-        for (k = 0; k < 8; k++) c = (c & 0x8000) ? (u16)((c << 1) ^ 0x1021) : (u16)(c << 1);
-        crc_tab[i] = c;
-    }
+static void hmix(u16 v) {
+    hs1 += (u8)v;
+    hs2 += hs1;
+    hs1 += (u8)(v >> 8);
+    hs2 += hs1;
 }
 
 /* what line l shows: its characters, attributes, placement, and the cursor
  * and selection in it (raw view: also the style before it and its
  * paragraph's alignment, which its tags show) */
 static u16 line_hash(u16 l, const struct line *L) {
-    u16 i = L->start, e = line_end(l), h = 0x5A17;
-    h = hmix(h, L->x);
-    h = hmix(h, (u16)(L->extra | (L->nsp << 8)));
-    h = hmix(h, (u16)(L->h | (L->asc << 8)));
-    h = hmix(h, (u16)(e - i));
+    u16 i = L->start, e = line_end(l);
+    hs1 = 0x17;
+    hs2 = 0x5A;
+    hmix(L->x);
+    hmix((u16)(L->extra | (L->nsp << 8)));
+    hmix((u16)(L->h | (L->asc << 8)));
+    hmix((u16)(e - i));
     if (view_mode == VIEW_RAW) {
-        h = hmix(h, prev_style(i));
-        h = hmix(h, ATR[para_end(i)]);
+        hmix(prev_style(i));
+        hmix(ATR[para_end(i)]);
     }
-    for (; i < e; i++) h = hmix(h, (u16)(TXT[i] | (ATR[i] << 8)));
+    for (; i < e; i++) {
+        hs1 += TXT[i];
+        hs2 += hs1;
+        hs1 += ATR[i];
+        hs2 += hs1;
+    }
     i = L->start;
-    if (cur >= i && cur < e) h = hmix(h, (u16)(0x8000 | (cur - i)));
+    if (cur >= i && cur < e) hmix((u16)(0x8000 | (cur - i)));
     if (sel_on) {
         u16 lo = sel_lo(), hi = sel_hi();
         if (lo < e && hi > i) {
-            h = hmix(h, (u16)(0x4000 | (lo > i ? lo - i : 0)));
-            h = hmix(h, (u16)(0x2000 | (hi < e ? hi - i : e - i)));
+            hmix((u16)(0x4000 | (lo > i ? lo - i : 0)));
+            hmix((u16)(0x2000 | (hi < e ? hi - i : e - i)));
         }
     }
-    return h;
+    return (u16)(hs1 | (hs2 << 8));
 }
 
 
