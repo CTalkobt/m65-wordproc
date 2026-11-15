@@ -61,6 +61,12 @@ void video_on(void) {
 }
 void video_off(void) {}
 
+/* the keyboard: what the tests say is held */
+u8 host_mods, host_ctrl_crsr, host_frames;
+u8 kbd_mods(void) { return host_mods; }
+u8 kbd_ctrl_crsr(void) { return host_ctrl_crsr; }
+u8 frames(void) { return host_frames; }
+
 static const unsigned char pal[16][3] = {
     {0, 0, 0}, {255, 255, 255}, {170, 50, 40}, {110, 210, 220}, {140, 60, 160}, {90, 170, 70},
     {50, 40, 170}, {210, 220, 110}, {150, 90, 30}, {100, 70, 0}, {200, 110, 100}, {68, 68, 68},

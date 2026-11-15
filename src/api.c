@@ -116,9 +116,26 @@ static void page_move(signed char d) {
     cur = pos_at_x(l, goal_x);
 }
 
+/* CTRL + a cursor key selects: a selection started at the cursor when
+ * there is none, else the one there is extended. The keys are read from the
+ * keyboard (ctrl_keys): the KERNAL drops CTRL + right / down, and gives
+ * CTRL + left / up as plain left / up on a MEGA65 but not in xemu; so a
+ * cursor key from GET while CTRL is held is left out. */
+static u8 ctrl_key;
+
+static u8 is_crsr(u8 k) { return k == 29 || k == 157 || k == 17 || k == 145; }
+
 void wp_key(u8 k) {
     u8 c, relayout = 0, mv = 1;
     msg[0] = 0;
+    if (is_crsr(k)) {
+        if (!ctrl_key) {
+            if (kbd_mods() & KM_CTRL) return;
+        } else if (!sel_on) {
+            sel_on = 1;
+            sel_anchor = cur;
+        }
+    }
     switch (k) {
     case 29:                    /* right */
         if (cur < doc_len - 1) cur++;
@@ -335,8 +352,34 @@ void wp_stopvec(u8 on) {
 /* while no key waits: more of the document laid out; 1 while there is more
  * (the screen drawn again when the last of it is: the page count, the
  * desk below the last page) */
+/* CTRL + a cursor key: the keyboard read here (BASIC calls wp_idle while
+ * no key waits), repeated as the KERNAL's keys are: after REP_FIRST
+ * frames, then every REP_NEXT */
+#define REP_FIRST 20
+#define REP_NEXT 3
+static u8 rep_key, rep_at;
+
+static void ctrl_keys(void) {
+    u8 k = kbd_ctrl_crsr(), now = frames();
+    if (k != rep_key) {
+        rep_key = k;
+        rep_at = (u8)(now + REP_FIRST);
+    } else if (!k || (signed char)(now - rep_at) < 0) {
+        return;
+    } else {
+        rep_at = (u8)(now + REP_NEXT);
+    }
+    if (!k) return;
+    ctrl_key = 1;
+    wp_key(k);
+    ctrl_key = 0;
+}
+
+/* between keys: CTRL + cursor keys; more of the layout (then the
+ * screen drawn again); 1 while there is layout left to do */
 u8 wp_idle(void) {
     u8 more;
+    ctrl_keys();
     if (layout_done) return 0;
     more = layout_idle();
     if (!more) render();

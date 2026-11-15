@@ -138,6 +138,13 @@ void color_fill(u8 row, u8 col, u8 n, u8 c);    /* cells' foreground colour */
 void color_row(u8 row, const u8 *c);            /* a row's 80 colours */
 void video_on(void);
 void video_off(void);
+/* the keyboard, read directly (the KERNAL gives no key for CTRL with a
+ * cursor key, or not always) */
+#define KM_SHIFT 0x03               /* kbd_mods(): either SHIFT */
+#define KM_CTRL 0x04
+u8 kbd_mods(void);                  /* the modifier keys held now ($D611) */
+u8 kbd_ctrl_crsr(void);             /* CTRL + a cursor key held: its code (29 157 17 145), else 0 */
+u8 frames(void);                    /* video frames counted (wraps) */
 
 #ifdef __cc45__
 #define TXT ((u8 __far *)TEXT_LIN)

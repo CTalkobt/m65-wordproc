@@ -47,6 +47,7 @@ keyboard buffer and saves a screenshot, e.g.
 | F4 | paragraph alignment: left, centre, right, justify |
 | F6 | page break |
 | F9 | start / end a selection (move the cursor to extend it) |
+| CTRL + cursor keys | start a selection at the cursor, or extend the one there is |
 | F10 / F11 / F12 | copy / cut / paste |
 | F8 or HELP | help |
 | ESC | menu: New, Load, Save, Import text, Export text, Directory, Help, Quit (ESC also ends a selection) |
@@ -57,7 +58,7 @@ Styles and fonts apply to the selection, or to what you type next.
 
 | Part | Language | Does |
 |------|----------|------|
-| `src/wp.bas` | BASIC 65 | the main loop (GET / GETKEY and what each key means; idle time handed to C), the menu, file-name prompts and confirmations, all disk work (`BLOAD` / `BSAVE` documents and fonts, `DOPEN` + `FREAD#` / `FWRITE#` text import and export, `DIR`), the help screen, error trapping |
+| `src/wp.bas` | BASIC 65 | the main loop (GET and what each key means; idle time handed to C), the menu, file-name prompts and confirmations, all disk work (`BLOAD` / `BSAVE` documents and fonts, `DOPEN` + `FREAD#` / `FWRITE#` text import and export, `DIR`), the help screen, error trapping |
 | `src/doc.c` | C | the document: two parallel arrays in bank 5 (text, an attribute byte per character), insert and delete by DMA, styles, alignment, clipboard, the file image |
 | `src/layout.c` | C | line breaking for both views, justification, pagination, raw-view tags, cursor ↔ position mapping; incremental and lazy (below) |
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
@@ -134,6 +135,14 @@ the X11 8×13 font for the raw view; `make fonts` rebuilds `src/fonts.c`
   the Editor's lock bit (bit 5 of `$F7`) is set. `KEY OFF` sets it, but first
   waits for a pending macro (`$D1`) to drain, which never happens in a running
   program; the program sets the bit itself.
+- **CTRL + cursor keys**: the keyboard's PETSCII table has no code for CTRL
+  with cursor right or down, so the KERNAL never queues them; CTRL with left
+  or up (the MEGA65's own keys, which the hardware sends as SHIFT + right /
+  down) comes through as plain left / up. So BASIC polls with `GET`, the C
+  half checks CTRL (`$D611`) when a cursor key arrives, and, between keys,
+  reads CTRL + right / down from the keyboard matrix (`$D614` / `$D613`,
+  with `$D60F` and the SHIFT bits to leave out left and up), repeating it by
+  the frame counter (`$D7FA`).
 - **RUN/STOP** is ignored while editing: the KERNAL's STOP vector (`$0328`)
   points at a 5-byte routine at `$0378` (free between the KERNAL's file
   tables and its RAM code) that answers "not pressed" as the KERNAL's own

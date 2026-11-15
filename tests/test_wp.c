@@ -20,6 +20,7 @@ void screen_ppm(const char *path);
 void wp_redraw(void);
 u8 wp_idle(void);
 extern const u8 *host_colram(void);
+extern u8 host_mods, host_ctrl_crsr, host_frames;
 
 /* the line table the edits left (laid out to the end) = the document laid out anew */
 static void check_incremental(void) {
@@ -194,6 +195,58 @@ int main(void) {
     /* the typing style follows the cursor */
     wp_key(157);
     CHECK(typing_attr & A_BOLD);
+
+    /* CTRL + cursor keys select (read from the keyboard by wp_idle): a
+     * selection is started, then extended; the key repeats while held */
+    wp_cmd(9);
+    wp_key(19);
+    wp_key(19);                 /* the line's end: 9 */
+    CHECK(cur == 9 && !sel_on);
+    host_mods = KM_CTRL;
+    host_ctrl_crsr = 157;       /* CTRL + left */
+    host_frames = 10;
+    wp_idle();
+    CHECK(sel_on && sel_anchor == 9 && cur == 8);
+    wp_key(157);                /* the same, from GET: left out */
+    CHECK(cur == 8);
+    host_ctrl_crsr = 0;
+    wp_idle();
+    host_ctrl_crsr = 157;
+    wp_idle();
+    host_ctrl_crsr = 0;
+    wp_idle();
+    host_ctrl_crsr = 157;
+    wp_idle();
+    CHECK(sel_on && sel_lo() == 6 && sel_hi() == 9);
+    host_ctrl_crsr = 0;
+    host_mods = 0;
+    wp_idle();
+    wp_key(157);                /* (a plain move goes on with it, as after F9) */
+    CHECK(sel_on && sel_lo() == 5 && sel_hi() == 9);
+    wp_cmd(9);
+    host_mods = KM_CTRL;
+    host_ctrl_crsr = 29;        /* CTRL + right held */
+    host_frames = 100;
+    wp_idle();
+    CHECK(sel_on && sel_anchor == 5 && cur == 6);
+    wp_idle();                  /* the same frame: no repeat yet */
+    host_frames = 110;
+    wp_idle();
+    CHECK(cur == 6);
+    host_frames = 120;          /* after the first delay: repeats */
+    wp_idle();
+    CHECK(cur == 7);
+    wp_idle();
+    CHECK(cur == 7);
+    host_frames = 123;
+    wp_idle();
+    CHECK(cur == 8);
+    host_ctrl_crsr = 0;
+    host_mods = 0;
+    host_frames = 200;
+    wp_idle();
+    CHECK(cur == 8 && sel_on && sel_lo() == 5 && sel_hi() == 8);
+    wp_cmd(9);
 
     /* wrapping and pages */
     wp_cmd(13);

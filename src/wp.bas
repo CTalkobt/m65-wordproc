@@ -64,10 +64,11 @@ wpinit:
 
 mainloop:
   trap errh
-  ' while the C half has layout left to do, it works between keys
-  sys {wp_idle} : rreg bz
-  if bz then get k$ : if k$ = "" then mainloop
-  if bz = 0 then getkey k$
+waitkey:
+  ' between keys the C half lays out what is left and reads CTRL + cursor
+  ' keys from the keyboard (GET does not give them, or not as such)
+  sys {wp_idle}
+  get k$ : if k$ = "" then waitkey
   k = asc(k$)
   select k
   case 133
@@ -319,7 +320,8 @@ proc helpscreen
   print
   print p"{yellow}Selection and clipboard{white}"
   print p"  F9 starts a selection at the cursor (again or ESC ends it); move to"
-  print p"  extend it.  F10 copy   F11 cut   F12 paste   typing replaces it"
+  print p"  extend it.  CTRL + cursor keys start or extend one, too."
+  print p"  F10 copy   F11 cut   F12 paste   typing replaces it"
   print
   print p"{yellow}Menu (ESC){white}"
   print p"  N new   L load   S save (Writer documents keep fonts and styles)"

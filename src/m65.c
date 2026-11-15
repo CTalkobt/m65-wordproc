@@ -110,3 +110,21 @@ void video_off(void) {
     for (i = 1; i < NSAVED; i++) VIC(0xD000 + saved_regs[i]) = saved[i];
     is_on = 0;
 }
+
+/* ---- the keyboard ---- */
+u8 kbd_mods(void) { return VIC(0xD611); }
+
+/* CTRL with a cursor key, held: its code. The matrix has one key for
+ * right / left and one for down / up; left and up are those with SHIFT, or
+ * the MEGA65's own left and up keys ($D60F bits 0, 1). */
+u8 kbd_ctrl_crsr(void) {
+    u8 m = VIC(0xD611), lu = VIC(0xD60F), v;
+    if (!(m & KM_CTRL)) return 0;
+    VIC(0xD614) = 0;            /* the matrix's first 8 keys: DEL RETURN CRSR-H F7 F1 F3 F5 CRSR-V */
+    v = VIC(0xD613);            /* (0: pressed) */
+    if (!(v & 0x04)) return (m & KM_SHIFT) || (lu & 1) ? 157 : 29;
+    if (!(v & 0x80)) return (m & KM_SHIFT) || (lu & 2) ? 145 : 17;
+    return 0;
+}
+
+u8 frames(void) { return VIC(0xD7FA); }
