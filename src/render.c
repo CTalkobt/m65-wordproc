@@ -111,18 +111,18 @@ static void crc_init(void) {
 /* what line l shows: its characters, attributes, placement, and the cursor
  * and selection in it (raw view: also the style before it and its
  * paragraph's alignment, which its tags show) */
-static u16 line_hash(u16 l) {
-    u16 i = LINES[l].start, e = line_end(l), h = 0x5A17;
-    h = hmix(h, LINES[l].x);
-    h = hmix(h, (u16)(LINES[l].extra | (LINES[l].nsp << 8)));
-    h = hmix(h, (u16)(LINES[l].h | (LINES[l].asc << 8)));
+static u16 line_hash(u16 l, const struct line *L) {
+    u16 i = L->start, e = line_end(l), h = 0x5A17;
+    h = hmix(h, L->x);
+    h = hmix(h, (u16)(L->extra | (L->nsp << 8)));
+    h = hmix(h, (u16)(L->h | (L->asc << 8)));
     h = hmix(h, (u16)(e - i));
     if (view_mode == VIEW_RAW) {
         h = hmix(h, prev_style(i));
         h = hmix(h, ATR[para_end(i)]);
     }
     for (; i < e; i++) h = hmix(h, (u16)(TXT[i] | (ATR[i] << 8)));
-    i = LINES[l].start;
+    i = L->start;
     if (cur >= i && cur < e) h = hmix(h, (u16)(0x8000 | (cur - i)));
     if (sel_on) {
         u16 lo = sel_lo(), hi = sel_hi();
@@ -179,11 +179,13 @@ static u8 gbuf[48];             /* a glyph's rows, copied from bank 4 */
 static void draw_glyph(const struct font *f, u8 c, u16 x, u8 top, u8 style) {
     const u8 *g = gbuf;
     u8 r, w, two, h = f->height, asc = f->ascent;
+    u32 oa;
     if (c < FONT_FIRST || c > FONT_LAST) c = '?';
     c -= FONT_FIRST;
     w = f->w[c];
     two = w > 8;
-    mem_read(gbuf, f->bits + f->o[c], two ? (u16)(h * 2) : h);
+    oa = f->offs + (u16)(c * 2);
+    mem_read(gbuf, f->bits + (u16)(mem_get(oa) | (mem_get(oa + 1) << 8)), two ? (u16)(h * 2) : h);
     for (r = 0; r < h; r++) {
         u16 px = x;
         u8 b0 = *g++, b1 = 0, b2, sh, row = (u8)(top + r);
@@ -215,25 +217,14 @@ static void draw_glyph(const struct font *f, u8 c, u16 x, u8 top, u8 style) {
     }
 }
 
-/* raw font text at cell col (an 8 x 16 cell row band); inv: inverted */
-static void raw_cell(u8 col, u8 c) {
+/* raw font text at cell col (an 8 x 16 cell row band); inv 0xFF: inverted */
+static void raw_cell(u8 col, u8 c, u8 inv) {
     const u8 *g;
     u8 r, *d = band + COLS + col;
     if (c < FONT_FIRST || c > FONT_LAST) c = '?';
     g = font_raw_rows + (u16)(c - FONT_FIRST) * 13;
     for (r = 0; r < 13; r++) {
-        d[0] = g[r];
-        d += COLS;
-    }
-}
-
-static void raw_cell_inv(u8 col, u8 c) {
-    const u8 *g;
-    u8 r, *d = band + COLS + col;
-    if (c < FONT_FIRST || c > FONT_LAST) c = '?';
-    g = font_raw_rows + (u16)(c - FONT_FIRST) * 13;
-    for (r = 0; r < 13; r++) {
-        d[0] = (u8)~g[r];
+        d[0] = (u8)(g[r] ^ inv);
         d += COLS;
     }
 }
@@ -255,35 +246,32 @@ static void rows_out(u16 sy, u16 n, const u8 *pattern) {
     while (n--) blit_row(sy++, pattern);
 }
 
-/* ---- numbers and strings ---- */
-static u8 put_str(char *d, u8 n, const char *s) {
-    while (*s && n < 80) d[n++] = *s++;
-    return n;
+/* ---- text for the bars and the page numbers: put into sb (sn long) ---- */
+static char sb[COLS + 1];
+static u8 sn;
+
+static void put_str(const char *s) {
+    while (*s && sn < COLS) sb[sn++] = *s++;
 }
 
-static u8 put_num(char *d, u8 n, u16 v) {
+static void put_num(u16 v) {
     char t[6];
     u8 k = 0;
     do {
         t[k++] = (char)('0' + v % 10);
         v /= 10;
     } while (v);
-    while (k && n < 80) d[n++] = t[--k];
-    return n;
+    while (k && sn < COLS) sb[sn++] = t[--k];
 }
 
 /* ---- the bars ---- */
-static void bar(u8 which, const char *left, const char *right) {
-    u8 i, n = 0, rn = 0;
+/* bar which from sb: its left part sb[0..ln-1], at its right end sb[ln..sn-1] */
+static void bar(u8 which, u8 ln) {
+    u8 i, rn = (u8)(sn - ln);
     char t[COLS + 2], *o = bar_text[which];
-    /* the bar as text: the left part, the right part at the end */
     for (i = 0; i < COLS; i++) t[i] = ' ';
-    while (left[n] && n < COLS) {
-        t[n] = left[n];
-        n++;
-    }
-    while (right[rn]) rn++;
-    for (i = 0; i < rn && i < COLS; i++) t[COLS - rn + i] = right[i];
+    for (i = 0; i < ln; i++) t[i] = sb[i];
+    for (i = 0; i < rn; i++) t[COLS - rn + i] = sb[ln + i];
     t[COLS] = '|';              /* (never "": a bar drawn) */
     t[COLS + 1] = 0;
     for (i = 0; i <= COLS && t[i] == o[i]; i++) ;
@@ -291,7 +279,7 @@ static void bar(u8 which, const char *left, const char *right) {
     band_fill(RAW_H, row_desk);
     for (i = 0; i < COLS; i++) {
         o[i] = t[i];
-        if (t[i] != ' ') raw_cell_inv(i, (u8)t[i]);
+        if (t[i] != ' ') raw_cell(i, (u8)t[i], 0xFF);
     }
     o[COLS] = '|';
     o[COLS + 1] = 0;
@@ -309,55 +297,52 @@ static void bar_colour(u8 row) {
 static const char *const align_names[4] = { "Left", "Centre", "Right", "Justify" };
 
 void render_bars(void) {
-    char l[81], r[41];
-    u8 n = 0, a = typing_attr;
+    u8 ln, a = typing_attr;
     u16 li = nlines ? line_of(cur) : 0;
+    struct line L;
     if (!inited) init_rows();
-    n = put_str(l, n, " MEGA65 Writer  ");
-    n = put_str(l, n, fname);
-    if (dirty) n = put_str(l, n, " *");
-    l[n] = 0;
-    n = 0;
-    n = put_str(r, n, view_mode == VIEW_RAW ? "RAW VIEW " : "PAGE LAYOUT ");
-    r[n] = 0;
-    bar(0, l, r);
+    sn = 0;
+    put_str(" MEGA65 Writer  ");
+    put_str(fname);
+    if (dirty) put_str(" *");
+    ln = sn;
+    put_str(view_mode == VIEW_RAW ? "RAW VIEW " : "PAGE LAYOUT ");
+    bar(0, ln);
     bar_colour(0);
 
+    sn = 0;
     if (msg[0]) {
-        n = put_str(l, 0, " ");
-        n = put_str(l, n, msg);
-        l[n] = 0;
-        r[0] = 0;
+        put_str(" ");
+        put_str(msg);
+        ln = sn;
     } else {
-        n = 0;
+        get_line(li, &L);
         if (view_mode == VIEW_PAGE) {
-            n = put_str(l, n, " Pg ");
-            n = put_num(l, n, (u16)(LINES[li].page + 1));
-            n = put_str(l, n, "/");
-            if (layout_done) n = put_num(l, n, npages);
-            else n = put_str(l, n, "?");
+            put_str(" Pg ");
+            put_num((u16)(L.page + 1));
+            put_str("/");
+            if (layout_done) put_num(npages);
+            else put_str("?");
         }
-        n = put_str(l, n, " Ln ");
-        n = put_num(l, n, (u16)(li + 1));
-        n = put_str(l, n, " Col ");
-        n = put_num(l, n, (u16)(cur - LINES[li].start + 1));
-        n = put_str(l, n, "  ");
-        n = put_str(l, n, font_names[a & A_FONT]);
-        n = put_str(l, n, (a & A_BOLD) ? " B" : " -");
-        n = put_str(l, n, (a & A_ITAL) ? "I" : "-");
-        n = put_str(l, n, (a & A_UNDER) ? "U " : "- ");
-        n = put_str(l, n, align_names[(ATR[para_end(cur)] & A_ALIGN) >> A_ALIGN_SHIFT]);
+        put_str(" Ln ");
+        put_num((u16)(li + 1));
+        put_str(" Col ");
+        put_num((u16)(cur - L.start + 1));
+        put_str("  ");
+        put_str(font_names[a & A_FONT]);
+        put_str((a & A_BOLD) ? " B" : " -");
+        put_str((a & A_ITAL) ? "I" : "-");
+        put_str((a & A_UNDER) ? "U " : "- ");
+        put_str(align_names[(ATR[para_end(cur)] & A_ALIGN) >> A_ALIGN_SHIFT]);
         if (sel_on) {
-            n = put_str(l, n, "  SEL ");
-            n = put_num(l, n, (u16)(sel_hi() - sel_lo()));
+            put_str("  SEL ");
+            put_num((u16)(sel_hi() - sel_lo()));
         }
-        l[n] = 0;
-        n = 0;
-        n = put_num(r, n, doc_len - 1);
-        n = put_str(r, n, " chars  F8 Help  ESC Menu ");
-        r[n] = 0;
+        ln = sn;
+        put_num(doc_len - 1);
+        put_str(" chars  F8 Help  ESC Menu ");
     }
-    bar(1, l, r);
+    bar(1, ln);
     bar_colour(ROWS - 2);
 }
 
@@ -366,17 +351,19 @@ static void mark_desk(u16 sy, u16 n) {
     while (n--) desk_row[sy++ >> 3] = 1;
 }
 
-/* line l into the band (rows 0..h-1) */
-static void draw_line(u16 l) {
-    u16 i = LINES[l].start, e = line_end(l), x, lo = 0, hi = 0, cx = 0xFFFF;
-    u8 h = LINES[l].h, asc = LINES[l].asc, extra = LINES[l].extra, nsp = LINES[l].nsp, k = 0;
+/* line l (*L) into the band (rows 0..h-1) */
+static void draw_line(u16 l, const struct line *L) {
+    u16 i = L->start, e = line_end(l), x, lo = 0, hi = 0, cx = 0xFFFF;
+    u8 h = L->h, asc = L->asc;
+    struct just j;
+    just_init(&j, L);
     if (h > BAND_H) h = BAND_H;
     band_fill(h, row_page);
     if (sel_on) {
         lo = sel_lo();
         hi = sel_hi();
     }
-    x = (u16)(TEXT_X + LINES[l].x);
+    x = (u16)(TEXT_X + L->x);
     for (; i < e; i++) {
         u8 c = TXT[i], a = ATR[i], w;
         const struct font *f = fonts[a & A_FONT];
@@ -385,14 +372,8 @@ static void draw_line(u16 l) {
             if (sel_on && i >= lo && i < hi) band_xor(x, x + 4, 0, h);
             continue;
         }
-        w = char_w(c, a);
-        if (c == ' ' && k < nsp) {
-            u8 s = (u8)(((u16)extra * (k + 1)) / nsp - ((u16)extra * k) / nsp);
-            k++;
-            w += s;
-        } else if (c != ' ') {
-            draw_glyph(f, c, x, (u8)(asc - f->ascent), a);
-        }
+        w = just_w(c, a, &j);
+        if (c != ' ') draw_glyph(f, c, x, (u8)(asc - f->ascent), a);
         if (a & A_UNDER) band_hline(x, x + w, (u8)(asc + 2));
         if (sel_on && i >= lo && i < hi) band_xor(x, x + w, 0, h);
         x += w;
@@ -404,26 +385,25 @@ static void draw_line(u16 l) {
 #define FOOT_H 15
 #define FOOT_Y (PAGE_H - 34)
 static void draw_footer(u8 page) {
-    char s[12];
-    u8 n = 0;
+    u8 n;
     u16 w = 0, x;
-    const struct font *f = &font_sans;
     band_fill(FOOT_H, row_page);
-    n = put_str(s, n, "- ");
-    n = put_num(s, n, (u16)(page + 1));
-    n = put_str(s, n, " -");
-    s[n] = 0;
-    for (n = 0; s[n]; n++) w += char_w((u8)s[n], 0);
+    sn = 0;
+    put_str("- ");
+    put_num((u16)(page + 1));
+    put_str(" -");
+    for (n = 0; n < sn; n++) w += char_w((u8)sb[n], 0);
     x = (u16)(PAGE_X + (PAGE_W - w) / 2);
-    for (n = 0; s[n]; n++) {
-        draw_glyph(f, (u8)s[n], x, 0, 0);
-        x += char_w((u8)s[n], 0);
+    for (n = 0; n < sn; n++) {
+        draw_glyph(&font_sans, (u8)sb[n], x, 0, 0);
+        x += char_w((u8)sb[n], 0);
     }
 }
 
 static void render_page(void) {
     u16 sy = VIEW_TOP, dy = view_y, l = 0, lo, hi, mid;
     u8 r;
+    struct line L;
     new_frame();
     for (r = 0; r < ROWS; r++) desk_row[r] = 0;
     /* the first line not above the view */
@@ -432,7 +412,8 @@ static void render_page(void) {
         hi = nlines;
         while (lo < hi) {
             mid = (u16)((lo + hi) / 2);
-            if (LINES[mid].y + LINES[mid].h <= dy) lo = (u16)(mid + 1);
+            get_line(mid, &L);
+            if (L.y + L.h <= dy) lo = (u16)(mid + 1);
             else hi = mid;
         }
         l = lo;
@@ -440,18 +421,20 @@ static void render_page(void) {
     while (sy < VIEW_TOP + VIEW_H) {
         u16 rem = VIEW_TOP + VIEW_H - sy, n;
         u16 p = dy / PAGE_STRIDE, off = dy - p * PAGE_STRIDE, ptop = p * PAGE_STRIDE + PAGE_GAP;
+        u8 more = l < nlines;
+        if (more) get_line(l, &L);
         if (off < PAGE_GAP || p >= npages) {
             /* the desk: between pages, or below the last */
             n = off < PAGE_GAP ? PAGE_GAP - off : (p + 1) * PAGE_STRIDE - dy;
             if (n > rem) n = rem;
             if (!seg_same(sy, SEG_DESK, 0, n, 0)) rows_out(sy, n, row_desk);
             mark_desk(sy, n);
-        } else if (l < nlines && LINES[l].y <= dy) {
-            u8 r0 = (u8)(dy - LINES[l].y);
-            n = LINES[l].h - r0;
+        } else if (more && L.y <= dy) {
+            u8 r0 = (u8)(dy - L.y);
+            n = L.h - r0;
             if (n > rem) n = rem;
-            if (!seg_same(sy, SEG_LINE, r0, n, line_hash(l))) {
-                draw_line(l);
+            if (!seg_same(sy, SEG_LINE, r0, n, line_hash(l, &L))) {
+                draw_line(l, &L);
                 band_out(sy, r0, (u8)n);
             }
             l++;
@@ -465,7 +448,7 @@ static void render_page(void) {
             }
         } else {
             u16 lim = ptop + PAGE_H;
-            if (l < nlines && LINES[l].y < lim) lim = LINES[l].y;
+            if (more && L.y < lim) lim = L.y;
             if (dy < ptop + FOOT_Y && ptop + FOOT_Y < lim) lim = ptop + FOOT_Y;
             n = lim - dy;
             if (n > rem) n = rem;
@@ -499,6 +482,7 @@ static void render_raw(void) {
     u8 vr, col, r;
     u16 l = view_y / RAW_H, lo = 0, hi = 0;
     char tags[48];
+    struct line L;
     new_frame();
     if (sel_on) {
         lo = sel_lo();
@@ -507,17 +491,18 @@ static void render_raw(void) {
     for (vr = 0; vr < VIEW_H / RAW_H; vr++, l++) {
         u16 sy = (u16)(VIEW_TOP + vr * RAW_H);
         u8 crow = (u8)(sy >> 3);
-        if (seg_same(sy, SEG_RAW, 0, RAW_H, l < nlines ? line_hash(l) : 0)) continue;
+        if (l < nlines) get_line(l, &L);
+        if (seg_same(sy, SEG_RAW, 0, RAW_H, l < nlines ? line_hash(l, &L) : 0)) continue;
         for (col = 0; col < COLS; col++) cellcol[col] = C_BLACK;
         band_fill(RAW_H, row_blank);
         if (l < nlines) {
-            u16 i = LINES[l].start, e = line_end(l);
+            u16 i = L.start, e = line_end(l);
             col = 0;
             for (; i < e && col < COLS; i++) {
                 u8 c = TXT[i], n = raw_tag(i, tags), k, tc = C_BLUE;
                 for (k = 0; k < n && col < COLS; k++) {
                     if (tags[k] == '[') tc = tag_colour(tags + k + 1);
-                    raw_cell(col, (u8)tags[k]);
+                    raw_cell(col, (u8)tags[k], 0);
                     cellcol[col] = tc;
                     if (c == CH_FF && i == cur && k == n - 1) raw_invert_cell(col);
                     col++;
@@ -525,10 +510,10 @@ static void render_raw(void) {
                 if (c == CH_FF) continue;
                 if (col >= COLS) break;
                 if (c == CH_CR) {
-                    raw_cell(col, G_PILCROW);
+                    raw_cell(col, G_PILCROW, 0);
                     cellcol[col] = C_GREY;
                 } else {
-                    raw_cell(col, c);
+                    raw_cell(col, c, 0);
                 }
                 if (sel_on && i >= lo && i < hi) raw_invert_cell(col);
                 if (i == cur) raw_invert_cell(col);

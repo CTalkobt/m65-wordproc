@@ -112,16 +112,18 @@ static int16_t pend_delta;      /* characters added (removed: negative) */
 #define TMP_LINES 40
 static struct line tmp[TMP_LINES];
 
-static void store(u16 l, const struct line *L) {
-    struct line FAR *D = &LINES[l];
-    D->start = L->start;
-    D->y = L->y;
-    D->h = L->h;
-    D->asc = L->asc;
-    D->x = L->x;
-    D->extra = L->extra;
-    D->nsp = L->nsp;
-    D->page = L->page;
+/* The line table is in bank 4: a line is read and written whole (one DMA)
+ * and its fields used near, as each far LINES[l].field costs ~60 bytes of
+ * code (cc45 #585). */
+static u32 line_addr(u16 l) { return LINES_LIN + (u32)l * sizeof(struct line); }
+
+void get_line(u16 l, struct line *L) { mem_read((u8 *)L, line_addr(l), sizeof *L); }
+
+static void store(u16 l, const struct line *L) { mem_write(line_addr(l), (const u8 *)L, sizeof *L); }
+
+u16 line_start(u16 l) {
+    u32 a = line_addr(l);
+    return (u16)(mem_get(a) | (mem_get(a + 1) << 8));
 }
 
 /* the end of the line starting at pos (after its last character); *hard:
@@ -160,6 +162,7 @@ static u16 break_line(u16 pos, u16 width, u8 *hard) {
 /* the state at the start of laid-out line l (l = 0: the document's start) */
 static void state_at(u16 l, struct lstate *st) {
     u16 p;
+    struct line L;
     if (l == 0 || l >= nlines) {
         st->pos = st->yin = st->row = 0;
         st->page = 0;
@@ -167,11 +170,12 @@ static void state_at(u16 l, struct lstate *st) {
         st->al = 0;
         return;
     }
-    p = LINES[l].start;
+    get_line(l, &L);
+    p = L.start;
     st->pos = p;
     st->row = l;
-    st->page = LINES[l].page;
-    st->yin = (u16)(LINES[l].y - (PAGE_GAP + st->page * PAGE_STRIDE + MARGIN_TOP));
+    st->page = L.page;
+    st->yin = (u16)(L.y - (PAGE_GAP + st->page * PAGE_STRIDE + MARGIN_TOP));
     st->para = (u8)(p == 0 || is_break(TXT[p - 1]));
     st->al = (u8)((ATR[para_end(p)] & A_ALIGN) >> A_ALIGN_SHIFT);
 }
@@ -254,8 +258,13 @@ static u8 produce(struct lstate *st, struct line *L) {
 }
 
 static void finish(void) {
+    struct line L;
     layout_done = 1;
-    npages = (view_mode == VIEW_PAGE && nlines) ? (u8)(LINES[nlines - 1].page + 1) : 1;
+    npages = 1;
+    if (view_mode == VIEW_PAGE && nlines) {
+        get_line(nlines - 1, &L);
+        npages = (u8)(L.page + 1);
+    }
 }
 
 /* up to n more lines laid out */
@@ -275,7 +284,14 @@ void ensure_pos(u16 p) {
 }
 
 void ensure_y(u16 y) {
-    while (!layout_done && (!nlines || LINES[nlines - 1].y < y)) extend(16);
+    struct line L;
+    while (!layout_done) {
+        if (nlines) {
+            get_line(nlines - 1, &L);
+            if (L.y >= y) return;
+        }
+        extend(16);
+    }
 }
 
 /* a little more of the document laid out (BASIC calls it while no key
@@ -312,7 +328,7 @@ static u16 line_of_laid(u16 pos) {
     u16 lo = 0, hi = nlines - 1, mid;
     while (lo < hi) {
         mid = (u16)((lo + hi + 1) / 2);
-        if (LINES[mid].start <= pos) lo = mid;
+        if (line_start(mid) <= pos) lo = mid;
         else hi = (u16)(mid - 1);
     }
     return lo;
@@ -322,19 +338,20 @@ static u16 line_of_laid(u16 pos) {
  * area when they move up: the DMA copies upwards only without overlap) */
 static void move_lines(u16 to, u16 from, u16 n) {
     u16 bytes = (u16)(n * sizeof(struct line));
+    u32 dst = line_addr(to), src = line_addr(from);
     if (to == from || !n) return;
-    if (to < from) {
-        mem_copy(LINES_LIN + (u32)to * sizeof(struct line), LINES_LIN + (u32)from * sizeof(struct line), bytes);
-    } else {
-        mem_copy(SCRATCH_LIN, LINES_LIN + (u32)from * sizeof(struct line), bytes);
-        mem_copy(LINES_LIN + (u32)to * sizeof(struct line), SCRATCH_LIN, bytes);
+    if (to > from) {
+        mem_copy(SCRATCH_LIN, src, bytes);
+        src = SCRATCH_LIN;
     }
+    mem_copy(dst, src, bytes);
 }
 
 void layout_update(void) {
-    u16 l0 = 0, k, i, old_n = nlines, base;
+    u16 l0 = 0, k, i, old_n = nlines, base, ks;
     u8 n = 0, old_done = layout_done, conv = !pend_multi;
     struct lstate st, old_lz = lz;
+    struct line O;
     if (!pend) return;
     pend = 0;
     if (pend_lo > 0 && nlines) {
@@ -355,15 +372,24 @@ void layout_update(void) {
         }
         if (conv) {
             /* an old line, moved by the edit, starting where this one does */
-            while (k < old_n && (int32_t)LINES[k].start + pend_delta < (int32_t)L->start) k++;
-            if (k < old_n && (int32_t)LINES[k].start + pend_delta == (int32_t)L->start && LINES[k].start > pend_hi &&
-                LINES[k].y == L->y && LINES[k].page == L->page &&
-                (view_mode == VIEW_PAGE || !is_break(TXT[L->start - 1])) && (u16)(l0 + n + (old_n - k)) <= MAX_LINES) {
+            while (k < old_n && (int32_t)line_start(k) + pend_delta < (int32_t)L->start) k++;
+            ks = 0;
+            if (k < old_n) {
+                get_line(k, &O);
+                ks = O.start;
+            }
+            if (k < old_n && (int32_t)ks + pend_delta == (int32_t)L->start && ks > pend_hi && O.y == L->y &&
+                O.page == L->page && (view_mode == VIEW_PAGE || !is_break(TXT[L->start - 1])) &&
+                (u16)(l0 + n + (old_n - k)) <= MAX_LINES) {
                 /* the rest is as it was: the old lines from k, after the new ones */
                 base = (u16)(l0 + n);
                 move_lines(base, k, (u16)(old_n - k));
                 for (i = 0; i < n; i++) store((u16)(l0 + i), &tmp[i]);
-                for (i = base; i < base + (old_n - k); i++) LINES[i].start = (u16)(LINES[i].start + pend_delta);
+                {
+                    /* their starts moved by the edit */
+                    struct line FAR *D = &LINES[base];
+                    for (i = base; i < base + (old_n - k); i++, D++) D->start = (u16)(D->start + pend_delta);
+                }
                 nlines = (u16)(base + (old_n - k));
                 layout_done = old_done;
                 if (!old_done) {
@@ -393,7 +419,7 @@ void layout(void) {
 }
 
 u16 line_end(u16 l) {
-    if (l + 1 < nlines) return LINES[l + 1].start;
+    if (l + 1 < nlines) return line_start(l + 1);
     return layout_done ? doc_len : lz.pos;
 }
 
@@ -408,39 +434,54 @@ static u8 just_share(u8 extra, u8 nsp, u8 k) {
     return (u8)(((u16)extra * (k + 1)) / nsp - ((u16)extra * k) / nsp);
 }
 
+/* walking along line *L in the page view: each character's width with
+ * the justification's share of a space */
+void just_init(struct just *j, const struct line *L) {
+    j->extra = L->extra;
+    j->nsp = L->nsp;
+    j->k = 0;
+}
+
+u8 just_w(u8 c, u8 a, struct just *j) {
+    u8 w = char_w(c, a);
+    if (c == ' ' && j->k < j->nsp) w += just_share(j->extra, j->nsp, j->k++);
+    return w;
+}
+
 /* pos's x in line l: pixels from the text's left (page), cells (raw: after
  * the tags before pos, where the cursor is drawn) */
 u16 x_of(u16 l, u16 pos) {
-    u16 i = LINES[l].start, x;
+    struct line L;
+    struct just j;
+    u16 i, x;
+    get_line(l, &L);
+    i = L.start;
     if (view_mode == VIEW_RAW) {
         x = 0;
         for (; i < pos; i++) x += tok_w(i);
         return (u16)(x + raw_tag(pos, 0));
-    } else {
-        u8 k = 0, extra = LINES[l].extra, nsp = LINES[l].nsp;
-        x = LINES[l].x;
-        for (; i < pos; i++) {
-            u8 c = TXT[i];
-            x += char_w(c, ATR[i]);
-            if (c == ' ' && k < nsp) x += just_share(extra, nsp, k++);
-        }
-        return x;
     }
+    just_init(&j, &L);
+    x = L.x;
+    for (; i < pos; i++) x += just_w(TXT[i], ATR[i], &j);
+    return x;
 }
 
 /* the position in line l nearest x */
 u16 pos_at_x(u16 l, u16 x) {
-    u16 i = LINES[l].start, e = (u16)(line_end(l) - 1), px, nx;
-    u8 k = 0, extra = LINES[l].extra, nsp = LINES[l].nsp;
-    px = view_mode == VIEW_RAW ? raw_tag(i, 0) : LINES[l].x;
+    struct line L;
+    struct just j;
+    u16 i, e = (u16)(line_end(l) - 1), px, nx;
+    get_line(l, &L);
+    i = L.start;
+    just_init(&j, &L);
+    px = view_mode == VIEW_RAW ? raw_tag(i, 0) : L.x;
     for (; i < e; i++) {
-        u8 c = TXT[i];
         if (view_mode == VIEW_RAW) {
-            nx = (u16)(px + 1 + raw_tag((u16)(i + 1), 0));
             if (x <= px) return i;
+            nx = (u16)(px + 1 + raw_tag((u16)(i + 1), 0));
         } else {
-            nx = px + char_w(c, ATR[i]);
-            if (c == ' ' && k < nsp) nx += just_share(extra, nsp, k++);
+            nx = px + just_w(TXT[i], ATR[i], &j);
             if (x < px + (nx - px) / 2) return i;
         }
         px = nx;
@@ -456,7 +497,11 @@ u16 doc_height(void) {
 }
 
 void scroll_to_cursor(void) {
-    u16 l = line_of(cur), top = LINES[l].y, bot = top + LINES[l].h, h;
+    u16 l = line_of(cur), top, bot, h;
+    struct line L;
+    get_line(l, &L);
+    top = L.y;
+    bot = top + L.h;
     u16 ctx = view_mode == VIEW_RAW ? 0 : 24;
     if (top < view_y + ctx) view_y = top > ctx ? (u16)(top - ctx) : 0;
     if (bot + ctx > view_y + VIEW_H) view_y = (u16)(bot + ctx - VIEW_H);

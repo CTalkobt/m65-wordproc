@@ -25,8 +25,9 @@ make test       # the C half on the host (gcc): editing, layout, files; build/*.
 
 On a MEGA65: copy `build/writer.d81` to the SD card, mount it, then
 `DLOAD "WRITER"` and `RUN`. The disk holds `WRITER` (the program),
-`WRITER.FNT` (the fonts' glyphs, loaded by the program) and `WELCOME` (the
-document shown the first time it runs; without it you get an empty one).
+`WRITER.FNT` (the fonts' glyphs, loaded by the program) and `WRITER.HELP` (the
+help: a Writer document shown when the program starts and again with F8 / HELP;
+without it the program starts with an empty document).
 
 `tools/xemu_run.py` runs it headless in xemu, types keys into the KERNAL's
 keyboard buffer and saves a screenshot, e.g.
@@ -49,7 +50,7 @@ keyboard buffer and saves a screenshot, e.g.
 | F9 | start / end a selection (move the cursor to extend it) |
 | CTRL + cursor keys | start a selection at the cursor, or extend the one there is |
 | F10 / F11 / F12 | copy / cut / paste |
-| F8 or HELP | help |
+| F8 or HELP | the help (`WRITER.HELP`) as the document (after asking about unsaved changes) |
 | ESC | menu: New, Load, Save, Import text, Export text, Directory, Help, Quit (ESC also ends a selection) |
 
 Styles and fonts apply to the selection, or to what you type next.
@@ -58,13 +59,13 @@ Styles and fonts apply to the selection, or to what you type next.
 
 | Part | Language | Does |
 |------|----------|------|
-| `src/wp.bas` | BASIC 65 | the main loop (GET and what each key means; idle time handed to C), the menu, file-name prompts and confirmations, all disk work (`BLOAD` / `BSAVE` documents and fonts, `DOPEN` + `FREAD#` / `FWRITE#` text import and export, `DIR`), the help screen, error trapping |
+| `src/wp.bas` | BASIC 65 | the main loop (GET and what each key means; idle time handed to C), the menu, file-name prompts and confirmations, all disk work (`BLOAD` / `BSAVE` documents and fonts, `DOPEN` + `FREAD#` / `FWRITE#` text import and export, `DIR`), loading the help document, error trapping |
 | `src/doc.c` | C | the document: two parallel arrays in bank 5 (text, an attribute byte per character), insert and delete by DMA, styles, alignment, clipboard, the file image |
 | `src/layout.c` | C | line breaking for both views, justification, pagination, raw-view tags, cursor ↔ position mapping; incremental and lazy (below) |
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
 | `src/m65.c` | C | the VIC-IV screen mode, DMA and colour RAM |
 | `src/api.c` | C | the functions BASIC calls with `SYS {name}, a` (and reads with `RREG`) |
-| `tools/welcome.c`, `tools/mkwelcome.c` | C (host) | the welcome document, written as a Writer file by the C half itself |
+| `tools/helpdoc.c`, `tools/mkhelp.c` | C (host) | the help document, written as a Writer file by the C half itself |
 | `tests/` | C (host) | the C half on the PC: editing, files, layout (incremental = from scratch), drawing (cached = full redraw), fuzzed |
 
 `basic45 --link` compiles the C files with cc45 and links them right after
@@ -102,7 +103,7 @@ the C64's. Each cell has its own colour (text, desk, tags, bars).
 |---------|------|-----|
 | `$40000` | 32000 | the bitmap |
 | `$48000` | 8000 | the screen (16-bit cells) |
-| `$4A000` | 12 KB | the fonts' glyphs (`WRITER.FNT`) |
+| `$4A000` | 12 KB | the document fonts' glyphs and glyph offsets (`WRITER.FNT`, ~10 KB) |
 | `$4D000` | 12 KB | the line table (1024 lines) |
 | `$50000` | 15000 | document text |
 | `$53B00` | 15000 | document attributes |
@@ -121,7 +122,9 @@ its alignment. Import / Export use plain sequential PETSCII files.
 `tools/mkfonts.py` rasterises DejaVu Sans 12, DejaVu Serif 12, Liberation
 Mono 13 and DejaVu Sans Bold 19 (1-bit, hinted, whole-pixel advances) and
 the X11 8×13 font for the raw view; `make fonts` rebuilds `src/fonts.c`
-(metrics, kept in bank 0 for the layout) and `src/writer.fnt` (glyphs).
+(metrics and advance widths, kept in bank 0 for the layout; the raw font's
+glyphs, drawn the most) and `src/writer.fnt` (the document fonts' glyphs,
+then where each glyph starts).
 
 ## Limits
 
@@ -149,4 +152,9 @@ the X11 8×13 font for the raw view; `make fonts` rebuilds `src/fonts.c`
   does. It has to be below `$2000`: BASIC 65 runs with its ROM mapped over
   `$2000`-`$BFFF`. Q)uit puts both back.
 - **Bank 0**: the BASIC program, the C code and its data must end below
-  `$C000`, so the glyph bitmaps live in bank 4 (`WRITER.FNT`).
+  `$C000`, so the glyph bitmaps live in bank 4 (`WRITER.FNT`), the help is a
+  document on the disk rather than text in the program, and the C half
+  reads a line of the line table (bank 4) whole with one DMA (`get_line`)
+  rather than field by field: with cc45 each far `LINES[l].field` costs
+  about 60 bytes of code
+  ([M65Compiler #585](https://github.com/CTalkobt/M65Compiler/issues/585)).

@@ -97,20 +97,26 @@ static void vertical(signed char d) {
     cur = pos_at_x(l, goal_x);
 }
 
+static u16 line_y(u16 l) {
+    struct line L;
+    get_line(l, &L);
+    return L.y;
+}
+
 static void page_move(signed char d) {
-    u16 l = line_of(cur), y = LINES[l].y, t;
+    u16 l = line_of(cur), y = line_y(l), t;
     if (!goal_valid) {
         goal_x = x_of(l, cur);
         goal_valid = 1;
     }
     if (d < 0) {
         t = y > VIEW_H ? (u16)(y - VIEW_H) : 0;
-        while (l > 0 && LINES[l].y > t) l--;
+        while (l > 0 && line_y(l) > t) l--;
         view_y = view_y > VIEW_H ? (u16)(view_y - VIEW_H) : 0;
     } else {
         t = (u16)(y + VIEW_H);
         ensure_y((u16)(t + VIEW_H));
-        while (l + 1 < nlines && LINES[l].y < t) l++;
+        while (l + 1 < nlines && line_y(l) < t) l++;
         view_y += VIEW_H;
     }
     cur = pos_at_x(l, goal_x);
@@ -153,7 +159,8 @@ void wp_key(u8 k) {
         break;
     case 19: {                  /* HOME: the line's start (there already: its end) */
         u16 l = line_of(cur);
-        cur = cur == LINES[l].start ? (u16)(line_end(l) - 1) : LINES[l].start;
+        u16 st = line_start(l);
+        cur = cur == st ? (u16)(line_end(l) - 1) : st;
         goal_valid = 0;
         break;
     }

@@ -2,7 +2,8 @@
 '
 ' The BASIC program runs the editor: it reads the keys, decides what each
 ' one means, runs the menu, asks for file names and does the disk work
-' (BSAVE, BLOAD, DOPEN / FWRITE# / FREAD#, DIR) and the help screen. The C
+' (BSAVE, BLOAD, DOPEN / FWRITE# / FREAD#, DIR). The help is a document
+' on the disk (WRITER.HELP), loaded at the start and with F8 / HELP. The C
 ' half (wp.h: api.c and the rest, linked with basic45 --link) keeps the
 ' document, lays it out and draws the 640 x 400 screen; BASIC calls it with
 ' SYS {name}, a and reads results with RREG.
@@ -27,7 +28,6 @@
 #define CMD_PGUP 16
 #define CMD_PGDN 17
 #define CMD_ALL 18
-#define CMD_DEMO 19
 #define CMD_CLEAN 20
 
 #define GET_DIRTY 0
@@ -52,10 +52,10 @@ start:
   bank 128 : poke $d1, 0 : poke $f7, peek($f7) or 32
   ' RUN/STOP ignored while editing
   sys {wp_stopvec}, 1
-  ' the first time: the welcome document (a Writer document on the disk),
-  ' loaded before the graphics screen is on (none: an empty document)
+  ' the first time: the help (a Writer document on the disk), loaded
+  ' before the graphics screen is on (none: an empty document)
   wl = 0
-  if fl <> 165 then wl = 1 : trap welcomeerr : bload "welcome", b5, p(IMG) : wl = 2
+  if fl <> 165 then wl = 1 : trap helperr : bload "writer.help", b5, p(IMG) : wl = 2
 wpinit:
   trap
   sys {wp_init}
@@ -86,7 +86,7 @@ waitkey:
   case 139
     sys {wp_cmd}, CMD_PAGEBREAK
   case 140, 132
-    call helpscreen
+    call loadhelp
   case 16
     sys {wp_cmd}, CMD_MARK
   case 21
@@ -127,7 +127,7 @@ proc menu
   case 68
     call showdir
   case 72
-    call helpscreen
+    call loadhelp
   case 81
     call quit
   case else
@@ -299,42 +299,35 @@ proc quit
   call say("")
 endproc
 
-' ---- help: on BASIC's text screen ----
-proc helpscreen
-  sys {wp_video}, 0
-  print "{clear}{lower}{white}";
-  print p"{rev} MEGA65 Writer {off}  a word processor in BASIC 65 and C"
-  print
-  print p"{yellow}Editing{white}"
-  print p"  Type to insert.  RETURN new paragraph.  DEL deletes left, INST right."
-  print p"  Cursor keys move; HOME line start/end; CLR document start/end."
-  print p"  F13 / F14 page up / down.  TAB inserts four spaces."
-  print
-  print p"{yellow}View{white}"
-  print p"  F1   page layout (fonts, styles, pages as printed) / raw (codes shown)"
-  print
-  print p"{yellow}Formatting{white}  (the selection, or what you type next)"
-  print p"  F3 bold   F5 italic   F7 underline   F2 font: Sans, Serif, Mono, Head"
-  print p"  F4 paragraph alignment: left, centre, right, justify"
-  print p"  F6 page break"
-  print
-  print p"{yellow}Selection and clipboard{white}"
-  print p"  F9 starts a selection at the cursor (again or ESC ends it); move to"
-  print p"  extend it.  CTRL + cursor keys start or extend one, too."
-  print p"  F10 copy   F11 cut   F12 paste   typing replaces it"
-  print
-  print p"{yellow}Menu (ESC){white}"
-  print p"  N new   L load   S save (Writer documents keep fonts and styles)"
-  print p"  I import / E export plain text (sequential PETSCII files)"
-  print p"  D directory   H this help   Q quit"
-  print
-  print p"{lblue}Press a key to go back to the document.{white}";
-  getkey c$
-  sys {wp_video}, 1
+' ---- the help: WRITER.HELP, a Writer document on the disk ----
+proc loadhelp
+  call discard
+  if yes then
+    call say(p"Loading the help...")
+    hl = 0
+    trap nohelp
+    bload "writer.help", b5, p(IMG)
+    hl = 1
+helpback:
+    trap errh
+    sys {wp_video}, 1
+    if hl then
+      sys {wp_get}, GET_UNPACK
+      fi$ = p"untitled" : call setname
+      call say(p"The help. ESC N starts a new document.")
+    else
+      call say(p"No help: WRITER.HELP is not on the disk.")
+    endif
+  endif
 endproc
 
-' no welcome document: start with an empty one
-welcomeerr:
+' no help document for F8 / HELP: said so
+nohelp:
+  hl = 0
+  resume helpback
+
+' no help document at the start: an empty one
+helperr:
   wl = 0
   resume wpinit
 

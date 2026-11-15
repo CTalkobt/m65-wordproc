@@ -1,8 +1,8 @@
-/* mkwelcome.c — writes WELCOME, the document shown at the start, as the
+/* mkhelp.c — writes WRITER.HELP, the help document (shown at the start), as the
  * BASIC program's BSAVE would: a PRG (load address $7600, SCRATCH_LIN's in
  * bank 5) holding doc_pack's image
  *
- *   build/mkwelcome build/welcome.prg
+ *   build/mkhelp build/help.prg
  */
 #include <stdio.h>
 #include "wp.h"
@@ -11,10 +11,10 @@ int main(int argc, char **argv) {
     FILE *f;
     u16 n;
     if (argc != 2) {
-        fprintf(stderr, "usage: mkwelcome out.prg\n");
+        fprintf(stderr, "usage: mkhelp out.prg\n");
         return 2;
     }
-    doc_load_demo();
+    doc_load_help();
     n = doc_pack();
     f = fopen(argv[1], "wb");
     if (!f) {

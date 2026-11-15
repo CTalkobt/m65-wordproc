@@ -42,20 +42,20 @@ $(TARGET): src/wp.bas $(CSRC) $(HEADERS)
 	@mkdir -p $(BUILD)
 	$(BASIC45) $(foreach f,$(CSRC),--link $(f)) --report src/wp.bas -o $@
 
-$(DISK): $(TARGET) src/writer.fnt $(BUILD)/welcome.prg
+$(DISK): $(TARGET) src/writer.fnt $(BUILD)/help.prg
 	rm -f $@
 	$(DISK45) create $@ -n "WRITER" -i "65"
 	$(DISK45) add $@ $(TARGET) "WRITER"
 	$(DISK45) add $@ src/writer.fnt "WRITER.FNT"
-	$(DISK45) add $@ $(BUILD)/welcome.prg "WELCOME"
+	$(DISK45) add $@ $(BUILD)/help.prg "WRITER.HELP"
 
 # the document shown at the start, made on the host by the C half itself
-$(BUILD)/mkwelcome: tools/mkwelcome.c tools/welcome.c tests/host.c $(PORTABLE) $(HEADERS)
+$(BUILD)/mkhelp: tools/mkhelp.c tools/helpdoc.c tests/host.c $(PORTABLE) $(HEADERS)
 	@mkdir -p $(BUILD)
-	$(HOSTCC) $(HOSTFLAGS) -o $@ tools/mkwelcome.c tools/welcome.c tests/host.c $(PORTABLE)
+	$(HOSTCC) $(HOSTFLAGS) -o $@ tools/mkhelp.c tools/helpdoc.c tests/host.c $(PORTABLE)
 
-$(BUILD)/welcome.prg: $(BUILD)/mkwelcome
-	$(BUILD)/mkwelcome $@
+$(BUILD)/help.prg: $(BUILD)/mkhelp
+	$(BUILD)/mkhelp $@
 
 run: $(DISK)
 	xemu-xmega65 -prgmode 65 -8 $(DISK) -prg $(TARGET)
@@ -63,9 +63,9 @@ run: $(DISK)
 shot: $(DISK)
 	python3 tools/xemu_run.py $(TARGET) $(DISK) $(BUILD)/writer.png wait:8
 
-$(BUILD)/test_wp: tests/test_wp.c tests/host.c tools/welcome.c $(PORTABLE) $(HEADERS)
+$(BUILD)/test_wp: tests/test_wp.c tests/host.c tools/helpdoc.c $(PORTABLE) $(HEADERS)
 	@mkdir -p $(BUILD)
-	$(HOSTCC) $(HOSTFLAGS) -fsanitize=address,undefined -o $@ tests/test_wp.c tests/host.c tools/welcome.c $(PORTABLE)
+	$(HOSTCC) $(HOSTFLAGS) -fsanitize=address,undefined -o $@ tests/test_wp.c tests/host.c tools/helpdoc.c $(PORTABLE)
 
 test: $(BUILD)/test_wp
 	$(BUILD)/test_wp

@@ -21,6 +21,7 @@ void mem_copy(u32 dst, u32 src, u16 n) {
     for (i = 0; i < n; i++) MEM[dst + i] = MEM[src + i];
 }
 void mem_read(u8 *dst, u32 src, u16 n) { memcpy(dst, MEM + src, n); }
+void mem_write(u32 dst, const u8 *src, u16 n) { memcpy(MEM + dst, src, n); }
 void mem_fill(u32 dst, u16 n, u8 v) { memset(MEM + dst, v, n); }
 
 void blit_row(u16 sy, const u8 *src) {

@@ -136,7 +136,7 @@ int main(void) {
     u16 n, i;
 
     wp_init();
-    doc_load_demo();            /* (as BASIC loads WELCOME) */
+    doc_load_help();            /* (as BASIC loads WRITER.HELP) */
     wp_redraw();
     check_doc();
     check_layout();
@@ -347,7 +347,7 @@ int main(void) {
 
     /* random keys: the invariants hold */
     srand(getenv("SEED") ? (unsigned)atoi(getenv("SEED")) : 1);
-    doc_load_demo();
+    doc_load_help();
     for (i = 0; i < 20000; i++) {
         static const u8 keys[] = {29, 157, 17, 145, 19, 147, 13, 20, 148, 9, 0x41, 0x42, 0x20, 0xC5, 0x2E};
         int r = rand() % 40;

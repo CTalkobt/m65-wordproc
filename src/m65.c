@@ -23,6 +23,9 @@ void mem_copy(u32 dst, u32 src, u16 n) {
 void mem_read(u8 *dst, u32 src, u16 n) {
     dma_copy_far((u32)(u16)dst, src, n);
 }
+void mem_write(u32 dst, const u8 *src, u16 n) {
+    dma_copy_far(dst, (u32)(u16)src, n);
+}
 void mem_fill(u32 dst, u16 n, u8 v) {
     if (n) dma_fill_far(dst, n, v);
 }

@@ -50,18 +50,25 @@ u8 attr_at_cursor(void) {
     return ATR[cur] & A_STYLE;
 }
 
+/* room for n characters at `at`: the text and attributes after it moved
+ * up, through the scratch area (the DMA copies upwards only when the
+ * ranges do not overlap) */
+static void open_gap(u16 at, u16 n) {
+    u16 tail = doc_len - at;
+    u32 o = 0;
+    u8 k;
+    for (k = 0; k < 2; k++, o = ATTR_LIN - TEXT_LIN) {
+        mem_copy(SCRATCH_LIN, TEXT_LIN + o + at, tail);
+        mem_copy(TEXT_LIN + o + at + n, SCRATCH_LIN, tail);
+    }
+}
+
 /* n characters (s, attributes a) inserted at `at`; 1 when there is no room */
 u8 doc_insert(u16 at, const u8 *s, const u8 *a, u16 n) {
-    u16 tail, i, lo = at;
+    u16 i, lo = at;
     if (n == 0) return 0;
     if (doc_len + n > DOC_MAX) return 1;
-    tail = doc_len - at;
-    /* the tail moves up through the scratch area (the DMA copies upwards
-     * only when the ranges do not overlap) */
-    mem_copy(SCRATCH_LIN, TEXT_LIN + at, tail);
-    mem_copy(TEXT_LIN + at + n, SCRATCH_LIN, tail);
-    mem_copy(SCRATCH_LIN, ATTR_LIN + at, tail);
-    mem_copy(ATTR_LIN + at + n, SCRATCH_LIN, tail);
+    open_gap(at, n);
     for (i = 0; i < n; i++) {
         TXT[at + i] = s[i];
         ATR[at + i] = a[i];
@@ -139,42 +146,30 @@ void doc_delete_fwd(void) {
     goal_valid = 0;
 }
 
+/* the selection's attributes: (a & keep) | set; then the typing style
+ * is its first character's */
+static void restyle(u8 keep, u8 set) {
+    u16 lo = sel_lo(), hi = sel_hi(), i;
+    for (i = lo; i < hi; i++) ATR[i] = (u8)((ATR[i] & keep) | set);
+    typing_attr = ATR[lo] & A_STYLE;
+    dirty = 1;
+    layout_edit(lo, hi, 0);
+}
+
 /* bold / italic / underline: over the selection (all on unless the first
  * character has it already), else for what is typed next */
 void doc_toggle(u8 bit) {
-    u16 i, hi;
-    u8 on;
-    if (!sel_on) {
-        typing_attr ^= bit;
-        return;
-    }
-    i = sel_lo();
-    hi = sel_hi();
-    on = !(ATR[i] & bit);
-    for (; i < hi; i++) {
-        if (on) ATR[i] |= bit;
-        else ATR[i] &= (u8)~bit;
-    }
-    typing_attr = ATR[sel_lo()] & A_STYLE;
-    dirty = 1;
-    layout_edit(sel_lo(), hi, 0);
+    if (!sel_on) typing_attr ^= bit;
+    else if (ATR[sel_lo()] & bit) restyle((u8)~bit, 0);
+    else restyle(0xFF, bit);
 }
 
+/* the next font: over the selection (after its first character's), else
+ * for what is typed next */
 void doc_cycle_font(void) {
-    u16 i, hi;
-    u8 f;
-    if (!sel_on) {
-        f = (u8)(((typing_attr & A_FONT) + 1) % NFONTS);
-        typing_attr = (u8)((typing_attr & ~A_FONT) | f);
-        return;
-    }
-    i = sel_lo();
-    hi = sel_hi();
-    f = (u8)(((ATR[i] & A_FONT) + 1) % NFONTS);
-    for (; i < hi; i++) ATR[i] = (u8)((ATR[i] & ~A_FONT) | f);
-    typing_attr = (u8)((typing_attr & ~A_FONT) | f);
-    dirty = 1;
-    layout_edit(sel_lo(), hi, 0);
+    u8 a = sel_on ? ATR[sel_lo()] : typing_attr, f = (u8)(((a & A_FONT) + 1) % NFONTS);
+    if (sel_on) restyle((u8)~A_FONT, f);
+    else typing_attr = (u8)((typing_attr & ~A_FONT) | f);
 }
 
 /* the alignment of the paragraph(s) at the cursor / selection: left,
@@ -212,15 +207,11 @@ void doc_cut(void) {
 }
 
 void doc_paste(void) {
-    u16 tail, n = clip_len;
+    u16 n = clip_len;
     if (!n) return;
     if (sel_on) delete_selection();
     if (doc_len + n > DOC_MAX) return;
-    tail = doc_len - cur;
-    mem_copy(SCRATCH_LIN, TEXT_LIN + cur, tail);
-    mem_copy(TEXT_LIN + cur + n, SCRATCH_LIN, tail);
-    mem_copy(SCRATCH_LIN, ATTR_LIN + cur, tail);
-    mem_copy(ATTR_LIN + cur + n, SCRATCH_LIN, tail);
+    open_gap(cur, n);
     mem_copy(TEXT_LIN + cur, CLIP_LIN, n);
     mem_copy(ATTR_LIN + cur, CLIP_LIN + CLIP_MAX, n);
     layout_edit(para_start(cur), cur, (int16_t)n);

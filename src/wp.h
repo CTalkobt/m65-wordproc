@@ -109,11 +109,11 @@ enum { VIEW_PAGE = 0, VIEW_RAW = 1 };
 struct font {
     u8 height, ascent;
     const u8 *w;                /* advance of each code FONT_FIRST.. */
-    const u16 *o;               /* each glyph's first byte from bits */
+    u32 offs;                   /* each glyph's first byte from bits: 2 bytes a code (FONT_LIN + ...) */
     u32 bits;                   /* the glyphs (FONT_LIN + ...): rows of 1 byte (width <= 8) or 2 */
 };
-extern const struct font font_sans, font_serif, font_mono, font_head, font_raw;
-extern const u8 font_raw_rows[];        /* the raw font's glyphs (13 rows each) in bank 0 */
+extern const struct font font_sans, font_serif, font_mono, font_head;
+extern const u8 font_raw_rows[];        /* the raw font's glyphs (8 x 13, 13 bytes each) in bank 0 */
 extern const struct font *const fonts[NFONTS];
 extern const char *const font_names[NFONTS];
 
@@ -133,6 +133,7 @@ void mem_put(u32 a, u8 v);
 void mem_copy(u32 dst, u32 src, u16 n);        /* overlapping: dst < src only */
 void mem_fill(u32 dst, u16 n, u8 v);
 void mem_read(u8 *dst, u32 src, u16 n);        /* far memory to a bank 0 buffer */
+void mem_write(u32 dst, const u8 *src, u16 n); /* a bank 0 buffer to far memory */
 void blit_row(u16 sy, const u8 *src);           /* 80 bytes to screen row sy */
 void color_fill(u8 row, u8 col, u8 n, u8 c);    /* cells' foreground colour */
 void color_row(u8 row, const u8 *c);            /* a row's 80 colours */
@@ -191,7 +192,7 @@ u16 para_end(u16 i);            /* the CR / FF ending the paragraph of i */
 u8 attr_at_cursor(void);
 u16 sel_lo(void);
 u16 sel_hi(void);
-void doc_load_demo(void);       /* (tools/welcome.c: the host only) */
+void doc_load_help(void);       /* (tools/helpdoc.c: the host only) */
 
 /* ---- layout (layout.c) ---- */
 extern u8 layout_done;          /* all lines laid out (else 0..nlines-1) */
@@ -204,6 +205,13 @@ void ensure_pos(u16 p);
 void ensure_y(u16 y);
 u16 line_of(u16 pos);           /* the line holding pos */
 u16 line_end(u16 l);            /* its end (the next line's start) */
+void get_line(u16 l, struct line *L);   /* line l of the table (in bank 4) */
+u16 line_start(u16 l);          /* its first character */
+struct just {                   /* walking along a line: its justification */
+    u8 extra, nsp, k;
+};
+void just_init(struct just *j, const struct line *L);
+u8 just_w(u8 c, u8 a, struct just *j);  /* c's width, with a space's share of the justification */
 u16 x_of(u16 l, u16 pos);       /* pos's x in line l (pixels from the text's left, or cells) */
 u16 pos_at_x(u16 l, u16 x);
 u8 char_w(u8 c, u8 a);          /* a character's advance, page view */
