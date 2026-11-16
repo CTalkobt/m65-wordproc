@@ -26,23 +26,23 @@ static u8 inited;
 static u8 nseg[2], set, prev_i;
 
 union mod_area mod_area;
-#define band (&mod_area.r.band[0])
+#define band mod_area.r.band
 #define segs mod_area.r.segs
 #define bar_text mod_area.r.bar_text
-#define row_desk (&mod_area.r.row_desk[0])
-#define row_page (&mod_area.r.row_page[0])
-#define row_blank (&mod_area.r.row_blank[0])
-#define rowcol (&mod_area.r.rowcol[0])
-#define cellcol (&mod_area.r.cellcol[0])
-#define desk_row (&mod_area.r.desk_row[0])
-#define gbuf (&mod_area.r.gbuf[0])
-#define sb (&mod_area.r.sb[0])
+#define row_desk mod_area.r.row_desk
+#define row_page mod_area.r.row_page
+#define row_blank mod_area.r.row_blank
+#define rowcol mod_area.r.rowcol
+#define cellcol mod_area.r.cellcol
+#define desk_row mod_area.r.desk_row
+#define gbuf mod_area.r.gbuf
+#define sb mod_area.r.sb
 
 u8 panel;
 char menu_text[PANEL_ROWS][81];
 
 /* LIST.OVL: at the end of mod_area (wp.h), past the drawing's buffers */
-#define list_area (&mod_area.m[LIST_OFS])
+#define list_area (mod_area.m + LIST_OFS)
 /* (the buffers' size, for tools/mkmod.py: a module placed at an offset
  * must be past them; cc45 takes a negative array size, so no check here) */
 const u16 mod_bufsize = sizeof(mod_area.r);

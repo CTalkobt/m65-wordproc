@@ -19,8 +19,8 @@
  */
 #include "wp.h"
 
-#define BAND (&mod_area.r.band[0])
-#define CELLCOL (&mod_area.r.cellcol[0])
+#define BAND mod_area.r.band
+#define CELLCOL mod_area.r.cellcol
 
 /* markers: 8 x 13, a byte a row, the raw font's cell */
 static const u8 g_dot[13] = { 0, 0, 0, 0, 0, 0, 0x18, 0x18, 0, 0, 0, 0, 0 };

@@ -312,9 +312,9 @@ then where each glyph starts).
   rather than field by field: with cc45 each far `LINES[l].field` costs
   about 60 bytes of code
   ([M65Compiler #585](https://github.com/CTalkobt/M65Compiler/issues/585)).
-- **cc45 and array members**: when an integer is added to an array that is
-  a member of a global struct or union (`s.a + n`, `u.m + 4`), cc45 keeps
-  only the low byte of its address (the high byte becomes 0: the pointer
-  lands in page 0). Indexing (`s.a[i]`) and `&s.a[i]` are right, so
-  render.c names the buffers in `mod_area` as `&mod_area.r.band[0]` and
-  so on ([M65Compiler #594](https://github.com/CTalkobt/M65Compiler/issues/594)).
+- **cc45 and array members**: before M65Compiler master `a7191e09`, cc45
+  kept only the low byte of an array member's address when an integer was
+  added to it (`s.a + n`: the pointer landed in page 0;
+  [M65Compiler #594](https://github.com/CTalkobt/M65Compiler/issues/594)).
+  render.c's buffers in `mod_area` are such members: build with a cc45
+  that has the fix.

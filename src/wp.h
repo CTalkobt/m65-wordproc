@@ -266,9 +266,7 @@ struct seg {
  * rows by init_rows, the rest drawn or marked unknown by render_invalidate),
  * share their memory with the module region: a module (an .OVL file run
  * once: Markdown, ...) is loaded there by BASIC, run by mod_run, and the
- * screen then drawn again. (Their addresses as &mod_area.r.x[0]: cc45 loses
- * the high byte of an array member's address when an integer is added to
- * it, as in mod_area.r.band + n: M65Compiler #594.) */
+ * screen then drawn again. */
 union mod_area {
     struct {
         u8 band[BAND_H * COLS];
