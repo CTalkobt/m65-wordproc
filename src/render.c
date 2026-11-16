@@ -236,7 +236,7 @@ static void raw_cell(u8 col, u8 c, u8 inv) {
 static void raw_invert_cell(u8 col) {
     u8 r, *d = band + col;
     for (r = 0; r < RAW_H; r++) {
-        d[0] ^= 0xFF;   /* (not *d ^= 0xFF: cc45 miscompiles a bitwise compound assignment of a constant through *p) */
+        *d ^= 0xFF;
         d += COLS;
     }
 }
