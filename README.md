@@ -27,9 +27,10 @@ On a MEGA65: copy `build/writer.d81` to the SD card, mount it, then
 `DLOAD "WRITER"` and `RUN`. The disk holds `WRITER` (the program),
 `WRITER.FNT` (the fonts' glyphs, loaded by the program), `WRITER.HELP` (the
 help: a Writer document shown when the program starts and again with F8 / HELP;
-without it the program starts with an empty document) and `MARKDOWN.OVL`
+without it the program starts with an empty document), `MARKDOWN.OVL`
 (Markdown import and export, a module: without it the rest works, and a
-`.md` name gets "Markdown needs MARKDOWN.OVL on the disk").
+`.md` name gets "Markdown needs MARKDOWN.OVL on the disk") and `LIST.OVL`
+(list mode, a module: without it the menu does not offer it).
 
 `tools/xemu_run.py` runs it headless in xemu, types keys into the KERNAL's
 keyboard buffer and saves a screenshot, e.g.
@@ -53,10 +54,17 @@ keyboard buffer and saves a screenshot, e.g.
 | CTRL + cursor keys | start a selection at the cursor, or extend the one there is |
 | F10 / F11 / F12 | copy / cut / paste |
 | F8 or HELP | the help (`WRITER.HELP`) as the document (after asking about unsaved changes) |
-| ESC | menu: New, Load, Save, Import, Export (plain text, or Markdown for a name ending in `.md`), Directory, Help, Redraw, Quit (ESC also ends a selection) |
+| ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text, or Markdown for a name ending in `.md`), Directory; Redraw, List on / off (with `LIST.OVL`), Help, Quit (ESC also ends a selection) |
 | CTRL+L | redraw the whole screen |
 
 Styles and fonts apply to the selection, or to what you type next.
+
+**List mode** (ESC T; [#2](https://github.com/CTalkobt/m65-wordproc/issues/2)),
+as vi's `:set list`, shows the text's invisible structure in either view,
+without moving any of it: a dot for each space, ¶ at each paragraph's end
+(raw view shows it always), an arrow after a line the paragraph wraps
+from, trailing spaces (before a paragraph's end) as a block (raw view: red),
+and `~` in raw view's rows past the end. The keys are the same.
 
 ## How it is split
 
@@ -68,6 +76,7 @@ Styles and fonts apply to the selection, or to what you type next.
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
 | `src/m65.c` | C | the VIC-IV screen mode, DMA and colour RAM |
 | `src/md.c` | C | Markdown export and import (below): the module `MARKDOWN.OVL` |
+| `src/list.c` | C | list mode's markers: the module `LIST.OVL` |
 | `src/api.c` | C | the functions BASIC calls with `SYS {name}, a` (and reads with `RREG`) |
 | `tools/helpdoc.c`, `tools/mkhelp.c` | C (host) | the help document, written as a Writer file by the C half itself |
 | `tools/mkmod.py` | Python | links a module against the program (below) |
@@ -81,20 +90,29 @@ name) by `POKE`ing them into C buffers (`{msg}`, `{fname}`).
 
 ### Modules
 
-Features that run now and then, as one job over the document, are
-modules: `.OVL` files on the disk, each loaded only when it is used, so a
-user who has no use for one leaves it off the disk and the program does
-not need the room for it. Markdown (`MARKDOWN.OVL`, from `src/md.c`) is
-the first; PETSCII graphics, PDF export, find and replace or a word count
-would fit the same way (features that work on every key, such as undo or
-a list view, do not: they belong in the program).
+Optional features are modules: `.OVL` files on the disk, so a user who
+has no use for one leaves it off the disk and the program does not need
+the room for it. Two kinds:
+
+- **Run once** (as one job over the document), loaded just before it runs:
+  Markdown (`MARKDOWN.OVL`, from `src/md.c`); PETSCII graphics, PDF export,
+  find and replace or a word count would fit the same way.
+- **Resident**, loaded at the start and called while drawing: list mode
+  (`LIST.OVL`, from `src/list.c`). It lives in `mod_area`'s last
+  `LIST_SIZE` bytes (`LIST_OFS`, past the drawing's buffers), so it too
+  costs no bank 0 of its own; a run-once module overwrites it, so
+  `mod_run` sets `list_ok` to 0 (the drawing then does not call it) and
+  BASIC loads it again after. `render.c` calls it (`list_marks`) for each
+  line it draws, after the line's text and before its cursor, with the
+  line in `hk_l` / `hk_L`; it XORs its markers into the band. A feature
+  that changes what keys do (undo) still belongs in the program.
 
 - **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 7 KB in
   bank 0), which is also where the drawing keeps its buffers and caches
   (the band, the redraw cache, the bars' text, the row patterns: 3.4 KB),
   all remade after a full redraw. So a module costs bank 0 only what it
   needs beyond those, once for all modules.
-- **Running it**: BASIC `BLOAD`s it into `mod_area` (`bload
+- **Running it** (run once): BASIC `BLOAD`s it into `mod_area` (`bload
   "markdown.ovl", b0, p({mod_area})`, under `TRAP`: no file, no module)
   just before `SYS {wp_get}, ...` runs it, with nothing drawn between.
   `mod_run` checks its header (`"WM"`, the build's ID), calls its
@@ -108,17 +126,25 @@ a list view, do not: they belong in the program).
   program's symbols the module uses as equates (its functions and
   variables, the run time: the module calls into the program and has no
   copy of what the program has) and the header, links the module at
-  `mod_area`, and checks that it fits in `MOD_SIZE`. The build's ID is a
+  `mod_area` (`--ofs`: at an offset in it, checked to be past the drawing's
+  buffers, whose size render.c leaves in `mod_bufsize`), and checks that it
+  fits (`--size`). The build's ID is a
   checksum of the sources and the tools (`build/buildid.h`), so a module
   is only run by the program it was linked with.
 - **The base page**: cc45 keeps the most used variables of functions that
-  make calls in the program's base page ($80-$F1, placed by ln45). The
-  module's header says it uses all of the register pool, so its blocks
-  start at $80, and mkmod.py checks them against the program's blocks
-  that are live while the module runs (those of the functions that lead
-  to `mod_run`, and of every program function the module calls, and
-  theirs): no byte shared. (Should one ever be, compile that module with
-  `-fno-zp-locals`, at some 20 % more code.)
+  make calls in the program's base page (blocks placed by ln45 up to $F1).
+  The module's header says it uses all of the register pool, so its own
+  blocks start at $80; where they can meet the program's:
+  - the blocks of the program functions that lead to the call (`--from`:
+    `mod_run`; for list mode `draw_line` and `render_raw`, where cc45
+    inlined `list_marks`) and their callers: the header saves those bytes
+    before it calls the module and puts them back after (Markdown: 9 bytes,
+    list mode: 71), as those functions' variables are not used until it
+    returns;
+  - the blocks of the program functions the module calls, and everything
+    they call, which are in use together with the module's: mkmod.py
+    checks that none shares a byte with the module's (should one ever,
+    compile that module with `-fno-zp-locals`, at some 20 % more code).
 
 ### Speed
 
@@ -243,8 +269,9 @@ then where each glyph starts).
   `$2000`-`$BFFF`. Q)uit puts both back.
 - **Bank 0**: the BASIC program, the C code and its data must end below
   `$C000` (the CPU stack is the page below it). With Markdown in the
-  program it was full; as a module (above) the C data ends at `$B600`,
-  leaving 2.5 KB. The glyph
+  program it was full; as a module (above) the C data ended at `$B600`;
+  the menu's panel and the hooks for list mode (in BASIC and C) took
+  1.5 KB of that, so it ends at `$BC00`, leaving 768 bytes. The glyph
   bitmaps (the raw-view font's too, fetched by DMA) live in bank 4
   (`WRITER.FNT`), the C files that do not run on every key are compiled
   with `-O1`, the help is a
@@ -258,4 +285,4 @@ then where each glyph starts).
   only the low byte of its address (the high byte becomes 0: the pointer
   lands in page 0). Indexing (`s.a[i]`) and `&s.a[i]` are right, so
   render.c names the buffers in `mod_area` as `&mod_area.r.band[0]` and
-  so on.
+  so on ([M65Compiler #594](https://github.com/CTalkobt/M65Compiler/issues/594)).

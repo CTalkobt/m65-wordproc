@@ -12,6 +12,7 @@ void wp_init(void);
 void wp_key(u8 k);
 void wp_cmd(u8 c);
 u16 wp_get(u8 w);
+void wp_panel(u8 n);
 void wp_setmsg(void);
 static int fails;
 static int oplog[8], opn;
@@ -188,6 +189,37 @@ int main(void) {
     screen_ppm("build/raw.ppm");
     wp_cmd(7);
     CHECK(view_mode == VIEW_PAGE);
+
+    /* list mode (LIST.OVL: on the host, list.c linked in) and the menu's
+     * panel: each changes the screen, and leaves it as it was when off */
+    {
+        static u8 off[COLS * ROWS * 8], cr[COLS * ROWS * 2];
+        u8 v;
+        CHECK(wp_get(10) == 1);         /* GET_LISTOK */
+        for (v = 0; v < 2; v++) {
+            wp_redraw();
+            memcpy(off, MEM + BITMAP_LIN, sizeof off);
+            memcpy(cr, host_colram(), sizeof cr);
+            wp_cmd(21);                 /* CMD_LIST */
+            CHECK(list_on);
+            CHECK(memcmp(off, MEM + BITMAP_LIN, sizeof off) != 0);
+            check_cache();
+            screen_ppm(v ? "build/list_raw.ppm" : "build/list_page.ppm");
+            wp_cmd(21);
+            CHECK(!list_on);
+            CHECK(memcmp(off, MEM + BITMAP_LIN, sizeof off) == 0);
+            strcpy(menu_text[0], "Menu:");
+            strcpy(menu_text[1], "File");
+            strcpy(msg, "View");
+            wp_panel(PANEL_ROWS);
+            CHECK(memcmp(off, MEM + BITMAP_LIN, sizeof off) != 0);
+            wp_panel(0);
+            CHECK(memcmp(off, MEM + BITMAP_LIN, sizeof off) == 0);
+            CHECK(memcmp(cr, host_colram(), sizeof cr) == 0);
+            wp_cmd(7);
+        }
+        CHECK(view_mode == VIEW_PAGE);
+    }
 
     /* typing */
     wp_cmd(13);                 /* new */
@@ -488,6 +520,7 @@ int main(void) {
     for (i = 0; i < 20000; i++) {
         static const u8 keys[] = {29, 157, 17, 145, 19, 147, 13, 20, 148, 9, 0x41, 0x42, 0x20, 0xC5, 0x2E};
         int r = rand() % 40;
+        if (i == 10000) wp_cmd(21);     /* the second half in list mode */
         if (r < (int)sizeof keys) { logop(keys[r]); wp_key(keys[r]); }
         else if (r < 30) { logop(0x41 + r % 26); wp_key(0x41 + r % 26); }
         else { int c = 1 + rand() % 18; logop(-c); wp_cmd((u8)c); }
@@ -500,6 +533,7 @@ int main(void) {
     wp_cmd(7);
     check_layout();
     screen_ppm("build/fuzz.ppm");
+    if (list_on) wp_cmd(21);
 
     /* the same on a document of several pages: edits far from the end, the
      * rest laid out later, page breaks moving */

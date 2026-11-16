@@ -16,45 +16,16 @@ char fname[17];
 
 static u8 inited;
 
-/* What was drawn where: a segment of the view (a line's band, blank page,
- * desk) starting at a screen row, with a hash of what it shows. A segment
- * the same as in the last frame, at the same row, is not drawn again. */
+/* What was drawn where (struct seg, wp.h): a segment the same as in the
+ * last frame, at the same row, is not drawn again. */
 #define SEG_DESK 1
 #define SEG_PAGE 2
 #define SEG_LINE 3
 #define SEG_FOOT 4
 #define SEG_RAW 5
-#define MAXSEG 40               /* (a page view frame has at most ~31; more: drawn again) */
-struct seg {
-    u32 hash;
-    u16 sy, n;
-    u8 kind, r0;
-};
 static u8 nseg[2], set, prev_i;
 
-/* The drawing's buffers and caches, all remade after a full redraw (the
- * rows by init_rows, the rest drawn or marked unknown by render_invalidate),
- * share their memory with the module region (mod_area): a module (an .OVL
- * file: Markdown, ...) is loaded there by BASIC, run by mod_run, and the
- * screen then drawn again. */
-union mod_area {
-    struct {
-        u8 band[BAND_H * COLS];
-        struct seg segs[2][MAXSEG];    /* this frame's and the last one's, in screen order */
-        char bar_text[2][COLS + 2];    /* what each bar shows ("" : unknown) */
-        u8 row_desk[COLS];             /* the desk between pages */
-        u8 row_page[COLS];             /* a page's blank row: desk at the sides */
-        u8 row_blank[COLS];
-        u8 rowcol[ROWS];               /* each cell row's colour scheme (0xFF: unknown) */
-        u8 cellcol[COLS];
-        u8 desk_row[ROWS];
-        u8 gbuf[48];                   /* a glyph's rows, copied from bank 4 */
-        char sb[COLS + 1];             /* a bar's text */
-    } r;
-    u8 m[MOD_SIZE];
-} mod_area;
-/* (as &...[0]: cc45 loses the high byte of an array member's address
- * when an integer is added to it, as in band + COLS + col) */
+union mod_area mod_area;
 #define band (&mod_area.r.band[0])
 #define segs mod_area.r.segs
 #define bar_text mod_area.r.bar_text
@@ -66,6 +37,18 @@ union mod_area {
 #define desk_row (&mod_area.r.desk_row[0])
 #define gbuf (&mod_area.r.gbuf[0])
 #define sb (&mod_area.r.sb[0])
+
+u8 panel;
+char menu_text[PANEL_ROWS][81];
+
+/* LIST.OVL: at the end of mod_area (wp.h), past the drawing's buffers */
+#define list_area (&mod_area.m[LIST_OFS])
+/* (the buffers' size, for tools/mkmod.py: a module placed at an offset
+ * must be past them; cc45 takes a negative array size, so no check here) */
+const u16 mod_bufsize = sizeof(mod_area.r);
+u8 list_ok, list_on;
+u16 hk_l;
+const struct line *hk_L;
 
 extern u8 npages;
 
@@ -88,7 +71,37 @@ static void init_rows(void) {
 void render_invalidate(void) {
     inited = 0;                 /* (init_rows: the rows, rowcol unknown) */
     nseg[0] = nseg[1] = 0;
-    bar_text[0][0] = bar_text[1][0] = 0;
+    bar_text[0][0] = bar_text[1][0] = bar_text[2][0] = bar_text[3][0] = 0;
+}
+
+/* a module's header: "WM" and the build's id (then a JMP to its entry) */
+static u8 mod_ok(const u8 *m) {
+#ifdef __cc45__
+    return m[0] == 'W' && m[1] == 'M' && m[2] == (u8)BUILD_ID && m[3] == (u8)(BUILD_ID >> 8);
+#else
+    (void)m;
+    return 1;
+#endif
+}
+
+u8 list_check(void) {
+    list_ok = mod_ok(list_area);
+    if (list_ok && list_on) {
+        render_invalidate();
+        render();
+    }
+    return list_ok;
+}
+
+/* LIST.OVL's markers over line l (*L), just drawn into the band */
+static void list_marks(u16 l, const struct line *L) {
+    hk_l = l;
+    hk_L = L;
+#ifdef __cc45__
+    ((void (*)(void))&list_area[4])();
+#else
+    list_main();
+#endif
 }
 
 /* Run the module BASIC loaded into mod_area (cmd: what it is to do; its
@@ -98,12 +111,12 @@ void render_invalidate(void) {
 u16 mod_run(u8 cmd) {
     mod_ret = 0xFFFF;
 #ifdef __cc45__
-    if (mod_area.m[0] == 'W' && mod_area.m[1] == 'M' &&
-        mod_area.m[2] == (u8)BUILD_ID && mod_area.m[3] == (u8)(BUILD_ID >> 8)) {
+    if (mod_ok(mod_area.m)) {
         mod_cmd = cmd;
         ((void (*)(void))&mod_area.m[4])();
     }
     mod_area.m[0] = 0;
+    list_ok = 0;                /* (LIST.OVL overwritten: loaded again by BASIC) */
 #else
     mod_cmd = cmd;
     mod_main();
@@ -200,7 +213,7 @@ static void band_fill(u8 rows, const u8 *pattern) {
 }
 
 /* the pixels x0..x1-1 of rows r0..r1-1 inverted */
-static void band_xor(u16 x0, u16 x1, u8 r0, u8 r1) {
+void band_xor(u16 x0, u16 x1, u8 r0, u8 r1) {
     u8 r;
     u16 x;
     if (x1 > SCR_W) x1 = SCR_W;
@@ -317,7 +330,7 @@ static void put_num(u16 v) {
 
 /* ---- the bars ---- */
 /* bar which from sb: its left part sb[0..ln-1], at its right end sb[ln..sn-1] */
-static void bar(u8 which, u8 ln) {
+static void bar(u8 which, u8 ln, u16 sy) {
     u8 i, rn = (u8)(sn - ln);
     char t[COLS + 2], *o = bar_text[which];
     for (i = 0; i < COLS; i++) t[i] = ' ';
@@ -334,7 +347,7 @@ static void bar(u8 which, u8 ln) {
     }
     o[COLS] = '|';
     o[COLS + 1] = 0;
-    band_out(which ? VIEW_TOP + VIEW_H : 0, 0, RAW_H);
+    band_out(sy, 0, RAW_H);
 }
 
 static void bar_colour(u8 row) {
@@ -357,9 +370,22 @@ void render_bars(void) {
     put_str(fname);
     if (dirty) put_str(" *");
     ln = sn;
+    if (list_on && list_ok) put_str("LIST  ");
     put_str(view_mode == VIEW_RAW ? "RAW VIEW " : "PAGE LAYOUT ");
-    bar(0, ln);
+    bar(0, ln, 0);
     bar_colour(0);
+
+    if (panel) {
+        for (ln = 0; ln < PANEL_ROWS; ln++) {
+            sn = 0;
+            put_str(" ");
+            put_str(menu_text[ln]);
+            bar((u8)(2 + ln), sn, (u16)(VIEW_TOP + VIEW_H - (PANEL_ROWS - ln) * RAW_H));
+            bar_colour((u8)((VIEW_TOP + VIEW_H - (PANEL_ROWS - ln) * RAW_H) >> 3));
+        }
+    } else {
+        bar_text[2][0] = bar_text[3][0] = 0;
+    }
 
     sn = 0;
     if (msg[0]) {
@@ -393,7 +419,7 @@ void render_bars(void) {
         put_num(doc_len - 1);
         put_str(" chars  F8 Help  ESC Menu ");
     }
-    bar(1, ln);
+    bar(1, ln, VIEW_TOP + VIEW_H);
     bar_colour(ROWS - 2);
 }
 
@@ -429,6 +455,7 @@ static void draw_line(u16 l, const struct line *L) {
         if (sel_on && i >= lo && i < hi) band_xor(x, x + w, 0, h);
         x += w;
     }
+    if (list_on && list_ok) list_marks(l, L);
     if (cx != 0xFFFF) band_xor(cx ? cx - 1 : 0, cx + 1, 0, h);
 }
 
@@ -452,7 +479,7 @@ static void draw_footer(u8 page) {
 }
 
 static void render_page(void) {
-    u16 sy = VIEW_TOP, dy = view_y, l = 0, lo, hi, mid;
+    u16 sy = VIEW_TOP, dy = view_y, l = 0, lo, hi, mid, vb = VIEW_TOP + VIEW_H - (panel ? PANEL_ROWS * RAW_H : 0);
     u8 r;
     struct line L;
     new_frame();
@@ -469,8 +496,8 @@ static void render_page(void) {
         }
         l = lo;
     }
-    while (sy < VIEW_TOP + VIEW_H) {
-        u16 rem = VIEW_TOP + VIEW_H - sy, n;
+    while (sy < vb) {
+        u16 rem = vb - sy, n;
         u16 p = dy / PAGE_STRIDE, off = dy - p * PAGE_STRIDE, ptop = p * PAGE_STRIDE + PAGE_GAP;
         u8 more = l < nlines;
         if (more) get_line(l, &L);
@@ -508,7 +535,7 @@ static void render_page(void) {
         sy += n;
         dy += n;
     }
-    for (r = VIEW_TOP / 8; r < (VIEW_TOP + VIEW_H) / 8; r++) {
+    for (r = VIEW_TOP / 8; r < vb / 8; r++) {
         u8 s = desk_row[r] ? SCHEME_DESK : SCHEME_PAGE;
         if (rowcol[r] == s) continue;
         if (rowcol[r] != SCHEME_DESK && rowcol[r] != SCHEME_PAGE) {
@@ -539,7 +566,7 @@ static void render_raw(void) {
         lo = sel_lo();
         hi = sel_hi();
     }
-    for (vr = 0; vr < VIEW_H / RAW_H; vr++, l++) {
+    for (vr = 0; vr < VIEW_H / RAW_H - (panel ? PANEL_ROWS : 0); vr++, l++) {
         u16 sy = (u16)(VIEW_TOP + vr * RAW_H);
         u8 crow = (u8)(sy >> 3);
         if (l < nlines) get_line(l, &L);
@@ -571,6 +598,7 @@ static void render_raw(void) {
                 col++;
             }
         }
+        if (list_on && list_ok) list_marks(l, &L);
         band_out(sy, 0, RAW_H);
         for (r = 0; r < 2; r++) {
             color_row((u8)(crow + r), cellcol);

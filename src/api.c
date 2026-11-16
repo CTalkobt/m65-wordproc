@@ -9,6 +9,8 @@
  *                    by the module MARKDOWN.OVL, 65535 when it is not loaded)
  *   wp_setmsg        msg (poked by BASIC as PETSCII) shown in the bottom bar
  *   wp_setname       fname (PETSCII) as the document's name
+ *   wp_panel(n)      the menu: n rows of menu_text above the bottom bar (msg);
+ *                    0 closes it
  *   wp_video(on)     1: the graphics screen (again, after the disk or text
  *                    screen); 0: BASIC's text screen back
  */
@@ -33,6 +35,7 @@
 #define CMD_PGDN 17
 #define CMD_ALL 18
 #define CMD_CLEAN 20
+#define CMD_LIST 21
 
 #define GET_DIRTY 0
 #define GET_LEN 1
@@ -44,6 +47,7 @@
 #define GET_IMPORT 7
 #define GET_MDEXPORT 8
 #define GET_MDIMPORT 9
+#define GET_LISTOK 10
 
 static u8 started;
 u8 mod_cmd;
@@ -277,6 +281,11 @@ void wp_cmd(u8 c) {
         dirty = 0;
         relayout = 0;
         break;
+    case CMD_LIST:              /* list mode (LIST.OVL) on / off */
+        if (list_ok) list_on ^= 1;
+        render_invalidate();
+        relayout = 0;
+        break;
     default:
         return;
     }
@@ -299,6 +308,7 @@ u16 wp_get(u8 w) {
         mem_fill(SCRATCH_LIN, 30720u, 0);       /* (all the scratch area: Markdown is longer) */
         return 0;
     case GET_MDEXPORT: return mod_run(MOD_MD_EXPORT);
+    case GET_LISTOK: return list_check();
     case GET_IMPORT:
     case GET_MDIMPORT: {
         u16 n = w == GET_IMPORT ? doc_import() : mod_run(MOD_MD_IMPORT);
@@ -321,6 +331,18 @@ static void to_ascii(char *s, u8 max) {
 void wp_setmsg(void) {
     to_ascii(msg, 78);
     render_bars();
+}
+
+/* the menu's panel above the bottom bar: n rows (0 or PANEL_ROWS) from
+ * menu_text, the bar's from msg; closed (0): msg emptied, the view drawn
+ * again under it */
+void wp_panel(u8 n) {
+    to_ascii(menu_text[0], 78);
+    to_ascii(menu_text[1], 78);
+    to_ascii(msg, 78);
+    panel = n;
+    if (!n) msg[0] = 0;
+    render();
 }
 
 void wp_setname(void) {

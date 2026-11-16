@@ -86,9 +86,12 @@ static const struct run help[] = {
             "I import  E export   (PETSCII text, or\r"
             "          Markdown for a name ending .md)\r"
             "D directory   H this help   Q quit\r"
-            "R redraw the screen (also CTRL+L)\r" },
+            "R redraw the screen (also CTRL+L)\r"
+            "T list mode on / off\r" },
     { 0, "Saved Writer documents keep their fonts and styles. "
-         "Markdown is read and written by MARKDOWN.OVL, when it is on the disk.\r" },
+         "Markdown is read and written by MARKDOWN.OVL, when it is on the disk. "
+         "List mode (LIST.OVL) marks spaces, paragraph ends, wrapped lines "
+         "and trailing spaces.\r" },
 };
 
 void doc_load_help(void) {

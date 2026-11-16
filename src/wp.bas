@@ -8,6 +8,9 @@
 ' document, lays it out and draws the 640 x 400 screen; BASIC calls it with
 ' SYS {name}, a and reads results with RREG.
 '
+' Modules (.OVL files: MARKDOWN.OVL, LIST.OVL) are loaded only when they
+' are on the disk (below).
+'
 ' Build: make  (basic45 --link src/api.c ... src/wp.bas -o build/writer.prg)
 
 #define CMD_BOLD 1
@@ -29,6 +32,7 @@
 #define CMD_PGDN 17
 #define CMD_ALL 18
 #define CMD_CLEAN 20
+#define CMD_LIST 21
 
 #define GET_DIRTY 0
 #define GET_PACK 2
@@ -39,6 +43,10 @@
 #define GET_IMPORT 7
 #define GET_MDEXPORT 8
 #define GET_MDIMPORT 9
+#define GET_LISTOK 10
+
+' LIST.OVL's place: mod_area + LIST_OFS (wp.h)
+#define LIST_OFS 3712
 
 ' the file image's place: bank 5, $7600 (SCRATCH_LIN in wp.h)
 #define IMG 30208
@@ -63,6 +71,7 @@ wpinit:
   sys {wp_init}
   if wl = 2 then sys {wp_get}, GET_UNPACK
   fi$ = p"untitled"
+  call loadlist
 
 mainloop:
   trap errh
@@ -113,10 +122,21 @@ waitkey:
   endselect
   goto mainloop
 
-' ---- the menu (ESC) ----
+' ---- the menu (ESC): a panel of three rows at the bottom, the commands
+' grouped (List only when LIST.OVL is loaded) ----
 proc menu
-  call say(p"N)ew L)oad S)ave I)mport E)xport D)ir H)elp R)edraw Q)uit  ESC: back")
+  b$ = ""
+  if lv then
+    bank 0 : lq = peek({list_on}) : bank 128
+    b$ = p"  T)List on"
+    if lq then b$ = p"  T)List off"
+  endif
+  call setstr(p"Menu:", {menu_text})
+  call setstr(p"File:  N)ew  L)oad  S)ave  I)mport  E)xport  D)ir", {menu_text} + 81)
+  call setstr(p"View:  R)edraw" + b$ + p"    H)elp  Q)uit    ESC: back", {msg})
+  sys {wp_panel}, 2
   getkey m$
+  sys {wp_panel}, 0
   m = asc(m$) and 127
   select m
   case 78
@@ -134,23 +154,27 @@ proc menu
   case 72
     call loadhelp
   case 82
-    call say("")
     sys {wp_redraw}
+  case 84
+    if lv then sys {wp_cmd}, CMD_LIST
   case 81
     call quit
-  case else
-    call say("")
   endselect
+endproc
+
+' s$ (PETSCII, at most 78 characters) poked at sa in bank 0, then a 0
+proc setstr(s$, sa)
+  sl = len(s$)
+  if sl > 78 then sl = 78
+  bank 0
+  if sl > 0 then for i = 1 to sl : poke sa + i - 1, asc(mid$(s$, i, 1)) : next
+  poke sa + sl, 0
+  bank 128
 endproc
 
 ' ---- the bottom bar's message: m$ poked into the C half's msg ----
 proc say(m$)
-  ml = len(m$)
-  if ml > 78 then ml = 78
-  bank 0
-  if ml > 0 then for i = 1 to ml : poke {msg} + i - 1, asc(mid$(m$, i, 1)) : next
-  poke {msg} + ml, 0
-  bank 128
+  call setstr(m$, {msg})
   sys {wp_setmsg}
 endproc
 
@@ -267,6 +291,7 @@ proc importtext
       if md then call loadmd
       if ml then sys {wp_get}, GET_IMPORT + md * (GET_MDIMPORT - GET_IMPORT) : rreg lo, hi
       sys {wp_video}, 1
+      if md then call loadlist
       call modsaid
       if ok then
         fi$ = p"untitled" : call setname
@@ -285,6 +310,7 @@ proc exporttext
     if md then
       call loadmd
       if ml then sys {wp_get}, GET_MDEXPORT : rreg lo, hi
+      call loadlist
     else
       sys {wp_get}, GET_EXPORT : rreg lo, hi
     endif
@@ -305,6 +331,17 @@ endproc
 ' ---- modules: .OVL files on the disk, each loaded when it is needed into
 ' the C half's module region (mod_area, where the drawing keeps its
 ' buffers) and run at once (SYS {wp_get}, ...): Markdown (MARKDOWN.OVL) ----
+
+' list mode: LIST.OVL, resident, loaded at the start (and again after a
+' module run in mod_area has overwritten it) when it is on the disk; lv: 1
+' when loaded and from this build (the menu offers it only then)
+proc loadlist
+  trap nolist
+  bload "list.ovl", b0, p({mod_area} + LIST_OFS)
+listback:
+  trap errh
+  sys {wp_get}, GET_LISTOK : rreg lv
+endproc
 
 ' ml: 1 when MARKDOWN.OVL loaded
 proc loadmd
@@ -374,6 +411,10 @@ helpback:
     endif
   endif
 endproc
+
+' no LIST.OVL
+nolist:
+  resume listback
 
 ' no MARKDOWN.OVL
 nomd:

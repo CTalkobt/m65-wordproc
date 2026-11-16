@@ -202,6 +202,19 @@ extern u8 mod_cmd;                      /* what mod_main is to do */
 extern u16 mod_ret;                     /* its result */
 u16 mod_run(u8 cmd);                    /* run the module loaded; 0xFFFF: none */
 void mod_main(void);                    /* a module's entry (md.c) */
+/* LIST.OVL (list.c), list mode: resident, it draws its markers over each
+ * line drawn while list_on (render.c calls list_main with hk_l, hk_L: the
+ * line). It is loaded by BASIC at the start into mod_area's last LIST_SIZE
+ * bytes, past the drawing's buffers (mod_area.r: at most LIST_OFS bytes),
+ * so it costs no memory of its own; a module run in mod_area (Markdown)
+ * overwrites it, so list_ok is then 0 until BASIC has loaded it again. */
+#define LIST_OFS 3712           /* (wp.bas's too) */
+#define LIST_SIZE (MOD_SIZE - LIST_OFS)
+extern u8 list_ok, list_on;             /* LIST.OVL loaded (and from this build); asked for */
+extern u16 hk_l;                        /* the line drawn (raw view: >= nlines, a row past the end) */
+extern const struct line *hk_L;
+u8 list_check(void);                    /* list_ok, from LIST.OVL's header (and then drawn) */
+void list_main(void);                   /* LIST.OVL's entry (list.c) */
 u16 para_end(u16 i);            /* the CR / FF ending the paragraph of i */
 u8 attr_at_cursor(void);
 u16 sel_lo(void);
@@ -235,7 +248,44 @@ void scroll_to_cursor(void);
 u16 doc_height(void);
 
 /* ---- drawing (render.c) ---- */
+/* What was drawn where: a segment of the view (a line's band, blank page,
+ * desk) starting at a screen row, with a hash of what it shows. */
+#define MAXSEG 40               /* (a page view frame has at most ~31; more: drawn again) */
+struct seg {
+    u32 hash;
+    u16 sy, n;
+    u8 kind, r0;
+};
+/* The drawing's buffers and caches, all remade after a full redraw (the
+ * rows by init_rows, the rest drawn or marked unknown by render_invalidate),
+ * share their memory with the module region: a module (an .OVL file run
+ * once: Markdown, ...) is loaded there by BASIC, run by mod_run, and the
+ * screen then drawn again. (Their addresses as &mod_area.r.x[0]: cc45 loses
+ * the high byte of an array member's address when an integer is added to
+ * it, as in mod_area.r.band + n: M65Compiler #594.) */
+union mod_area {
+    struct {
+        u8 band[BAND_H * COLS];
+        struct seg segs[2][MAXSEG];    /* this frame's and the last one's, in screen order */
+        char bar_text[4][COLS + 2];    /* what each bar shows ("" : unknown) */
+        u8 row_desk[COLS];             /* the desk between pages */
+        u8 row_page[COLS];             /* a page's blank row: desk at the sides */
+        u8 row_blank[COLS];
+        u8 rowcol[ROWS];               /* each cell row's colour scheme (0xFF: unknown) */
+        u8 cellcol[COLS];              /* raw view: the row's cells' colours */
+        u8 desk_row[ROWS];
+        u8 gbuf[48];                   /* a glyph's rows, copied from bank 4 */
+        char sb[COLS + 1];             /* a bar's text */
+    } r;
+    u8 m[MOD_SIZE];
+};
+extern union mod_area mod_area;
 extern char msg[81];            /* the bottom bar's message ("": the status) */
+/* the menu's panel: panel rows (0 or 2) above the bottom bar, menu_text */
+#define PANEL_ROWS 2
+extern u8 panel;
+extern char menu_text[PANEL_ROWS][81];
+void band_xor(u16 x0, u16 x1, u8 r0, u8 r1);    /* the band's pixels x0..x1-1, rows r0..r1-1, inverted */
 extern char fname[17];          /* the document's name */
 void render(void);
 void render_bars(void);
