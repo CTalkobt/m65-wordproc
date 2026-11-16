@@ -2,7 +2,7 @@
 """mkmod.py — link a Writer module (an .OVL file) against the program
 
     mkmod.py [--at SYM] [--ofs MACRO] [--size MACRO] [--entry FUNC]
-             [--from FUNC] LOG OUT.ovl ID OBJ.o45 ...
+             [--from FUNC] MAP PRG OUT.ovl ID OBJ.o45 ...
 
     --at     the program's region the module runs in (_mod_area)
     --ofs    wp.h's #define of where in it (0)
@@ -12,9 +12,9 @@
              (_mod_run; a static function's name has its file's suffix, and
              one cc45 inlined is not one: its callers are)
 
-LOG is basic45 -v's log of the program's link: its ln45 command is run
-again with -M for the program's map (basic45 writes none). The module is
-linked to run at the program's mod_area (render.c), with:
+MAP is the program's link map (basic45 --map: its symbols, call graph and
+base-page blocks), PRG the program. The module is linked to run at the
+program's mod_area (render.c), with:
 
   - a header first: "WM", the build's ID (16 bits), then the code the
     program jumps to (mod_run checks the first four bytes before it
@@ -56,29 +56,17 @@ def run(cmd):
     return r.stdout
 
 
-def program_map(log, out):
-    """the program's link map, from the ln45 command in basic45's log"""
-    cmd = None
-    for line in open(log):
-        m = re.search(r"\[basic45:INFO\]\s+(.*/ln45' .*)$", line)
-        if m:
-            cmd = shlex.split(m.group(1))
-    if not cmd:
-        die("no ln45 command in " + log + " (basic45 -v)")
-    i = cmd.index("-o")
-    cmd[i + 1] = out + ".prg"
-    for f in cmd[1:]:
-        if f.endswith(".o45") and not os.path.exists(f):
-            die("%s is gone (basic45's link directory, kept by BASIC45_KEEP_TMP): link again" % f)
-    log = run_log(cmd[:1] + ["-vv", "-M", out] + cmd[1:])
-    image = open(out + ".prg", "rb").read()
-    os.remove(out + ".prg")
+def program_map(mapfile, prg):
+    """the program's symbols, base-page blocks and call graph (its link
+    map: basic45 --map) and its image (the .prg)"""
+    mp = open(mapfile).read()
+    if "Base Page" not in mp:
+        die("%s has no Base Page part: a basic45 --map (M65Compiler #595) map?" % mapfile)
     syms = {}
-    for line in open(out):
-        m = re.match(r"\s+\$([0-9A-F]+)\s+(\S+)", line)
-        if m and m.group(2) not in syms:
+    for m in re.finditer(r"^\s+\$([0-9A-F]+)\s+(\S+)", mp, re.M):
+        if m.group(2) not in syms:
             syms[m.group(2)] = int(m.group(1), 16)
-    return syms, blocks(log), calls(open(out).read(), log), image
+    return syms, blocks(mp), calls(mp), open(prg, "rb").read()
 
 
 def word_at(image, a):
@@ -87,30 +75,22 @@ def word_at(image, a):
     return image[o] | image[o + 1] << 8
 
 
-def run_log(cmd):
-    """run a link with -vv: its log (stderr)"""
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode:
-        die("%s failed:\n%s%s" % (os.path.basename(cmd[0]), r.stdout, r.stderr))
-    return r.stderr
-
-
-def blocks(log):
-    """function: the base-page bytes of its block (ln45 -vv)"""
+def blocks(mp):
+    """function: the base-page bytes of its block (the map's Base Page)"""
     b = {}
-    for m in re.finditer(r"base-page block: (\S+) at \$([0-9a-fA-F]+) len (\d+)", log):
+    for m in re.finditer(r"base-page block: (\S+) at \$([0-9a-fA-F]+) len (\d+)", mp):
         a = int(m.group(2), 16)
         b[m.group(1)] = set(range(a, a + int(m.group(3))))
     return b
 
 
-def calls(mp, log):
+def calls(mp):
     """function: the functions it calls (the map's call graph); ANY: through
-    a pointer (ln45 -vv), which reaches every function"""
+    a pointer (Calls Through Pointers), which reaches every function"""
     g = {}
     for m in re.finditer(r"^\s+(\S+) -> (.*)$", mp, re.M):
         g.setdefault(m.group(1), set()).update(m.group(2).split())
-    for m in re.finditer(r"call graph: (\S+) calls through any pointer", log):
+    for m in re.finditer(r"call graph: (\S+) calls through any pointer", mp):
         g.setdefault(m.group(1), set()).add("ANY")
     return g
 
@@ -165,15 +145,15 @@ def main():
             die(__doc__)
         opt[args[0]] = args[1]
         args = args[2:]
-    if len(args) < 4:
+    if len(args) < 5:
         die(__doc__)
-    log, out, ident, objs = args[0], args[1], int(args[2]), args[3:]
+    mapfile, prg, out, ident, objs = args[0], args[1], args[2], int(args[3]), args[4:]
     at, entry, site = opt["--at"], opt["--entry"], opt["--from"]
     if not entry:
         die("--entry: the module's entry function")
     size_max = macro(opt["--size"])
     base = os.path.splitext(out)[0]
-    prog, pblocks, pcalls, image = program_map(log, base + ".prog.map")
+    prog, pblocks, pcalls, image = program_map(mapfile, prg)
     if at not in prog:
         die("the program has no " + at)
     ofs = macro(opt["--ofs"])
@@ -242,18 +222,18 @@ def main():
     run([os.path.join(BIN, "ca45"), "-c", equ, "-o", base + ".equ.o45"])
 
     lib = os.path.join(CC45_ROOT, "lib", "build", "c45.lib")
-    mlog = run_log([os.path.join(BIN, "ln45"), "-vv", "-prg", "-t", "%X" % org,
-                    "-M", base + ".map", "-o", out, base + ".head.o45"] + objs +
-                   [base + ".equ.o45", lib])
+    run([os.path.join(BIN, "ln45"), "-prg", "-t", "%X" % org,
+         "-M", base + ".map", "-o", out, base + ".head.o45"] + objs +
+        [base + ".equ.o45", lib])
 
-    for f, bytes_ in sorted(blocks(mlog).items()):
+    mp = open(base + ".map").read()
+    for f, bytes_ in sorted(blocks(mp).items()):
         hit = sorted(bytes_ & set(busy))
         if hit:
             die("%s's base-page block ($%02X...) shares $%02X with the program's %s, "
                 "which it calls: compile the module with -fno-zp-locals"
                 % (f, min(bytes_), hit[0], busy[hit[0]]))
 
-    mp = open(base + ".map").read()
     top = max(int(m.group(2), 16)
               for m in re.finditer(r"^\s+(TEXT|DATA|BSS)\s+\$[0-9A-F]+ - \$([0-9A-F]+)", mp, re.M))
     size = top + 1 - org

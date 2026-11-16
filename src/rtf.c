@@ -294,7 +294,7 @@ static void ctrl_word(void) {
     switch (w) {
     case W_SECT:
         if (pempty) break;
-        /* (fall through) */
+        /* fall through */
     case W_PAR:
     case W_LINE:
     case W_ROW: end_para(CH_CR); break;
@@ -302,7 +302,7 @@ static void ctrl_word(void) {
         if (pempty && rn && TXT[rn - 1] == CH_CR) TXT[rn - 1] = CH_FF;
         else end_para(CH_FF);
         break;
-    case W_CELL: put(' '); /* (fall through) */
+    case W_CELL: put(' '); /* fall through */
     case W_TAB: put(' '); break;
     case W_PARD: align = 0; break;
     case W_PLAIN:

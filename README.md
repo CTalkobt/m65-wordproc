@@ -15,7 +15,9 @@ Text is shown on a 640 × 400 bitmap in proportional fonts, so fonts, **bold**,
 ## Building and running
 
 Needs the cc45 toolchain (M65Compiler: `basic45`, `cc45`, `disk45`), by
-default checked out next to this directory (`CC45_ROOT`).
+default checked out next to this directory (`CC45_ROOT`), at master
+`6a7dd256` or later (`basic45 --map` and a working `--minify`; build
+`BASFLAGS=` for an unminified program).
 
 ```bash
 make            # build/writer.prg and build/writer.d81
@@ -127,9 +129,9 @@ the room for it. Two kinds:
   marks the drawing's caches unknown so the next frame redraws all;
   65535 tells BASIC there was none or it is from another build.
 - **Building it** (`tools/mkmod.py`, from the Makefile): the module's C
-  files are compiled as any other; basic45 links the program (with `-v`,
-  and `BASIC45_KEEP_TMP` keeping its link's inputs in `build/tmp`), and
-  mkmod.py runs that `ln45` again for the program's map, writes the
+  files are compiled as any other; basic45 links the program and writes
+  its link map (`--map`: symbols, call graph, base-page blocks), and
+  mkmod.py reads that map, writes the
   program's symbols the module uses as equates (its functions and
   variables, the run time: the module calls into the program and has no
   copy of what the program has) and the header, links the module at
@@ -300,9 +302,13 @@ then where each glyph starts).
   `$C000` (the CPU stack is the page below it). With Markdown in the
   program it was full; as a module (above) the C data ended at `$B600`;
   the menu's panel, the hooks for list mode and RTF's import and export
-  in BASIC took most of that, so it ends at `$BE00`, leaving 256 bytes
-  (basic45's `--minify` would save several hundred, once it works:
-  [M65Compiler #598](https://github.com/CTalkobt/M65Compiler/issues/598)).
+  in BASIC took most of that, so it ended at `$BE00`. The BASIC program
+  is now built with basic45's `--minify` (no comments or indentation,
+  lines joined, short names: 5378 bytes rather than 6115), so the C half
+  starts at `$3600` and its data ends at `$BC00`, leaving 768 bytes. (Its
+  two `poke`s of `$D1` / `$F7` are written in decimal: `--minify` turns
+  `poke $d1` into a variable,
+  [M65Compiler #603](https://github.com/CTalkobt/M65Compiler/issues/603).)
   The glyph
   bitmaps (the raw-view font's too, fetched by DMA) live in bank 4
   (`WRITER.FNT`), the C files that do not run on every key are compiled

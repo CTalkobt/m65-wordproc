@@ -63,7 +63,8 @@ start:
   ' F-keys give their codes, not their KEY macros: the Editor's lock bit
   ' (bit 5 of locks, $F7) as KEY OFF sets it, without KEY's wait for a
   ' pending macro ($D1) to drain, which never ends in a running program
-  bank 128 : poke $d1, 0 : poke $f7, peek($f7) or 32
+  ' ($D1 and $F7 in decimal: basic45 --minify mangles poke $xx, M65Compiler #603)
+  bank 128 : poke 209, 0 : poke 247, peek(247) or 32
   ' RUN/STOP ignored while editing
   sys {wp_stopvec}, 1
   ' the first time: the help (a Writer document on the disk), loaded
@@ -410,7 +411,7 @@ proc quit
   call discard
   if yes then
     sys {wp_video}, 0
-    sys {wp_stopvec}, 0 : poke $f7, peek($f7) and 223
+    sys {wp_stopvec}, 0 : poke 247, peek(247) and 223
     print "{clear}";
     print p"MEGA65 Writer: bye. RUN starts it again with the document kept."
     end

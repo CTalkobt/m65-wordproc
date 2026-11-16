@@ -28,6 +28,7 @@ HOSTFLAGS = -std=c99 -Wall -Wextra -O1 -g -Isrc
 
 BUILD  = build
 TARGET = $(BUILD)/writer.prg
+MAP    = $(BUILD)/writer.map
 DISK   = $(BUILD)/writer.d81
 
 CSRC    = src/api.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/list.c src/m65.c src/fonts.c
@@ -39,6 +40,10 @@ HEADERS = src/wp.h
 # included, which cc45 makes much smaller (md.c: 8.2 KB at -O2, 6.3 KB at
 # -O1): bank 0 is full.
 CC45FLAGS = -I$(CC45_ROOT)/lib/include -Isrc -I$(BUILD)
+# --minify: the BASIC program without comments and indentation, its lines
+# joined and its long names shortened (737 bytes less, so the C half starts
+# a page lower; needs M65Compiler #601, master since 6762f672)
+BASFLAGS ?= --minify
 FAST    = render m65 fonts
 SMALL   = api doc layout
 OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45)
@@ -48,12 +53,9 @@ $(BUILD)/obj/%.o45: src/%.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
 	$(CC45) $(if $(filter $*,$(SMALL)),-O1,-O2) $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
 
-# (basic45 -v logs its ln45 command, and BASIC45_KEEP_TMP keeps that link's
-# inputs in build/tmp: tools/mkmod.py links again for the program's map.)
-#
 # Modules (.OVL files, loaded by BASIC when used and only when on the disk):
 # linked by tools/mkmod.py to run at the program's mod_area, against its
-# map; the build's ID (of the sources and the tools) ties each to the
+# map (basic45 --map: M65Compiler #595, in master since 6a7dd256); the build's ID (of the sources and the tools) ties each to the
 # program it was linked with (render.c's mod_run refuses another's).
 MODS    = $(BUILD)/markdown.ovl $(BUILD)/rtf.ovl $(BUILD)/list.ovl
 BUILD_ID := $(shell cat src/*.c src/*.h src/wp.bas tools/mkmod.py $(CC45) $(CC45_ROOT)/bin/ln45 2>/dev/null | cksum | awk '{print $$1 % 65536}')
@@ -70,14 +72,14 @@ $(BUILD)/obj/md_mod.o45: src/md.c $(HEADERS)
 	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
 
 $(BUILD)/markdown.ovl: $(TARGET) $(BUILD)/obj/md_mod.o45 tools/mkmod.py
-	python3 tools/mkmod.py --entry _md_main $(BUILD)/link.log $@ $(BUILD_ID) $(BUILD)/obj/md_mod.o45
+	python3 tools/mkmod.py --entry _md_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/md_mod.o45
 
 $(BUILD)/obj/rtf_mod.o45: src/rtf.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
 	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
 
 $(BUILD)/rtf.ovl: $(TARGET) $(BUILD)/obj/rtf_mod.o45 tools/mkmod.py
-	python3 tools/mkmod.py --entry _rtf_main $(BUILD)/link.log $@ $(BUILD_ID) $(BUILD)/obj/rtf_mod.o45
+	python3 tools/mkmod.py --entry _rtf_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/rtf_mod.o45
 
 # LIST.OVL: resident (loaded at the start), at the end of mod_area
 # (LIST_OFS); render.c's list_marks calls it while drawing (inlined: from
@@ -89,7 +91,7 @@ $(BUILD)/obj/list_mod.o45: src/list.c $(HEADERS)
 $(BUILD)/list.ovl: $(TARGET) $(BUILD)/obj/list_mod.o45 tools/mkmod.py
 	python3 tools/mkmod.py --at _mod_area --ofs LIST_OFS --size LIST_SIZE --entry _list_main \
 	    --from _draw_line__render,_render_raw__render \
-	    $(BUILD)/link.log $@ $(BUILD_ID) $(BUILD)/obj/list_mod.o45
+	    $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/list_mod.o45
 
 .PHONY: all run shot test fonts clean FORCE
 .DEFAULT_GOAL := all
@@ -98,9 +100,7 @@ all: $(DISK)
 
 $(TARGET): src/wp.bas $(OBJS)
 	@mkdir -p $(BUILD)
-	@rm -rf $(BUILD)/tmp && mkdir -p $(BUILD)/tmp
-	BASIC45_KEEP_TMP=1 TMPDIR=$(abspath $(BUILD)/tmp) $(BASIC45) -v $(foreach f,$(OBJS),--link $(f)) --report src/wp.bas -o $@ 2>$(BUILD)/link.log || (cat $(BUILD)/link.log; false)
-	@grep -v '^\[basic45:INFO\]\|note:' $(BUILD)/link.log || true
+	$(BASIC45) $(foreach f,$(OBJS),--link $(f)) --map $(MAP) $(BASFLAGS) --report src/wp.bas -o $@
 
 $(DISK): $(TARGET) src/writer.fnt $(BUILD)/help.prg $(MODS)
 	rm -f $@
