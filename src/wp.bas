@@ -37,6 +37,8 @@
 #define GET_SEL 5
 #define GET_PREP 6
 #define GET_IMPORT 7
+#define GET_MDEXPORT 8
+#define GET_MDIMPORT 9
 
 ' the file image's place: bank 5, $7600 (SCRATCH_LIN in wp.h)
 #define IMG 30208
@@ -246,41 +248,57 @@ proc importtext
   call discard
   if yes then
     a$ = ""
-    call ask(p"Import text file: ")
+    call ask(p"Import text file (name.md: Markdown): ")
     if ok and a$ <> "" then
       call say(p"Importing " + a$ + "...")
+      call ismd
       sys {wp_get}, GET_PREP
       dopen#2, (a$)
       ' 1 KB at a time until the end of the file (past it the drive gives CRs,
-      ' which wp_get GET_IMPORT trims)
+      ' which the import trims) or the scratch area's end (30 KB)
       p = 0
       do
         fread#2, $57600 + p * 1024, 1024
         p = p + 1
-      loop until st <> 0 or p >= 14
+      loop until st <> 0 or p >= 30
       dclose#2
       sys {wp_video}, 1
-      sys {wp_get}, GET_IMPORT : rreg lo, hi
+      sys {wp_get}, GET_IMPORT + md * (GET_MDIMPORT - GET_IMPORT) : rreg lo, hi
       fi$ = p"untitled" : call setname
       call say(p"Imported " + mid$(str$(lo + 256 * hi), 2) + p" characters.")
     endif
   endif
 endproc
 
-' the text as a sequential PETSCII file
 proc exporttext
   a$ = ""
-  call ask(p"Export text as: ")
+  call ask(p"Export text as (name.md: Markdown): ")
   if ok and a$ <> "" then
-    sys {wp_get}, GET_EXPORT : rreg lo, hi
+    call ismd
+    if md then
+      sys {wp_get}, GET_MDEXPORT : rreg lo, hi
+    else
+      sys {wp_get}, GET_EXPORT : rreg lo, hi
+    endif
     n = lo + 256 * hi
-    scratch (a$)
-    dopen#2, (a$), w
-    fwrite#2, $57600, n
-    dclose#2
-    sys {wp_video}, 1
-    call say(p"Exported " + mid$(str$(n), 2) + p" characters to " + a$ + ".")
+    if n = 0 then
+      call say(p"Too long for Markdown (more than 30 KB).")
+    else
+      scratch (a$)
+      dopen#2, (a$), w
+      fwrite#2, $57600, n
+      dclose#2
+      sys {wp_video}, 1
+      call say(p"Exported " + mid$(str$(n), 2) + p" bytes to " + a$ + ".")
+    endif
   endif
+endproc
+
+' md: 1 when a$ ends in .md (either case)
+proc ismd
+  md = 0
+  b$ = right$(a$, 3)
+  if b$ = p".md" or b$ = p".MD" then md = 1
 endproc
 
 proc showdir

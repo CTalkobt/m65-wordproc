@@ -109,7 +109,7 @@ static u8 pend, pend_multi;     /* an edit to lay out; more than one */
 static u16 pend_lo, pend_hi;    /* the first position changed; the end of the change (before it) */
 static int16_t pend_delta;      /* characters added (removed: negative) */
 
-#define TMP_LINES 40
+#define TMP_LINES 32
 static struct line tmp[TMP_LINES];
 
 /* The line table is in bank 4: a line is read and written whole (one DMA)

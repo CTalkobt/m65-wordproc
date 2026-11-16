@@ -28,9 +28,10 @@ static u8 inited;
 #define SEG_LINE 3
 #define SEG_FOOT 4
 #define SEG_RAW 5
-#define MAXSEG 64
+#define MAXSEG 40               /* (a page view frame has at most ~31; more: drawn again) */
 struct seg {
-    u16 sy, n, hash;
+    u32 hash;
+    u16 sy, n;
     u8 kind, r0;
 };
 static struct seg segs[2][MAXSEG];     /* this frame's and the last one's, in screen order */
@@ -70,7 +71,7 @@ static void new_frame(void) {
 
 /* the segment at screen row sy: 1 if the last frame drew the same there
  * (it is recorded either way) */
-static u8 seg_same(u16 sy, u8 kind, u8 r0, u16 n, u16 hash) {
+static u8 seg_same(u16 sy, u8 kind, u8 r0, u16 n, u32 hash) {
     struct seg *p = segs[set ^ 1], *c;
     u8 np = nseg[set ^ 1], same;
     while (prev_i < np && p[prev_i].sy < sy) prev_i++;
@@ -89,10 +90,12 @@ static u8 seg_same(u16 sy, u8 kind, u8 r0, u16 n, u16 hash) {
     return same;
 }
 
-/* A line's hash: a Fletcher-style pair of sums of its bytes (s1 their sum,
- * s2 the sum of the running s1), two 8-bit adds a byte. Any one byte
- * changed changes s1; two neighbours swapped change s2. */
-static u8 hs1, hs2;
+/* A line's hash: a Fletcher-style pair of 16-bit sums of its bytes (s1
+ * their sum, s2 the sum of the running s1), two adds a byte. Any one byte
+ * changed changes s1; two neighbours swapped change s2. 32 bits: with 16,
+ * a stale line every few ten thousand changed lines (the host tests found
+ * them, as they did for a CRC-16). */
+static u16 hs1, hs2;
 
 static void hmix(u16 v) {
     hs1 += (u8)v;
@@ -104,7 +107,7 @@ static void hmix(u16 v) {
 /* what line l shows: its characters, attributes, placement, and the cursor
  * and selection in it (raw view: also the style before it and its
  * paragraph's alignment, which its tags show) */
-static u16 line_hash(u16 l, const struct line *L) {
+static u32 line_hash(u16 l, const struct line *L) {
     u16 i = L->start, e = line_end(l);
     hs1 = 0x17;
     hs2 = 0x5A;
@@ -113,7 +116,8 @@ static u16 line_hash(u16 l, const struct line *L) {
     hmix((u16)(L->h | (L->asc << 8)));
     hmix((u16)(e - i));
     if (view_mode == VIEW_RAW) {
-        hmix(prev_style(i));
+        /* (and whether it starts a paragraph: its alignment's tag) */
+        hmix((u16)(prev_style(i) | ((i == 0 || TXT[i - 1] == CH_CR || TXT[i - 1] == CH_FF) << 8)));
         hmix(ATR[para_end(i)]);
     }
     for (; i < e; i++) {
@@ -131,9 +135,11 @@ static u16 line_hash(u16 l, const struct line *L) {
             hmix((u16)(0x2000 | (hi < e ? hi - i : e - i)));
         }
     }
-    return (u16)(hs1 | (hs2 << 8));
+    return hs1 | ((u32)hs2 << 16);
 }
 
+
+static u8 gbuf[48];             /* a glyph's rows, copied from bank 4 */
 
 /* ---- drawing into the band ---- */
 static void band_fill(u8 rows, const u8 *pattern) {
@@ -173,7 +179,6 @@ static void band_hline(u16 x0, u16 x1, u8 r) {
     for (x = x0; x < x1; x++) d[x >> 3] |= (u8)(0x80 >> (x & 7));
 }
 
-static u8 gbuf[48];             /* a glyph's rows, copied from bank 4 */
 
 /* glyph c of font f, its cell's top at band row top, at pixel x */
 static void draw_glyph(const struct font *f, u8 c, u16 x, u8 top, u8 style) {
@@ -219,12 +224,11 @@ static void draw_glyph(const struct font *f, u8 c, u16 x, u8 top, u8 style) {
 
 /* raw font text at cell col (an 8 x 16 cell row band); inv 0xFF: inverted */
 static void raw_cell(u8 col, u8 c, u8 inv) {
-    const u8 *g;
     u8 r, *d = band + COLS + col;
     if (c < FONT_FIRST || c > FONT_LAST) c = '?';
-    g = font_raw_rows + (u16)(c - FONT_FIRST) * 13;
+    mem_read(gbuf, font_raw_at + (u16)((c - FONT_FIRST) * 13), 13);
     for (r = 0; r < 13; r++) {
-        d[0] = (u8)(g[r] ^ inv);
+        d[0] = (u8)(gbuf[r] ^ inv);
         d += COLS;
     }
 }

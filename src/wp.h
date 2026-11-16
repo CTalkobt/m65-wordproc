@@ -113,7 +113,7 @@ struct font {
     u32 bits;                   /* the glyphs (FONT_LIN + ...): rows of 1 byte (width <= 8) or 2 */
 };
 extern const struct font font_sans, font_serif, font_mono, font_head;
-extern const u8 font_raw_rows[];        /* the raw font's glyphs (8 x 13, 13 bytes each) in bank 0 */
+extern const u32 font_raw_at;           /* the raw font's glyphs (8 x 13, 13 bytes each, from FONT_FIRST) in bank 4 */
 extern const struct font *const fonts[NFONTS];
 extern const char *const font_names[NFONTS];
 
@@ -188,6 +188,9 @@ u16 doc_pack(void);             /* the file image at SCRATCH_LIN; its size */
 u8 doc_unpack(void);            /* 0: loaded */
 u16 doc_export(void);           /* the PETSCII text at SCRATCH_LIN; its size */
 u16 doc_import(void);           /* PETSCII text at SCRATCH_LIN as the document */
+void doc_loaded(u8 d);          /* after a load / import: the final CR, the cursor at the start; d: changed */
+u16 md_export(void);            /* Markdown at SCRATCH_LIN; its size (0: too long) */
+u16 md_import(void);            /* Markdown at SCRATCH_LIN as the document; its length */
 u16 para_end(u16 i);            /* the CR / FF ending the paragraph of i */
 u8 attr_at_cursor(void);
 u16 sel_lo(void);

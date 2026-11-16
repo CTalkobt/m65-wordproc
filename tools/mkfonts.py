@@ -6,8 +6,8 @@ Usage:  python3 tools/mkfonts.py src/fonts.c src/writer.fnt [preview.png]
 The document fonts' glyphs, and where each starts, are the file writer.fnt,
 which the BASIC program loads (BLOAD) to FONT_LIN in bank 4 before it starts
 the C half; fonts.c has the fonts' metrics and advance widths, which the
-layout reads all the time and so stay in bank 0. The raw-view font is drawn
-the most: its glyphs are in bank 0 (font_raw_rows), not in the file.
+layout reads all the time and so stay in bank 0. The raw-view font (8 x 13,
+13 bytes a glyph) is in the file too, after the offsets (font_raw_at).
 
 Each document font is a TrueType font rasterised by FreeType at one pixel
 size without anti-aliasing (PIL's 1-bit mode, hinted), one glyph at a time,
@@ -138,15 +138,13 @@ def emit(out, blob, offs_blob, cname, height, ascent, glyphs):
         % (cname, height, ascent, cname, glyph_end + obase, base))
 
 
-def emit_raw(out, height, glyphs):
-    """the raw-view font: its glyphs (fixed 8 wide) in bank 0"""
+def emit_raw(out, blob, height, glyphs):
+    """the raw-view font: its glyphs (fixed 8 wide) at the end of blob"""
     bits, _, _ = rasterise(glyphs)
     assert all(adv == 8 for adv, _ in glyphs) and len(bits) == height * len(glyphs)
-    out.write("/* the raw-view font: 8 x %d */\n" % height)
-    out.write("const u8 font_raw_rows[%d] = {\n" % len(bits))
-    for i in range(0, len(bits), 16):
-        out.write("    " + ", ".join("0x%02X" % b for b in bits[i:i + 16]) + ",\n")
-    out.write("};\n")
+    out.write("/* the raw-view font: 8 x %d, in writer.fnt */\n" % height)
+    out.write("const u32 font_raw_at = FONT_LIN + %dUL;\n" % len(blob))
+    blob.extend(bits)
 
 
 def preview(fonts, path):
@@ -182,8 +180,8 @@ def main():
         glyph_end = len(blob)
         for f in finish:
             f(glyph_end)
-        emit_raw(out, rh, rg)
-    blob.extend(offs_blob)
+        blob.extend(offs_blob)
+        emit_raw(out, blob, rh, rg)
     if len(blob) > FONT_MAX:
         sys.exit("mkfonts: %d bytes of glyphs, more than the %d of FONT_LIN's area" % (len(blob), FONT_MAX))
     with open(fnt_path, "wb") as f:

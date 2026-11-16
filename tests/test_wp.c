@@ -85,6 +85,45 @@ static void type(const char *s) {
     }
 }
 
+/* the document as Markdown into out; its size */
+static u16 md_out(char *out) {
+    u16 n = md_export();
+    memcpy(out, MEM + SCRATCH_LIN, n);
+    out[n] = 0;
+    return n;
+}
+
+/* Markdown s as the document (as FREAD# leaves it: the rest zero) */
+static void md_in(const char *s) {
+    memset(MEM + SCRATCH_LIN, 0, 30720);
+    memcpy(MEM + SCRATCH_LIN, s, strlen(s));
+    md_import();
+}
+
+static void show(const char *s) {
+    int k;
+    for (k = 0; k < 90 && s[k]; k++) {
+        if (s[k] == '\n') printf("\\n");
+        else putchar(s[k]);
+    }
+    putchar('\n');
+}
+
+/* m1 (the document's Markdown) imported and exported again: the same */
+static void md_fixed_point(const char *m1, char *m2, const char *what) {
+    md_in(m1);
+    md_out(m2);
+    if (strcmp(m1, m2) != 0) {
+        u16 k = 0;
+        while (m1[k] && m1[k] == m2[k]) k++;
+        printf("FAIL: %s Markdown changed by an import at byte %u\n  was: ", what, k);
+        show(m1 + (k > 40 ? k - 40 : 0));
+        printf("  now: ");
+        show(m2 + (k > 40 ? k - 40 : 0));
+        fails++;
+    }
+}
+
 static void text_of(char *out, u16 max) {
     u16 i;
     for (i = 0; i < doc_len && i + 1 < max; i++) out[i] = (char)TXT[i];
@@ -343,6 +382,104 @@ int main(void) {
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "Hello\rworld\r") == 0);
         CHECK(n == 11);         /* (the final CR not counted) */
+    }
+
+    /* ---- Markdown ---- */
+    {
+        static char m1[40000], m2[40000];
+        u16 k;
+        /* the help as Markdown (build/help.md, for a look) */
+        doc_load_help();
+        n = md_out(m1);
+        {
+            FILE *f = fopen("build/help.md", "wb");
+            if (f) {
+                fwrite(m1, 1, n, f);
+                fclose(f);
+            }
+        }
+        CHECK(strstr(m1, "<div align=\"center\">\n\n# MEGA65 Writer\n\n</div>") != NULL);
+        CHECK(strstr(m1, "This is the help, shown in **page layout** view") != NULL);
+        CHECK(strstr(m1, "**_bold_**") == NULL);
+        CHECK(strstr(m1, "<u>underlined</u>") != NULL);
+        CHECK(strstr(m1, "***<u>all three</u>***") != NULL || strstr(m1, "<u>***all three***</u>") != NULL);
+        CHECK(strstr(m1, "\n```\nTyping     inserts; RETURN: a new paragraph\nDEL / INST") != NULL);
+        CHECK(strstr(m1, "`Mono`") != NULL);
+        CHECK(strstr(m1, "<div align=\"justify\">") != NULL);
+        /* imported, it exports the same again */
+        md_fixed_point(m1, m2, "help");
+        text_of(buf, sizeof buf);
+        CHECK(strncmp(buf, "MEGA65 Writer\rA graphical word processor", 40) == 0);
+        CHECK((ATR[0] & A_FONT) == 3 && ((ATR[13] & A_ALIGN) >> A_ALIGN_SHIFT) == 1);
+
+        /* Markdown from elsewhere */
+        md_in("Hello *world* and **bold**, `code` <u>under</u>.\n");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "Hello world and bold, code under.\r") == 0);
+        CHECK(ATR[6] == A_ITAL && ATR[16] == A_BOLD && ATR[22] == 2 && ATR[27] == A_UNDER && ATR[0] == 0);
+        md_in("# Title\n\nPara one\nwraps here.\n\n- item 1\n- item 2\n\n1. first\n2) second\n");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "Title\rPara one wraps here.\r\r- item 1\r- item 2\r\r1. first\r2) second\r") == 0);
+        CHECK((ATR[0] & A_FONT) == 3 && (ATR[6] & A_FONT) == 0);
+        md_in("Setext\n======\nnext\n");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "Setext\rnext\r") == 0 && (ATR[0] & A_FONT) == 3);
+        md_in("See [the site](http://x.y) and ![a picture](p.png); <http://a.b>.\n");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "See the site (http://x.y) and a picture; http://a.b.\r") == 0);
+        md_in("caf\xc3\xa9 \xe2\x80\x94 \xe2\x80\x9cq\xe2\x80\x9d Stra\xc3\x9f" "e \xc3\xbc\xc3\xb1 \xe2\x80\xa6 \xf0\x9f\x98\x80!\r\n");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "cafe -- \"q\" Strasse un ... ?!\r") == 0);
+        md_in("a\\*b\\* 5 &lt; 6 &amp; 7&nbsp;8 &copy; 2 * 3 = 6 snake_case_name\n");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "a*b* 5 < 6 & 7 8 &copy; 2 * 3 = 6 snake_case_name\r") == 0);
+        md_in("```c\nint *p = 0;\n  x\n```\nafter\n");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "int *p = 0;\r  x\r\rafter\r") == 0 && ATR[0] == 2 && ATR[5] == 2 && ATR[17] == 0);
+        md_in("one\n\n<div style=\"page-break-after: always\"></div>\n\ntwo\n");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "one\r\ftwo\r") == 0);
+        md_in("<div align=\"center\">\n\nMid\nline\\\nnext  \nlast\n\n</div>\n\n> quoted\n");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "Mid line\rnext\rlast\r\rquoted\r") == 0);
+        CHECK(((ATR[8] & A_ALIGN) >> A_ALIGN_SHIFT) == 1 && ((ATR[18] & A_ALIGN) >> A_ALIGN_SHIFT) == 1 &&
+              ATR[19] == 0 && ((ATR[26] & A_ALIGN) >> A_ALIGN_SHIFT) == 0);
+        md_in("**a***b* ***c*** *d **e** f*\n");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "ab c d e f\r") == 0);
+        CHECK(ATR[0] == A_BOLD && ATR[1] == A_ITAL && ATR[3] == (A_BOLD | A_ITAL) && ATR[5] == A_ITAL &&
+              ATR[7] == (A_BOLD | A_ITAL) && ATR[9] == A_ITAL);
+        md_in("");
+        CHECK(doc_len == 1 && TXT[0] == CH_CR);
+
+        /* random documents: exported, imported, exported again: the same */
+        srand(getenv("SEED") ? (unsigned)atoi(getenv("SEED")) : 1);
+        for (k = 0; k < 300; k++) {
+            static const char *w[] = {"word", "*star*", "a_b", "[x]", "#1", "<tag>", "&amp;", "1.", "- ", "`q`",
+                                      "  ", "\\", "Mono", "~", ">", "!", "x+y", "=", "C64", "''"};
+            u16 nw = (u16)(1 + rand() % 60), q;
+            doc_len = 0;
+            for (q = 0; q < nw; q++) {
+                const char *t = w[rand() % 20];
+                u8 a = (u8)(rand() % 4 == 0 ? rand() % 32 : 0), r = (u8)(rand() % 14);
+                for (; *t; t++) {
+                    TXT[doc_len] = (u8)*t;
+                    ATR[doc_len++] = a;
+                }
+                if (r < 9) {
+                    TXT[doc_len] = ' ';
+                    ATR[doc_len++] = (u8)(rand() % 3 == 0 ? a : 0);
+                } else {
+                    TXT[doc_len] = r == 13 ? CH_FF : CH_CR;
+                    ATR[doc_len++] = (u8)((rand() % 4) << A_ALIGN_SHIFT);
+                }
+            }
+            TXT[doc_len] = CH_CR;
+            ATR[doc_len++] = 0;
+            n = md_out(m1);
+            md_fixed_point(m1, m2, "random");
+            if (fails > 10) break;
+        }
     }
 
     /* random keys: the invariants hold */

@@ -243,23 +243,27 @@ u8 doc_unpack(void) {
     mem_copy(TEXT_LIN, SCRATCH_LIN + 5, n);
     mem_copy(ATTR_LIN, SCRATCH_LIN + 5 + n, n);
     doc_len = n;
-    if (TXT[n - 1] != CH_CR) {      /* (keep the final CR) */
-        if (n < DOC_MAX) {
-            TXT[n] = CH_CR;
-            ATR[n] = 0;
+    doc_loaded(0);
+    return 0;
+}
+
+/* a document just loaded or imported (doc_len characters): its final CR
+ * made sure of, the cursor at its start, laid out anew; d: changed */
+void doc_loaded(u8 d) {
+    if (!doc_len || TXT[doc_len - 1] != CH_CR) {
+        if (doc_len < DOC_MAX) {
+            ATR[doc_len] = 0;
             doc_len++;
-        } else {
-            TXT[n - 1] = CH_CR;
         }
+        TXT[doc_len - 1] = CH_CR;
     }
     cur = 0;
     sel_on = 0;
     view_y = 0;
     goal_valid = 0;
-    dirty = 0;
+    dirty = d;
     typing_attr = attr_at_cursor();
     layout_all();
-    return 0;
 }
 
 /* the text as PETSCII (lower-case set) for a SEQ file; the size */
@@ -298,17 +302,6 @@ u16 doc_import(void) {
     }
     /* past the file's end the drive gives CRs: one CR at the end */
     while (doc_len > 1 && TXT[doc_len - 1] == CH_CR && TXT[doc_len - 2] == CH_CR) doc_len--;
-    if (!doc_len || TXT[doc_len - 1] != CH_CR) {
-        TXT[doc_len] = CH_CR;
-        ATR[doc_len] = 0;
-        doc_len++;
-    }
-    cur = 0;
-    sel_on = 0;
-    view_y = 0;
-    goal_valid = 0;
-    dirty = 1;
-    typing_attr = 0;
-    layout_all();
+    doc_loaded(1);
     return (u16)(doc_len - 1);
 }

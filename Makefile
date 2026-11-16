@@ -29,18 +29,31 @@ BUILD  = build
 TARGET = $(BUILD)/writer.prg
 DISK   = $(BUILD)/writer.d81
 
-CSRC    = src/api.c src/doc.c src/layout.c src/render.c src/m65.c src/fonts.c
-PORTABLE = src/api.c src/doc.c src/layout.c src/render.c src/fonts.c
+CSRC    = src/api.c src/doc.c src/layout.c src/render.c src/md.c src/m65.c src/fonts.c
+PORTABLE = src/api.c src/doc.c src/layout.c src/render.c src/md.c src/fonts.c
 HEADERS = src/wp.h
+
+# The C half is compiled here (basic45 --link takes the objects): -O2 for
+# the drawing (the most work on every key), -O1 for the rest, layout
+# included, which cc45 makes much smaller (md.c: 8.2 KB at -O2, 6.3 KB at
+# -O1): bank 0 is full.
+CC45FLAGS = -I$(CC45_ROOT)/lib/include -Isrc
+FAST    = render m65 fonts
+SMALL   = api doc md layout
+OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45)
+
+$(BUILD)/obj/%.o45: src/%.c $(HEADERS)
+	@mkdir -p $(BUILD)/obj
+	$(CC45) $(if $(filter $*,$(SMALL)),-O1,-O2) $(CC45FLAGS) -c $< -o $@ 2>&1 | grep -v 'note:\|^ *[0-9]* |\|^ *|' || true
 
 .PHONY: all run shot test fonts clean
 .DEFAULT_GOAL := all
 
 all: $(DISK)
 
-$(TARGET): src/wp.bas $(CSRC) $(HEADERS)
+$(TARGET): src/wp.bas $(OBJS)
 	@mkdir -p $(BUILD)
-	$(BASIC45) $(foreach f,$(CSRC),--link $(f)) --report src/wp.bas -o $@
+	$(BASIC45) $(foreach f,$(OBJS),--link $(f)) --report src/wp.bas -o $@
 
 $(DISK): $(TARGET) src/writer.fnt $(BUILD)/help.prg
 	rm -f $@

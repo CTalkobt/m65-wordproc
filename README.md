@@ -51,7 +51,7 @@ keyboard buffer and saves a screenshot, e.g.
 | CTRL + cursor keys | start a selection at the cursor, or extend the one there is |
 | F10 / F11 / F12 | copy / cut / paste |
 | F8 or HELP | the help (`WRITER.HELP`) as the document (after asking about unsaved changes) |
-| ESC | menu: New, Load, Save, Import text, Export text, Directory, Help, Redraw, Quit (ESC also ends a selection) |
+| ESC | menu: New, Load, Save, Import, Export (plain text, or Markdown for a name ending in `.md`), Directory, Help, Redraw, Quit (ESC also ends a selection) |
 | CTRL+L | redraw the whole screen |
 
 Styles and fonts apply to the selection, or to what you type next.
@@ -60,17 +60,20 @@ Styles and fonts apply to the selection, or to what you type next.
 
 | Part | Language | Does |
 |------|----------|------|
-| `src/wp.bas` | BASIC 65 | the main loop (GET and what each key means; idle time handed to C), the menu, file-name prompts and confirmations, all disk work (`BLOAD` / `BSAVE` documents and fonts, `DOPEN` + `FREAD#` / `FWRITE#` text import and export, `DIR`), loading the help document, error trapping |
+| `src/wp.bas` | BASIC 65 | the main loop (GET and what each key means; idle time handed to C), the menu, file-name prompts and confirmations, all disk work (`BLOAD` / `BSAVE` documents and fonts, `DOPEN` + `FREAD#` / `FWRITE#` text and Markdown import and export, `DIR`), loading the help document, error trapping |
 | `src/doc.c` | C | the document: two parallel arrays in bank 5 (text, an attribute byte per character), insert and delete by DMA, styles, alignment, clipboard, the file image |
 | `src/layout.c` | C | line breaking for both views, justification, pagination, raw-view tags, cursor ↔ position mapping; incremental and lazy (below) |
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
 | `src/m65.c` | C | the VIC-IV screen mode, DMA and colour RAM |
+| `src/md.c` | C | Markdown export and import (below) |
 | `src/api.c` | C | the functions BASIC calls with `SYS {name}, a` (and reads with `RREG`) |
 | `tools/helpdoc.c`, `tools/mkhelp.c` | C (host) | the help document, written as a Writer file by the C half itself |
 | `tests/` | C (host) | the C half on the PC: editing, files, layout (incremental = from scratch), drawing (cached = full redraw), fuzzed |
 
-`basic45 --link` compiles the C files with cc45 and links them right after
-the BASIC program in one `.prg`. BASIC passes strings (messages, the file
+The Makefile compiles the C files with cc45 (`-O2` for the drawing, which
+does the most work on every key; `-O1` for the rest, layout included,
+which cc45 makes much smaller: md.c is 8.2 KB at `-O2`, 6.3 KB at `-O1`)
+and `basic45 --link` links them right after the BASIC program in one `.prg`. BASIC passes strings (messages, the file
 name) by `POKE`ing them into C buffers (`{msg}`, `{fname}`).
 
 ### Speed
@@ -85,13 +88,16 @@ name) by `POKE`ing them into C buffers (`{msg}`, `{fname}`).
 - **Drawing** is cached: each band of screen rows (a line, blank page, desk,
   a page number) has a hash of what it shows; a band the same as in the
   last frame, in the same place, is not drawn again. The bars are redrawn
-  only when their text changes. The hash is two 8-bit running sums
+  only when their text changes. The hash is two 16-bit running sums
   (Fletcher-style: two adds a byte, no table): one byte changed, or two
-  neighbours swapped, always changes it; other changes could, rarely,
-  leave a line showing its old text, which CTRL+L (redraw) puts right.
+  neighbours swapped, always changes it; a 16-bit hash (two 8-bit sums, or
+  a CRC-16) let a line in some ten thousand changed ones show its old text
+  in the host tests' random editing. Should one ever, CTRL+L redraws all.
 
 About 10 ms a key in a short document and 80 ms in one of 10,000
-characters (40 MHz, measured in xemu).
+characters (40 MHz, measured in xemu), and some 5-8 % more since the
+layout is compiled with `-O1` and the raw font is fetched by DMA (to make
+room for Markdown).
 
 ### The screen
 
@@ -107,11 +113,11 @@ the C64's. Each cell has its own colour (text, desk, tags, bars).
 |---------|------|-----|
 | `$40000` | 32000 | the bitmap |
 | `$48000` | 8000 | the screen (16-bit cells) |
-| `$4A000` | 12 KB | the document fonts' glyphs and glyph offsets (`WRITER.FNT`, ~10 KB) |
+| `$4A000` | 12 KB | the fonts' glyphs and the document fonts' glyph offsets (`WRITER.FNT`, 11 KB) |
 | `$4D000` | 12 KB | the line table (1024 lines) |
 | `$50000` | 15000 | document text |
 | `$53B00` | 15000 | document attributes |
-| `$57600` | 30 KB | scratch: insertion bounce buffer, file image |
+| `$57600` | 30 KB | scratch: insertion bounce buffer, file image, text and Markdown files |
 | `$5EC00` | 5 KB | clipboard |
 
 ### Files
@@ -119,7 +125,42 @@ the C64's. Each cell has its own colour (text, desk, tags, bars).
 A document (`S`ave / `L`oad) is a PRG file: `"WP"`, version 1, the length
 (2 bytes), the text, then the attributes. The attribute byte: bits 0-1 font,
 2 bold, 3 italic, 4 underline; on a paragraph's CR (or page break) bits 5-6
-its alignment. Import / Export use plain sequential PETSCII files.
+its alignment. Import / Export use sequential files: plain PETSCII text, or
+Markdown when the name ends in `.md`.
+
+### Markdown
+
+Export (`src/md.c`, `md_export`) writes UTF-8-compatible ASCII with LF line
+ends; Import reads it back (up to 30 KB) and Markdown from elsewhere.
+
+| Writer | Markdown |
+|--------|----------|
+| a paragraph | a line; paragraphs one after another with no empty one between them (and the same alignment) are one Markdown paragraph with hard breaks (`\` at the line's end); others are blocks with a blank line between |
+| a paragraph all in Head | `# ` heading (import: any level, and setext `===` / `---` underlines) |
+| a paragraph all in Mono, unstyled | a fenced code block; one line a paragraph |
+| bold, italic, underline | `**…**`, `*…*`, `<u>…</u>` |
+| Mono inside a paragraph | `` `…` `` |
+| centre, right, justify | `<div align="center">` … `</div>` around the block |
+| page break | `<div style="page-break-after: always"></div>` |
+| Serif; Head inside a paragraph | (nothing in Markdown: plain text) |
+
+Markup characters in the text are escaped with `\` (only where Markdown
+would read them: `*`, `_`, `` ` ``, `[`, `]`, `\`, `~` everywhere; `#`, `>`, `-`,
+`+`, `=` and a number's `.` at a paragraph's start; `<` and `&` before a
+name), and spaces at a paragraph's start are `&nbsp;`; empty paragraphs are
+not written (blocks are separated by blank lines instead).
+
+Import also takes lists and quotes (their markers kept as text, an item a
+paragraph), links (`[text](url)` becomes "text (url)", an image its text),
+`<br>`, the common entities, and UTF-8: accented letters lose their accents
+(ä → a, ß → ss), curly quotes, dashes and the ellipsis become ASCII, others
+`?`. It puts an empty paragraph between blocks (not after a heading).
+Emphasis is paired within a paragraph; an unpaired `*` or `_` is text.
+
+Tests (`make test`): the help and 300 random documents (each `SEED`)
+exported, imported and exported again give the same Markdown; Markdown
+from elsewhere imported as expected. The exported random documents were
+also checked with markdown-it (CommonMark): their text comes out exactly.
 
 ### Fonts
 
@@ -133,7 +174,7 @@ then where each glyph starts).
 ## Limits
 
 - 15000 characters (about 2500 words) and 1024 laid-out lines a document;
-  a 2560-character clipboard; imported text up to 14 KB.
+  a 2560-character clipboard; imported text up to 14 KB, Markdown 30 KB.
 - No undo, no printing (yet).
 
 ## MEGA65 details worth knowing
@@ -156,7 +197,10 @@ then where each glyph starts).
   does. It has to be below `$2000`: BASIC 65 runs with its ROM mapped over
   `$2000`-`$BFFF`. Q)uit puts both back.
 - **Bank 0**: the BASIC program, the C code and its data must end below
-  `$C000`, so the glyph bitmaps live in bank 4 (`WRITER.FNT`), the help is a
+  `$C000`; with Markdown it is full (about 300 bytes left). So the glyph
+  bitmaps (the raw-view font's too, fetched by DMA) live in bank 4
+  (`WRITER.FNT`), the C files that do not run on every key are compiled
+  with `-O1`, the help is a
   document on the disk rather than text in the program, and the C half
   reads a line of the line table (bank 4) whole with one DMA (`get_line`)
   rather than field by field: with cc45 each far `LINES[l].field` costs

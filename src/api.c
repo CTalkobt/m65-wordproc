@@ -4,7 +4,8 @@
  *   wp_key(k)        an editing key (its PETSCII code from GET): text, RETURN,
  *                    DEL, INST, the cursor keys, HOME, CLR, TAB
  *   wp_cmd(c)        a command (CMD_...: styles, view, selection, clipboard, ...)
- *   wp_get(w)        a value for BASIC (RREG lo, hi): GET_...
+ *   wp_get(w)        a value for BASIC (RREG lo, hi): GET_... (files: the
+ *                    image, plain text or Markdown at SCRATCH_LIN)
  *   wp_setmsg        msg (poked by BASIC as PETSCII) shown in the bottom bar
  *   wp_setname       fname (PETSCII) as the document's name
  *   wp_video(on)     1: the graphics screen (again, after the disk or text
@@ -40,6 +41,8 @@
 #define GET_SEL 5
 #define GET_IMPORT_PREP 6
 #define GET_IMPORT 7
+#define GET_MDEXPORT 8
+#define GET_MDIMPORT 9
 
 static u8 started;
 /* BASIC reads this before its first SYS (before BSS is cleared), so it is
@@ -290,10 +293,12 @@ u16 wp_get(u8 w) {
     }
     case GET_SEL: return sel_on;
     case GET_IMPORT_PREP:
-        mem_fill(SCRATCH_LIN, DOC_MAX, 0);
+        mem_fill(SCRATCH_LIN, 30720u, 0);       /* (all the scratch area: Markdown is longer) */
         return 0;
-    case GET_IMPORT: {
-        u16 n = doc_import();
+    case GET_MDEXPORT: return md_export();
+    case GET_IMPORT:
+    case GET_MDIMPORT: {
+        u16 n = w == GET_IMPORT ? doc_import() : md_import();
         refresh(1);
         return n;
     }
