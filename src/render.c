@@ -7,17 +7,13 @@
  * baseline, underline a row two below the baseline.
  */
 #include "wp.h"
+#ifdef __cc45__
+#include "buildid.h"             /* BUILD_ID (made by the Makefile) */
+#endif
 
 char msg[81];
 char fname[17];
 
-static u8 band[BAND_H * COLS];
-static u8 row_desk[COLS];       /* the desk between pages */
-static u8 row_page[COLS];       /* a page's blank row: desk at the sides */
-static u8 row_blank[COLS];
-static u8 rowcol[ROWS];         /* each cell row's colour scheme (0xFF: unknown) */
-static u8 cellcol[COLS];
-static u8 desk_row[ROWS];
 static u8 inited;
 
 /* What was drawn where: a segment of the view (a line's band, blank page,
@@ -34,9 +30,42 @@ struct seg {
     u16 sy, n;
     u8 kind, r0;
 };
-static struct seg segs[2][MAXSEG];     /* this frame's and the last one's, in screen order */
 static u8 nseg[2], set, prev_i;
-static char bar_text[2][COLS + 2];     /* what each bar shows ("" : unknown) */
+
+/* The drawing's buffers and caches, all remade after a full redraw (the
+ * rows by init_rows, the rest drawn or marked unknown by render_invalidate),
+ * share their memory with the module region (mod_area): a module (an .OVL
+ * file: Markdown, ...) is loaded there by BASIC, run by mod_run, and the
+ * screen then drawn again. */
+union mod_area {
+    struct {
+        u8 band[BAND_H * COLS];
+        struct seg segs[2][MAXSEG];    /* this frame's and the last one's, in screen order */
+        char bar_text[2][COLS + 2];    /* what each bar shows ("" : unknown) */
+        u8 row_desk[COLS];             /* the desk between pages */
+        u8 row_page[COLS];             /* a page's blank row: desk at the sides */
+        u8 row_blank[COLS];
+        u8 rowcol[ROWS];               /* each cell row's colour scheme (0xFF: unknown) */
+        u8 cellcol[COLS];
+        u8 desk_row[ROWS];
+        u8 gbuf[48];                   /* a glyph's rows, copied from bank 4 */
+        char sb[COLS + 1];             /* a bar's text */
+    } r;
+    u8 m[MOD_SIZE];
+} mod_area;
+/* (as &...[0]: cc45 loses the high byte of an array member's address
+ * when an integer is added to it, as in band + COLS + col) */
+#define band (&mod_area.r.band[0])
+#define segs mod_area.r.segs
+#define bar_text mod_area.r.bar_text
+#define row_desk (&mod_area.r.row_desk[0])
+#define row_page (&mod_area.r.row_page[0])
+#define row_blank (&mod_area.r.row_blank[0])
+#define rowcol (&mod_area.r.rowcol[0])
+#define cellcol (&mod_area.r.cellcol[0])
+#define desk_row (&mod_area.r.desk_row[0])
+#define gbuf (&mod_area.r.gbuf[0])
+#define sb (&mod_area.r.sb[0])
 
 extern u8 npages;
 
@@ -57,10 +86,30 @@ static void init_rows(void) {
 }
 
 void render_invalidate(void) {
-    u16 i;
-    for (i = 0; i < ROWS; i++) rowcol[i] = 0xFF;
+    inited = 0;                 /* (init_rows: the rows, rowcol unknown) */
     nseg[0] = nseg[1] = 0;
     bar_text[0][0] = bar_text[1][0] = 0;
+}
+
+/* Run the module BASIC loaded into mod_area (cmd: what it is to do; its
+ * result, or 0xFFFF when there is none, or it is from another build). It
+ * starts "WM", the build's id, then a JMP to its mod_main. The header is
+ * cleared after it: the drawing soon overwrites the rest. */
+u16 mod_run(u8 cmd) {
+    mod_ret = 0xFFFF;
+#ifdef __cc45__
+    if (mod_area.m[0] == 'W' && mod_area.m[1] == 'M' &&
+        mod_area.m[2] == (u8)BUILD_ID && mod_area.m[3] == (u8)(BUILD_ID >> 8)) {
+        mod_cmd = cmd;
+        ((void (*)(void))&mod_area.m[4])();
+    }
+    mod_area.m[0] = 0;
+#else
+    mod_cmd = cmd;
+    mod_main();
+#endif
+    render_invalidate();
+    return mod_ret;
 }
 
 static void new_frame(void) {
@@ -139,7 +188,6 @@ static u32 line_hash(u16 l, const struct line *L) {
 }
 
 
-static u8 gbuf[48];             /* a glyph's rows, copied from bank 4 */
 
 /* ---- drawing into the band ---- */
 static void band_fill(u8 rows, const u8 *pattern) {
@@ -251,7 +299,6 @@ static void rows_out(u16 sy, u16 n, const u8 *pattern) {
 }
 
 /* ---- text for the bars and the page numbers: put into sb (sn long) ---- */
-static char sb[COLS + 1];
 static u8 sn;
 
 static void put_str(const char *s) {

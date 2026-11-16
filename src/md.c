@@ -599,3 +599,8 @@ u16 md_import(void) {
     doc_loaded(1);
     return (u16)(doc_len - 1);
 }
+
+/* MARKDOWN.OVL's entry (mod_run): export or import */
+void mod_main(void) {
+    mod_ret = mod_cmd == MOD_MD_EXPORT ? md_export() : md_import();
+}

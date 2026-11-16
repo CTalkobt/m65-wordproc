@@ -87,7 +87,8 @@ static const struct run help[] = {
             "          Markdown for a name ending .md)\r"
             "D directory   H this help   Q quit\r"
             "R redraw the screen (also CTRL+L)\r" },
-    { 0, "Saved Writer documents keep their fonts and styles.\r" },
+    { 0, "Saved Writer documents keep their fonts and styles. "
+         "Markdown is read and written by MARKDOWN.OVL, when it is on the disk.\r" },
 };
 
 void doc_load_help(void) {

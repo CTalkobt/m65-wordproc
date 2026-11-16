@@ -262,10 +262,16 @@ proc importtext
         p = p + 1
       loop until st <> 0 or p >= 30
       dclose#2
+      ' (Markdown: by MARKDOWN.OVL, loaded last: drawing overwrites it)
+      ml = 1 : lo = 0 : hi = 0
+      if md then call loadmd
+      if ml then sys {wp_get}, GET_IMPORT + md * (GET_MDIMPORT - GET_IMPORT) : rreg lo, hi
       sys {wp_video}, 1
-      sys {wp_get}, GET_IMPORT + md * (GET_MDIMPORT - GET_IMPORT) : rreg lo, hi
-      fi$ = p"untitled" : call setname
-      call say(p"Imported " + mid$(str$(lo + 256 * hi), 2) + p" characters.")
+      call modsaid
+      if ok then
+        fi$ = p"untitled" : call setname
+        call say(p"Imported " + mid$(str$(lo + 256 * hi), 2) + p" characters.")
+      endif
     endif
   endif
 endproc
@@ -275,15 +281,17 @@ proc exporttext
   call ask(p"Export text as (name.md: Markdown): ")
   if ok and a$ <> "" then
     call ismd
+    ml = 1 : lo = 0 : hi = 0
     if md then
-      sys {wp_get}, GET_MDEXPORT : rreg lo, hi
+      call loadmd
+      if ml then sys {wp_get}, GET_MDEXPORT : rreg lo, hi
     else
       sys {wp_get}, GET_EXPORT : rreg lo, hi
     endif
     n = lo + 256 * hi
-    if n = 0 then
-      call say(p"Too long for Markdown (more than 30 KB).")
-    else
+    call modsaid
+    if ok and n = 0 then call say(p"Too long for Markdown (more than 30 KB).") : ok = 0
+    if ok then
       scratch (a$)
       dopen#2, (a$), w
       fwrite#2, $57600, n
@@ -292,6 +300,28 @@ proc exporttext
       call say(p"Exported " + mid$(str$(n), 2) + p" bytes to " + a$ + ".")
     endif
   endif
+endproc
+
+' ---- modules: .OVL files on the disk, each loaded when it is needed into
+' the C half's module region (mod_area, where the drawing keeps its
+' buffers) and run at once (SYS {wp_get}, ...): Markdown (MARKDOWN.OVL) ----
+
+' ml: 1 when MARKDOWN.OVL loaded
+proc loadmd
+  ml = 0
+  trap nomd
+  bload "markdown.ovl", b0, p({mod_area})
+  ml = 1
+mdback:
+  trap errh
+endproc
+
+' after a module's run: ok 0 when it said why there was none (ml, and
+' lo / hi 255: the module from another build of Writer)
+proc modsaid
+  ok = 1
+  if ml = 0 then call say(p"Markdown needs MARKDOWN.OVL on the disk.") : ok = 0
+  if lo = 255 and hi = 255 then call say(p"MARKDOWN.OVL is from another version of Writer.") : ok = 0
 endproc
 
 ' md: 1 when a$ ends in .md (either case)
@@ -344,6 +374,11 @@ helpback:
     endif
   endif
 endproc
+
+' no MARKDOWN.OVL
+nomd:
+  ml = 0
+  resume mdback
 
 ' no help document for F8 / HELP: said so
 nohelp:

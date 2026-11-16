@@ -25,9 +25,11 @@ make test       # the C half on the host (gcc): editing, layout, files; build/*.
 
 On a MEGA65: copy `build/writer.d81` to the SD card, mount it, then
 `DLOAD "WRITER"` and `RUN`. The disk holds `WRITER` (the program),
-`WRITER.FNT` (the fonts' glyphs, loaded by the program) and `WRITER.HELP` (the
+`WRITER.FNT` (the fonts' glyphs, loaded by the program), `WRITER.HELP` (the
 help: a Writer document shown when the program starts and again with F8 / HELP;
-without it the program starts with an empty document).
+without it the program starts with an empty document) and `MARKDOWN.OVL`
+(Markdown import and export, a module: without it the rest works, and a
+`.md` name gets "Markdown needs MARKDOWN.OVL on the disk").
 
 `tools/xemu_run.py` runs it headless in xemu, types keys into the KERNAL's
 keyboard buffer and saves a screenshot, e.g.
@@ -65,9 +67,10 @@ Styles and fonts apply to the selection, or to what you type next.
 | `src/layout.c` | C | line breaking for both views, justification, pagination, raw-view tags, cursor ↔ position mapping; incremental and lazy (below) |
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
 | `src/m65.c` | C | the VIC-IV screen mode, DMA and colour RAM |
-| `src/md.c` | C | Markdown export and import (below) |
+| `src/md.c` | C | Markdown export and import (below): the module `MARKDOWN.OVL` |
 | `src/api.c` | C | the functions BASIC calls with `SYS {name}, a` (and reads with `RREG`) |
 | `tools/helpdoc.c`, `tools/mkhelp.c` | C (host) | the help document, written as a Writer file by the C half itself |
+| `tools/mkmod.py` | Python | links a module against the program (below) |
 | `tests/` | C (host) | the C half on the PC: editing, files, layout (incremental = from scratch), drawing (cached = full redraw), fuzzed |
 
 The Makefile compiles the C files with cc45 (`-O2` for the drawing, which
@@ -75,6 +78,47 @@ does the most work on every key; `-O1` for the rest, layout included,
 which cc45 makes much smaller: md.c is 8.2 KB at `-O2`, 6.3 KB at `-O1`)
 and `basic45 --link` links them right after the BASIC program in one `.prg`. BASIC passes strings (messages, the file
 name) by `POKE`ing them into C buffers (`{msg}`, `{fname}`).
+
+### Modules
+
+Features that run now and then, as one job over the document, are
+modules: `.OVL` files on the disk, each loaded only when it is used, so a
+user who has no use for one leaves it off the disk and the program does
+not need the room for it. Markdown (`MARKDOWN.OVL`, from `src/md.c`) is
+the first; PETSCII graphics, PDF export, find and replace or a word count
+would fit the same way (features that work on every key, such as undo or
+a list view, do not: they belong in the program).
+
+- **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 7 KB in
+  bank 0), which is also where the drawing keeps its buffers and caches
+  (the band, the redraw cache, the bars' text, the row patterns: 3.4 KB),
+  all remade after a full redraw. So a module costs bank 0 only what it
+  needs beyond those, once for all modules.
+- **Running it**: BASIC `BLOAD`s it into `mod_area` (`bload
+  "markdown.ovl", b0, p({mod_area})`, under `TRAP`: no file, no module)
+  just before `SYS {wp_get}, ...` runs it, with nothing drawn between.
+  `mod_run` checks its header (`"WM"`, the build's ID), calls its
+  `mod_main` (what to do in `mod_cmd`, the result in `mod_ret`), then
+  marks the drawing's caches unknown so the next frame redraws all;
+  65535 tells BASIC there was none or it is from another build.
+- **Building it** (`tools/mkmod.py`, from the Makefile): the module's C
+  files are compiled as any other; basic45 links the program (with `-v`,
+  and `BASIC45_KEEP_TMP` keeping its link's inputs in `build/tmp`), and
+  mkmod.py runs that `ln45` again for the program's map, writes the
+  program's symbols the module uses as equates (its functions and
+  variables, the run time: the module calls into the program and has no
+  copy of what the program has) and the header, links the module at
+  `mod_area`, and checks that it fits in `MOD_SIZE`. The build's ID is a
+  checksum of the sources and the tools (`build/buildid.h`), so a module
+  is only run by the program it was linked with.
+- **The base page**: cc45 keeps the most used variables of functions that
+  make calls in the program's base page ($80-$F1, placed by ln45). The
+  module's header says it uses all of the register pool, so its blocks
+  start at $80, and mkmod.py checks them against the program's blocks
+  that are live while the module runs (those of the functions that lead
+  to `mod_run`, and of every program function the module calls, and
+  theirs): no byte shared. (Should one ever be, compile that module with
+  `-fno-zp-locals`, at some 20 % more code.)
 
 ### Speed
 
@@ -130,8 +174,9 @@ Markdown when the name ends in `.md`.
 
 ### Markdown
 
-Export (`src/md.c`, `md_export`) writes UTF-8-compatible ASCII with LF line
-ends; Import reads it back (up to 30 KB) and Markdown from elsewhere.
+Export (`src/md.c`, `md_export`, in the module `MARKDOWN.OVL`) writes
+UTF-8-compatible ASCII with LF line ends; Import reads it back (up to
+30 KB) and Markdown from elsewhere.
 
 | Writer | Markdown |
 |--------|----------|
@@ -197,8 +242,9 @@ then where each glyph starts).
   does. It has to be below `$2000`: BASIC 65 runs with its ROM mapped over
   `$2000`-`$BFFF`. Q)uit puts both back.
 - **Bank 0**: the BASIC program, the C code and its data must end below
-  `$C000`; with Markdown it is full: the C data ends at `$BF00`, rounded up to
-  a page, which leaves only the 256-byte CPU stack below `$C000`. So the glyph
+  `$C000` (the CPU stack is the page below it). With Markdown in the
+  program it was full; as a module (above) the C data ends at `$B600`,
+  leaving 2.5 KB. The glyph
   bitmaps (the raw-view font's too, fetched by DMA) live in bank 4
   (`WRITER.FNT`), the C files that do not run on every key are compiled
   with `-O1`, the help is a
@@ -207,3 +253,9 @@ then where each glyph starts).
   rather than field by field: with cc45 each far `LINES[l].field` costs
   about 60 bytes of code
   ([M65Compiler #585](https://github.com/CTalkobt/M65Compiler/issues/585)).
+- **cc45 and array members**: when an integer is added to an array that is
+  a member of a global struct or union (`s.a + n`, `u.m + 4`), cc45 keeps
+  only the low byte of its address (the high byte becomes 0: the pointer
+  lands in page 0). Indexing (`s.a[i]`) and `&s.a[i]` are right, so
+  render.c names the buffers in `mod_area` as `&mod_area.r.band[0]` and
+  so on.

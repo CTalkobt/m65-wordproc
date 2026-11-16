@@ -13,6 +13,8 @@ Each step, in order, after the program has started:
     text:STRING         the string's characters as GET gives them (letters:
                         lower case $41-$5A, capitals $C1-$DA; "|" is RETURN)
     peek:ADDR:N         print N bytes at the 28-bit address (hex)
+    mon:CMD             a monitor command, its answer printed (e.g. mon:r,
+                        the CPU's registers)
     poke:ADDR:B,B,...   write bytes (hex) there; e.g. poke:ffd3615:3a,2 holds
                         CTRL and cursor right (the virtual keys $D615/$D616:
                         matrix positions; 7f: none)
@@ -135,6 +137,8 @@ def main():
                 # poke:ADDR:B,B,...  (28-bit addresses reach the I/O: ffd3615 = $D615)
                 a, _, bs = arg.partition(":")
                 monitor(sock, "s%s %s" % (a, " ".join(bs.split(","))))
+            elif kind == "mon":
+                print(monitor(sock, arg).strip())
             elif kind == "peek":
                 a, _, n = arg.partition(":")
                 b = peek(sock, int(a, 16), int(n or "16"))

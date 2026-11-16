@@ -191,6 +191,17 @@ u16 doc_import(void);           /* PETSCII text at SCRATCH_LIN as the document *
 void doc_loaded(u8 d);          /* after a load / import: the final CR, the cursor at the start; d: changed */
 u16 md_export(void);            /* Markdown at SCRATCH_LIN; its size (0: too long) */
 u16 md_import(void);            /* Markdown at SCRATCH_LIN as the document; its length */
+
+/* ---- modules (.OVL files, loaded by BASIC into mod_area: render.c) ----
+ * A module is built apart (Makefile: linked at mod_area against the
+ * program's map) and is at most MOD_SIZE bytes, code, data and variables. */
+#define MOD_SIZE 7168
+#define MOD_MD_EXPORT 0                 /* MARKDOWN.OVL: md_export */
+#define MOD_MD_IMPORT 1                 /* MARKDOWN.OVL: md_import */
+extern u8 mod_cmd;                      /* what mod_main is to do */
+extern u16 mod_ret;                     /* its result */
+u16 mod_run(u8 cmd);                    /* run the module loaded; 0xFFFF: none */
+void mod_main(void);                    /* a module's entry (md.c) */
 u16 para_end(u16 i);            /* the CR / FF ending the paragraph of i */
 u8 attr_at_cursor(void);
 u16 sel_lo(void);

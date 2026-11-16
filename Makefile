@@ -1,6 +1,7 @@
 # MEGA65 Writer — a word processor in BASIC 65 and C (the cc45 toolchain)
 #
-#   make            build/writer.prg and build/writer.d81
+#   make            build/writer.prg, its modules (build/*.ovl) and
+#                   build/writer.d81
 #   make run        build and start it in xemu
 #   make shot       build and save a screenshot (build/writer.png, headless xemu;
 #                   tools/xemu_run.py can also type keys first)
@@ -37,30 +38,58 @@ HEADERS = src/wp.h
 # the drawing (the most work on every key), -O1 for the rest, layout
 # included, which cc45 makes much smaller (md.c: 8.2 KB at -O2, 6.3 KB at
 # -O1): bank 0 is full.
-CC45FLAGS = -I$(CC45_ROOT)/lib/include -Isrc
+CC45FLAGS = -I$(CC45_ROOT)/lib/include -Isrc -I$(BUILD)
 FAST    = render m65 fonts
-SMALL   = api doc md layout
+SMALL   = api doc layout
 OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45)
+CCQUIET = 2>&1 | grep -v 'note:\|^ *[0-9]* |\|^ *|' || true
 
 $(BUILD)/obj/%.o45: src/%.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
-	$(CC45) $(if $(filter $*,$(SMALL)),-O1,-O2) $(CC45FLAGS) -c $< -o $@ 2>&1 | grep -v 'note:\|^ *[0-9]* |\|^ *|' || true
+	$(CC45) $(if $(filter $*,$(SMALL)),-O1,-O2) $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
 
-.PHONY: all run shot test fonts clean
+# (basic45 -v logs its ln45 command, and BASIC45_KEEP_TMP keeps that link's
+# inputs in build/tmp: tools/mkmod.py links again for the program's map.)
+#
+# Modules (.OVL files, loaded by BASIC when used and only when on the disk):
+# linked by tools/mkmod.py to run at the program's mod_area, against its
+# map; the build's ID (of the sources and the tools) ties each to the
+# program it was linked with (render.c's mod_run refuses another's).
+MODS    = $(BUILD)/markdown.ovl
+BUILD_ID := $(shell cat src/*.c src/*.h src/wp.bas tools/mkmod.py $(CC45) $(CC45_ROOT)/bin/ln45 2>/dev/null | cksum | awk '{print $$1 % 65536}')
+
+$(BUILD)/buildid.h: FORCE
+	@mkdir -p $(BUILD)
+	@echo '#define BUILD_ID $(BUILD_ID)u' > $@.new
+	@cmp -s $@.new $@ && rm $@.new || mv $@.new $@
+
+$(BUILD)/obj/render.o45: $(BUILD)/buildid.h
+
+$(BUILD)/obj/md_mod.o45: src/md.c $(HEADERS)
+	@mkdir -p $(BUILD)/obj
+	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+
+$(BUILD)/markdown.ovl: $(TARGET) $(BUILD)/obj/md_mod.o45 tools/mkmod.py
+	python3 tools/mkmod.py $(BUILD)/link.log $@ $(BUILD_ID) $(BUILD)/obj/md_mod.o45
+
+.PHONY: all run shot test fonts clean FORCE
 .DEFAULT_GOAL := all
 
 all: $(DISK)
 
 $(TARGET): src/wp.bas $(OBJS)
 	@mkdir -p $(BUILD)
-	$(BASIC45) $(foreach f,$(OBJS),--link $(f)) --report src/wp.bas -o $@
+	@rm -rf $(BUILD)/tmp && mkdir -p $(BUILD)/tmp
+	BASIC45_KEEP_TMP=1 TMPDIR=$(abspath $(BUILD)/tmp) $(BASIC45) -v $(foreach f,$(OBJS),--link $(f)) --report src/wp.bas -o $@ 2>$(BUILD)/link.log || (cat $(BUILD)/link.log; false)
+	@grep -v '^\[basic45:INFO\]\|note:' $(BUILD)/link.log || true
 
-$(DISK): $(TARGET) src/writer.fnt $(BUILD)/help.prg
+$(DISK): $(TARGET) src/writer.fnt $(BUILD)/help.prg $(MODS)
 	rm -f $@
 	$(DISK45) create $@ -n "WRITER" -i "65"
 	$(DISK45) add $@ $(TARGET) "WRITER"
 	$(DISK45) add $@ src/writer.fnt "WRITER.FNT"
 	$(DISK45) add $@ $(BUILD)/help.prg "WRITER.HELP"
+	$(DISK45) add $@ $(BUILD)/markdown.ovl "MARKDOWN.OVL"
 
 # the document shown at the start, made on the host by the C half itself
 $(BUILD)/mkhelp: tools/mkhelp.c tools/helpdoc.c tests/host.c $(PORTABLE) $(HEADERS)

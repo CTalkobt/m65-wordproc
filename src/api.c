@@ -5,7 +5,8 @@
  *                    DEL, INST, the cursor keys, HOME, CLR, TAB
  *   wp_cmd(c)        a command (CMD_...: styles, view, selection, clipboard, ...)
  *   wp_get(w)        a value for BASIC (RREG lo, hi): GET_... (files: the
- *                    image, plain text or Markdown at SCRATCH_LIN)
+ *                    image, plain text or Markdown at SCRATCH_LIN; Markdown
+ *                    by the module MARKDOWN.OVL, 65535 when it is not loaded)
  *   wp_setmsg        msg (poked by BASIC as PETSCII) shown in the bottom bar
  *   wp_setname       fname (PETSCII) as the document's name
  *   wp_video(on)     1: the graphics screen (again, after the disk or text
@@ -45,6 +46,8 @@
 #define GET_MDIMPORT 9
 
 static u8 started;
+u8 mod_cmd;
+u16 mod_ret;
 /* BASIC reads this before its first SYS (before BSS is cleared), so it is
  * data: $5A until BASIC has loaded writer.fnt and set it to $A5 */
 u8 fonts_loaded = 0x5A;
@@ -295,10 +298,10 @@ u16 wp_get(u8 w) {
     case GET_IMPORT_PREP:
         mem_fill(SCRATCH_LIN, 30720u, 0);       /* (all the scratch area: Markdown is longer) */
         return 0;
-    case GET_MDEXPORT: return md_export();
+    case GET_MDEXPORT: return mod_run(MOD_MD_EXPORT);
     case GET_IMPORT:
     case GET_MDIMPORT: {
-        u16 n = w == GET_IMPORT ? doc_import() : md_import();
+        u16 n = w == GET_IMPORT ? doc_import() : mod_run(MOD_MD_IMPORT);
         refresh(1);
         return n;
     }
