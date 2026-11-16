@@ -119,14 +119,24 @@ u8 kbd_mods(void) { return VIC(0xD611); }
 
 /* CTRL with a cursor key, held: its code. The matrix has one key for
  * right / left and one for down / up; left and up are those with SHIFT, or
- * the MEGA65's own left and up keys ($D60F bits 0, 1). */
+ * the MEGA65's own left and up keys ($D60F bits 0, 1).
+ *
+ * $D60F is checked first, on its own: the hardware sends the own left / up
+ * keys as SHIFT + CRSR-right / down, but whether the direct matrix scan
+ * ($D613) shows that virtual press is not confirmed on a real MEGA65 (xemu
+ * tests press SHIFT + the cursor key, not these keys). Were it not shown,
+ * the matrix test below would miss CTRL + left / up, and the plain left / up
+ * the KERNAL queues for them is ignored while CTRL is held (wp_key), so they
+ * would do nothing at all. */
 u8 kbd_ctrl_crsr(void) {
     u8 m = VIC(0xD611), lu = VIC(0xD60F), v;
     if (!(m & KM_CTRL)) return 0;
+    if (lu & 1) return 157;
+    if (lu & 2) return 145;
     VIC(0xD614) = 0;            /* the matrix's first 8 keys: DEL RETURN CRSR-H F7 F1 F3 F5 CRSR-V */
     v = VIC(0xD613);            /* (0: pressed) */
-    if (!(v & 0x04)) return (m & KM_SHIFT) || (lu & 1) ? 157 : 29;
-    if (!(v & 0x80)) return (m & KM_SHIFT) || (lu & 2) ? 145 : 17;
+    if (!(v & 0x04)) return m & KM_SHIFT ? 157 : 29;
+    if (!(v & 0x80)) return m & KM_SHIFT ? 145 : 17;
     return 0;
 }
 
