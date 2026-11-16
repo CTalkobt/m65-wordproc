@@ -59,6 +59,7 @@ keyboard buffer and saves a screenshot, e.g.
 | F8 or HELP | the help (`WRITER.HELP`) as the document (after asking about unsaved changes) |
 | ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text; Markdown for a name ending in `.md`, RTF for `.rtf`), Directory; Redraw, List on / off (with `LIST.OVL`), Help, Quit (ESC also ends a selection) |
 | CTRL+L | redraw the whole screen |
+| CTRL+A | Compose: the next two characters make an accented one (below) |
 
 Styles and fonts apply to the selection, or to what you type next.
 
@@ -68,6 +69,22 @@ without moving any of it: a dot for each space, ¶ at each paragraph's end
 (raw view shows it always), an arrow after a line the paragraph wraps
 from, trailing spaces (before a paragraph's end) as a block (raw view: red),
 and `~` in raw view's rows past the end. The keys are the same.
+
+**Accented characters** ([#1](https://github.com/CTalkobt/m65-wordproc/issues/1)):
+CTRL+A, then two characters, in either order, types a Latin-1 character:
+
+| Type | For | Type | For |
+|------|-----|------|-----|
+| `"a` `'e` `` `e `` `^o` `~n` | ä é è ô ñ (any letter that has it, capitals too) | `,c` `oa` | ç å |
+| `ss` `ae` `AE` `o/` | ß æ Æ ø | `<<` `>>` `??` `!!` | « » ¿ ¡ |
+| `co` `ro` `L-` `Y=` `c/` | © ® £ ¥ ¢ | `oo` `+-` `xx` `:-` `mu` | ° ± × ÷ µ |
+| `12` `14` `34` `1^` `2^` `3^` | ½ ¼ ¾ ¹ ² ³ | `so` `PP` `..` | § ¶ · |
+| `a_` `o_` `th` `d-` | ª º þ ð | two spaces | a no-break space |
+
+`` ` `` is SHIFT+@ (the keyboard has no key for it). The status bar says
+"Compose" while it waits; a pair the table does not have types nothing.
+The table is `tools/mkfonts.py`'s (`COMPOSE_MORE`, and every Latin-1
+letter with its accent), in `WRITER.FNT`.
 
 ## How it is split
 
@@ -218,26 +235,29 @@ the C64's. Each cell has its own colour (text, desk, tags, bars).
 |---------|------|-----|
 | `$40000` | 32000 | the bitmap |
 | `$48000` | 8000 | the screen (16-bit cells) |
-| `$4A000` | 12 KB | the fonts' glyphs and the document fonts' glyph offsets (`WRITER.FNT`, 11 KB) |
+| `$4A000` | 12 KB | `WRITER.FNT`'s first part: Head's glyphs and records, the raw font, the compose table |
 | `$4D000` | 12 KB | the line table (1024 lines) |
 | `$50000` | 15000 | document text |
 | `$53B00` | 15000 | document attributes |
 | `$57600` | 30 KB | scratch: insertion bounce buffer, file image, text and Markdown files |
 | `$5EC00` | 5 KB | clipboard |
+| `$FF83000` | 20 KB | colour RAM past the screen's cells (`$FF81000`-`$FF82F3F`): `WRITER.FNT`'s second part, Sans, Serif and Mono (12 KB) |
 
 ### Files
 
 A document (`S`ave / `L`oad) is a PRG file: `"WP"`, version 1, the length
-(2 bytes), the text, then the attributes. The attribute byte: bits 0-1 font,
+(2 bytes), the text (Latin-1: ASCII, and `$A0`-`$FF` for the accented
+characters; CR ends a paragraph, FF a page), then the attributes. The attribute byte: bits 0-1 font,
 2 bold, 3 italic, 4 underline; on a paragraph's CR (or page break) bits 5-6
-its alignment. Import / Export use sequential files: plain PETSCII text, or
-Markdown when the name ends in `.md`.
+its alignment. Import / Export use sequential files: plain PETSCII text
+(accents left out on export: PETSCII has none), Markdown when the name ends
+in `.md`, RTF for `.rtf`.
 
 ### Markdown
 
 Export (`src/md.c`, `md_export`, in the module `MARKDOWN.OVL`) writes
-UTF-8-compatible ASCII with LF line ends; Import reads it back (up to
-30 KB) and Markdown from elsewhere.
+UTF-8 with LF line ends; Import reads it back (up to 30 KB) and Markdown
+from elsewhere.
 
 | Writer | Markdown |
 |--------|----------|
@@ -258,8 +278,8 @@ not written (blocks are separated by blank lines instead).
 
 Import also takes lists and quotes (their markers kept as text, an item a
 paragraph), links (`[text](url)` becomes "text (url)", an image its text),
-`<br>`, the common entities, and UTF-8: accented letters lose their accents
-(ä → a, ß → ss), curly quotes, dashes and the ellipsis become ASCII, others
+`<br>`, the common entities, and UTF-8: Latin-1's characters (U+00A0-U+00FF)
+as they are; curly quotes, dashes, the ellipsis and € become ASCII, others
 `?`. It puts an empty paragraph between blocks (not after a heading).
 Emphasis is paired within a paragraph; an unpaired `*` or `_` is text.
 
@@ -274,7 +294,8 @@ Export (`src/rtf.c`, in the module `RTF.OVL`) is lossless for Writer's
 documents: a font table (`\f0` Sans `\fswiss`, `\f1` Serif `\froman`,
 `\f2` Mono `\fmodern`, `\f3` Head `\fswiss` at `\fs36`), `\b` `\i` `\ul`
 where they change, each paragraph as `\pard`, its alignment (`\ql` `\qc`
-`\qr` `\qj`) and `\par`, a page break as `\par\page`; `\ { }` escaped.
+`\qr` `\qj`) and `\par`, a page break as `\par\page`; `\ { }` escaped,
+accented characters as `\'hh` (`\ansicpg1252`, which has Latin-1's).
 
 Import reads the file 1 KB at a time (BASIC streams it to the module, so
 it may be larger than the scratch area): control words, control symbols,
@@ -283,8 +304,8 @@ family in `\fonttbl` (`\froman` Serif, `\fmodern` Mono, others Sans), a
 size of 14 pt or more is Head; `\b`, `\i`, the underlines, `\plain`,
 `\pard`, alignment; `\par`, `\line` and `\row` end a paragraph, `\page`
 ends a page; `\tab` and `\cell` are spaces; `\uN` (skipping `\ucN`
-characters after it) and `\'hh` (Windows-1252) become ASCII where there is
-one; `\binN` data is skipped. `\colortbl`, `\stylesheet`, `\info`,
+characters after it) and `\'hh` (Windows-1252) are Latin-1's characters, or ASCII
+for the punctuation it does not have; `\binN` data is skipped. `\colortbl`, `\stylesheet`, `\info`,
 pictures, headers, footers, footnotes and every `{\* ...}` group are left
 out, as are unknown control words. Writer's own RTF round-trips exactly
 (the host tests check it, and random documents); pandoc's imports with its
@@ -294,10 +315,21 @@ headings as Head and its code as Mono.
 
 `tools/mkfonts.py` rasterises DejaVu Sans 12, DejaVu Serif 12, Liberation
 Mono 13 and DejaVu Sans Bold 19 (1-bit, hinted, whole-pixel advances) and
-the X11 8×13 font for the raw view; `make fonts` rebuilds `src/fonts.c`
-(metrics and advance widths, kept in bank 0 for the layout; the raw font's
-glyphs, drawn the most) and `src/writer.fnt` (the document fonts' glyphs,
-then where each glyph starts).
+the X11 8×13 font for the raw view, codes 32-126 and Latin-1's
+`$A0`-`$FF`; `make fonts` rebuilds `src/fonts.c` (metrics, where each
+font's block is, and the advance widths of codes 32-128, kept in bank 0
+for the layout) and `src/writer.fnt`. Each font is one block: a 3-byte
+record for each code 32-255 (its advance, where its glyph starts; codes
+129-159 are `?`), then the glyphs; the raw font is 13 bytes a code. The
+blocks, with the compose table, do not fit bank 4's 12 KB together, so
+mkfonts.py places each, the largest first, in bank 4 or in colour RAM's
+last 20 KB (`HI_LIN`, `$FF83000`: every MEGA65 has 32 KB of colour RAM,
+and the screen's cells use only `$FF81000`-`$FF82F3F`). BASIC `BLOAD`s the
+file to the scratch area at the start and `font_install` copies the two
+parts by DMA. Layout reads a Latin-1 character's width from its record
+(far memory) rather than the bank-0 table. Mono's accented capitals lose
+their top pixel row, and Head's Æ is cut at 16 pixels, the widest a glyph
+can be.
 
 ## Limits
 
@@ -333,7 +365,8 @@ then where each glyph starts).
   lines joined, short names: 5378 bytes rather than 6115), so the C half
   starts at `$3600`. The converters' shared code (`conv.c`, above) and a
   smaller `mod_area` then left the C data ending at `$BB00`: 1024 bytes
-  free. (Its
+  free; the accented characters (#1: the Compose key, the glyph lookup)
+  took half of that, so it ends at `$BD00`. (Its
   two `poke`s of `$D1` / `$F7` are written in decimal: `--minify` turns
   `poke $d1` into a variable,
   [M65Compiler #603](https://github.com/CTalkobt/M65Compiler/issues/603).)

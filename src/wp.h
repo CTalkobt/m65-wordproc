@@ -1,7 +1,7 @@
 /* wp.h — MEGA65 Writer: the C half's shared definitions
  *
- * The document is two parallel arrays in bank 5: the text (ASCII, CR ends a
- * paragraph, FF a paragraph and its page) and one attribute byte per
+ * The document is two parallel arrays in bank 5: the text (Latin-1: ASCII
+ * and $A0-$FF; CR ends a paragraph, FF a paragraph and its page) and one attribute byte per
  * character (font, bold, italic, underline; a paragraph's alignment on its
  * CR / FF). The document always ends with a CR the user cannot delete.
  *
@@ -31,8 +31,8 @@ typedef uint32_t u32;
 
 /* ---- memory (28-bit linear addresses) ----
  * bank 4: $40000 the bitmap (4000 glyphs x 8 bytes), $48000 the screen
- *         (80 x 50 x 2), $4A000 the fonts' glyphs (writer.fnt, BLOADed by
- *         BASIC), $4D000 the layout's line table
+ *         (80 x 50 x 2), $4A000 writer.fnt's first part (font_install), $4D000
+ *         the layout's line table
  * bank 5: $50000 the text, $53B00 the attributes, $57600 the scratch area
  *         (insertions' bounce buffer; the file image BSAVE writes), $5EC00
  *         the clipboard (text, then attributes) */
@@ -44,7 +44,14 @@ typedef uint32_t u32;
 #define ATTR_LIN    0x53B00UL
 #define SCRATCH_LIN 0x57600UL
 #define CLIP_LIN    0x5EC00UL
-#define COLOR_OFS   0x1000u     /* our cells' colours in colour RAM */
+#define COLOR_OFS   0x1000u     /* our cells' colours in colour RAM ($FF81000-$FF82F3F) */
+/* the Latin-1 glyphs and the compose table: colour RAM's last 20 KB, which
+ * every MEGA65 has and nothing else uses (the host: bank 3 of MEM) */
+#ifdef __cc45__
+#define HI_LIN      0xFF83000UL
+#else
+#define HI_LIN      0x30000UL
+#endif
 
 #define DOC_MAX   15000u        /* characters, the final CR included */
 #define CLIP_MAX  2560u
@@ -104,16 +111,22 @@ enum { VIEW_PAGE = 0, VIEW_RAW = 1 };
 /* ---- fonts (fonts.c, made by tools/mkfonts.py) ---- */
 #define FONT_FIRST 32
 #define FONT_LAST 128
+#define FONT_HI 0xA0            /* Latin-1 $A0-$FF (issue #1); 129-159 are drawn as "?" */
 #define G_PILCROW 127
 #define G_BLOCK 128
 struct font {
     u8 height, ascent;
     const u8 *w;                /* advance of each code FONT_FIRST.. */
-    u32 offs;                   /* each glyph's first byte from bits: 2 bytes a code (FONT_LIN + ...) */
-    u32 bits;                   /* the glyphs (FONT_LIN + ...): rows of 1 byte (width <= 8) or 2 */
+    u32 offs;                   /* each code's record, 32-255 (FONT_LIN / HI_LIN + ...): its advance, its glyph's first byte from bits (2) */
+    u32 bits;                   /* the glyphs: rows of 1 byte (width <= 8) or 2 */
 };
 extern const struct font font_sans, font_serif, font_mono, font_head;
-extern const u32 font_raw_at;           /* the raw font's glyphs (8 x 13, 13 bytes each, from FONT_FIRST) in bank 4 */
+extern const u32 font_raw_at;           /* the raw font's glyphs (8 x 13, 13 bytes each, codes 32-255) */
+extern const u32 compose_at;            /* the compose table: 2 characters (both orders), a code; 0 at the end */
+extern const u16 font_lo_size, font_hi_size;    /* writer.fnt's parts, for FONT_LIN and HI_LIN */
+void font_install(void);                /* writer.fnt, BLOADed to SCRATCH_LIN, to FONT_LIN and HI_LIN */
+u32 raw_at(u8 c);                       /* the raw font's glyph of c */
+#define NO_GLYPH(c) ((c) < FONT_FIRST || ((c) > FONT_LAST && (c) < FONT_HI))   /* drawn as "?" */
 extern const struct font *const fonts[NFONTS];
 extern const char *const font_names[NFONTS];
 
@@ -220,7 +233,8 @@ extern u16 b_n;
 extern u8 b_attr, b_done;
 void build_start(void);
 void build_put(u8 c);
-void build_uni(u16 u);          /* a Unicode character as the document's (ASCII) */
+void build_uni(u16 u);          /* a Unicode character as the document's (Latin-1, or ASCII for some) */
+u8 as_ascii(u8 c);              /* a document character as ASCII (accents left out, else '?') */
 u16 build_end(void);            /* the final CR, doc_len, b_done; the length without the final CR */
 void doc_built(void);           /* after build_end (b_done): doc_loaded(1) (mod_run calls it) */
 

@@ -251,14 +251,12 @@ static void band_hline(u16 x0, u16 x1, u8 r) {
 /* glyph c of font f, its cell's top at band row top, at pixel x */
 static void draw_glyph(const struct font *f, u8 c, u16 x, u8 top, u8 style) {
     const u8 *g = gbuf;
-    u8 r, w, two, h = f->height, asc = f->ascent;
-    u32 oa;
-    if (c < FONT_FIRST || c > FONT_LAST) c = '?';
-    c -= FONT_FIRST;
-    w = f->w[c];
+    u8 r, w, two, h = f->height, asc = f->ascent, e[3];
+    if (NO_GLYPH(c)) c = '?';
+    mem_read(e, f->offs + (u16)((c - FONT_FIRST) * 3), 3);
+    w = e[0];
     two = w > 8;
-    oa = f->offs + (u16)(c * 2);
-    mem_read(gbuf, f->bits + (u16)(mem_get(oa) | (mem_get(oa + 1) << 8)), two ? (u16)(h * 2) : h);
+    mem_read(gbuf, f->bits + (u16)(e[1] | (e[2] << 8)), two ? (u16)(h * 2) : h);
     for (r = 0; r < h; r++) {
         u16 px = x;
         u8 b0 = *g++, b1 = 0, b2, sh, row = (u8)(top + r);
@@ -290,11 +288,15 @@ static void draw_glyph(const struct font *f, u8 c, u16 x, u8 top, u8 style) {
     }
 }
 
+u32 raw_at(u8 c) {
+    if (NO_GLYPH(c)) c = '?';
+    return font_raw_at + (u16)((c - FONT_FIRST) * 13);
+}
+
 /* raw font text at cell col (an 8 x 16 cell row band); inv 0xFF: inverted */
 static void raw_cell(u8 col, u8 c, u8 inv) {
     u8 r, *d = band + COLS + col;
-    if (c < FONT_FIRST || c > FONT_LAST) c = '?';
-    mem_read(gbuf, font_raw_at + (u16)((c - FONT_FIRST) * 13), 13);
+    mem_read(gbuf, raw_at(c), 13);
     for (r = 0; r < 13; r++) {
         d[0] = (u8)(gbuf[r] ^ inv);
         d += COLS;
@@ -636,5 +638,6 @@ u8 petscii_to_ascii(u8 c) {
     if (c == 0xDD) return '}';
     if (c == 0xDC) return '|';
     if (c == 0xDE) return '~';
+    if (c == 0xBA) return '`';          /* SHIFT + @ */
     return 0;
 }

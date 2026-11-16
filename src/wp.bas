@@ -48,6 +48,7 @@
 #define GET_RTFBEGIN 12
 #define GET_RTFCHUNK 13
 #define GET_RTFEND 14
+#define GET_FONTS 15
 
 ' LIST.OVL's place: mod_area + LIST_OFS (wp.h)
 #define LIST_OFS 3712
@@ -57,9 +58,11 @@
 
 start:
   print chr$(14);
-  ' the fonts' glyphs to bank 4, $A000 (FONT_LIN in wp.h): once
+  ' the fonts' glyphs, once: to the scratch area, then the C half copies
+  ' codes 32-128 to bank 4 (FONT_LIN in wp.h) and the Latin-1 ones and the
+  ' compose table to colour RAM (HI_LIN)
   bank 0 : fl = peek({fonts_loaded}) : bank 128
-  if fl <> 165 then print p"Loading fonts..." : bload "writer.fnt", b4, p(40960) : bank 0 : poke {fonts_loaded}, 165 : bank 128
+  if fl <> 165 then print p"Loading fonts..." : bload "writer.fnt", b5, p(IMG) : sys {wp_get}, GET_FONTS : bank 0 : poke {fonts_loaded}, 165 : bank 128
   ' F-keys give their codes, not their KEY macros: the Editor's lock bit
   ' (bit 5 of locks, $F7) as KEY OFF sets it, without KEY's wait for a
   ' pending macro ($D1) to drain, which never ends in a running program

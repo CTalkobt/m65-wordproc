@@ -53,6 +53,7 @@
 #define GET_RTFBEGIN 12
 #define GET_RTFCHUNK 13
 #define GET_RTFEND 14
+#define GET_FONTS 15
 
 static u8 started;
 u8 mod_cmd;
@@ -146,9 +147,59 @@ static u8 ctrl_key;
 
 static u8 is_crsr(u8 k) { return k == 29 || k == 157 || k == 17 || k == 145; }
 
+static void say(const char *m) {
+    u8 i;
+    for (i = 0; m[i]; i++) msg[i] = m[i];
+    msg[i] = 0;
+}
+
+static void typed(u8 c) {
+    if (doc_type(c)) say("The document is full.");
+}
+
+/* Compose (CTRL+A), then two characters: the Latin-1 character the compose
+ * table (writer.fnt: compose_at) gives them, in either order: "a -> a with
+ * its diaeresis, 'e, `e, ^e, ~n, oa, ,c, ss, ae, o/, << ... (issue #1) */
+#define K_COMPOSE 1
+static u8 compose, comp1;
+
+static u8 compose_find(u8 a, u8 b) {
+    u8 e[3];
+    u16 i = 0;
+    do {
+        mem_read(e, compose_at + i, 3);
+        if (e[0] == a && e[1] == b) return e[2];
+        i += 3;
+    } while (e[0]);
+    return 0;
+}
+
+/* writer.fnt, BLOADed to the scratch area: its parts to FONT_LIN, HI_LIN */
+void font_install(void) {
+    mem_copy(FONT_LIN, SCRATCH_LIN, font_lo_size);
+    mem_copy(HI_LIN, SCRATCH_LIN + font_lo_size, font_hi_size);
+}
+
 void wp_key(u8 k) {
     u8 c, relayout = 0, mv = 1;
     msg[0] = 0;
+    if (compose || k == K_COMPOSE) {
+        c = petscii_to_ascii(k);
+        if (!compose) {
+            compose = 1;
+        } else if (c && compose == 1) {
+            comp1 = c;
+            compose = 2;
+        } else {
+            compose = 0;
+            if (c) c = compose_find(comp1, c);
+            if (c) typed(c);
+            else say("No such character.");
+        }
+        if (compose) say("Compose");
+        refresh(1);
+        return;
+    }
     if (is_crsr(k)) {
         if (!ctrl_key) {
             if (kbd_mods() & KM_CTRL) return;
@@ -203,11 +254,7 @@ void wp_key(u8 k) {
     default:
         c = petscii_to_ascii(k);
         if (!c) return;
-        if (doc_type(c)) {
-            const char *m = "The document is full.";
-            for (c = 0; m[c]; c++) msg[c] = m[c];
-            msg[c] = 0;
-        }
+        typed(c);
         relayout = 1;
         mv = 0;
         break;
@@ -317,6 +364,7 @@ u16 wp_get(u8 w) {
     case GET_RTFBEGIN: return mod_run(MOD_RTF_BEGIN);
     case GET_RTFCHUNK: return mod_run(MOD_RTF_CHUNK);
     case GET_LISTOK: return list_check();
+    case GET_FONTS: font_install(); return 0;
     case GET_IMPORT:
     case GET_MDIMPORT:
     case GET_RTFEND: {

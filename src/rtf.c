@@ -8,7 +8,8 @@
  *   styles            \b \b0, \i \i0, \ul \ulnone, written where they change
  *   a paragraph       \pard, its alignment (\ql \qc \qr \qj), its text, \par
  *   a page break      \par\page (the paragraph ends the page)
- *   \ { }             escaped with "\"
+ *   \ { }             escaped with "\"; Latin-1 characters as \'hh
+ *                     (\ansicpg1252: Windows-1252 has them)
  *
  * Import is streamed, as files from other word processors are often larger
  * than the scratch area: BASIC reads the file 1 KB at a time into
@@ -28,8 +29,9 @@
  *   \page             a page break (ending the paragraph, or the one that
  *                     just ended)
  *   \tab \cell        a space; two after a table's cell
- *   \uN, \'hh         as ASCII where there is one (Windows-1252 for \'hh;
- *                     \ucN characters after \u skipped), else "?"
+ *   \uN, \'hh         Latin-1 (Windows-1252 for \'hh), or ASCII for some
+ *                     punctuation, else "?" (build_uni; \ucN characters
+ *                     after \u skipped)
  *   \binN             N bytes of binary data skipped
  * and leaves out \colortbl, \stylesheet, \info, pictures, headers,
  * footers, footnotes and every {\* ...} group (as the spec says a reader
@@ -47,9 +49,10 @@
 #define outs o_puts
 
 static const char rtf_head[] =
-    "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fswiss Sans;}{\\f1\\froman Serif;}"
+    "{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0\\fswiss Sans;}{\\f1\\froman Serif;}"
     "{\\f2\\fmodern Mono;}{\\f3\\fswiss Head;}}\r\n";
 static const char *const q_word[4] = { "\\ql", "\\qc", "\\qr", "\\qj" };
+static const char hex[] = "0123456789abcdef";
 
 static u16 rtf_export(void) {
     u16 i;
@@ -81,7 +84,14 @@ static u16 rtf_export(void) {
             sp = 0;
             for (i = w_pos; i < w_to; i++) {
                 c = txt_at(i);
-                if (c == '\\' || c == '{' || c == '}') out('\\');
+                if (c >= 0x80) {
+                    /* Latin-1, as Windows-1252 has it: \'hh */
+                    outs("\\'");
+                    out(hex[c >> 4]);
+                    c = hex[c & 15];
+                } else if (c == '\\' || c == '{' || c == '}') {
+                    out('\\');
+                }
                 out(c);
             }
         } else {

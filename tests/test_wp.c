@@ -510,7 +510,7 @@ int main(void) {
         CHECK(strcmp(buf, "See the site (http://x.y) and a picture; http://a.b.\r") == 0);
         md_in("caf\xc3\xa9 \xe2\x80\x94 \xe2\x80\x9cq\xe2\x80\x9d Stra\xc3\x9f" "e \xc3\xbc\xc3\xb1 \xe2\x80\xa6 \xf0\x9f\x98\x80!\r\n");
         text_of(buf, sizeof buf);
-        CHECK(strcmp(buf, "cafe -- \"q\" Strasse un ... ?!\r") == 0);
+        CHECK(strcmp(buf, "caf\xe9 -- \"q\" Stra\xdf" "e \xfc\xf1 ... ?!\r") == 0);
         md_in("a\\*b\\* 5 &lt; 6 &amp; 7&nbsp;8 &copy; 2 * 3 = 6 snake_case_name\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "a*b* 5 < 6 & 7 8 &copy; 2 * 3 = 6 snake_case_name\r") == 0);
@@ -537,11 +537,12 @@ int main(void) {
         srand(getenv("SEED") ? (unsigned)atoi(getenv("SEED")) : 1);
         for (k = 0; k < 300; k++) {
             static const char *w[] = {"word", "*star*", "a_b", "[x]", "#1", "<tag>", "&amp;", "1.", "- ", "`q`",
-                                      "  ", "\\", "Mono", "~", ">", "!", "x+y", "=", "C64", "''"};
+                                      "  ", "\\", "Mono", "~", ">", "!", "x+y", "=", "C64", "''",
+                                      "caf\xe9", "\xc4\xdf\xff", "\xa0", "\xbf\xa1"};
             u16 nw = (u16)(1 + rand() % 60), q;
             doc_len = 0;
             for (q = 0; q < nw; q++) {
-                const char *t = w[rand() % 20];
+                const char *t = w[rand() % 24];
                 u8 a = (u8)(rand() % 4 == 0 ? rand() % 32 : 0), r = (u8)(rand() % 14);
                 for (; *t; t++) {
                     TXT[doc_len] = (u8)*t;
@@ -588,7 +589,7 @@ int main(void) {
             u16 len = (u16)(1 + rand() % 3000);
             for (k = 0; k < len; k++) {
                 int r2 = rand() % 40;
-                TXT[k] = (u8)(r2 == 0 ? CH_CR : r2 == 1 ? CH_FF : r2 < 8 ? ' ' : 32 + rand() % 95);
+                TXT[k] = (u8)(r2 == 0 ? CH_CR : r2 == 1 ? CH_FF : r2 < 8 ? ' ' : r2 < 12 ? 0xA0 + rand() % 96 : 32 + rand() % 95);
                 ATR[k] = (u8)(TXT[k] == CH_CR || TXT[k] == CH_FF ? (rand() % 4) << A_ALIGN_SHIFT
                                                                  : rand() % 3 ? ATR[k ? k - 1 : 0] & A_STYLE : rand() % 32);
             }
@@ -621,7 +622,7 @@ int main(void) {
                 "\\pard{\\object\\objemb{\\*\\objdata 0102}}e\\bin3 }{\\f\\par\r\n";
             u16 len;
             static const char *want =
-                "Title\rPlain bold both under no mono serif\rcafe \"q\" -- 'x? link {}\\\ra b\rc\fd\rx  y  \ref\r";
+                "Title\rPlain bold both under no mono serif\rcaf\xe9 \"q\" -- 'x? link {}\\\ra b\rc\fd\rx  y  \ref\r";
             strcpy(w, body);
             len = (u16)strlen(w);
             while (len < 1300) w[len++] = '\n';    /* (line ends: nothing in RTF) */
@@ -644,11 +645,51 @@ int main(void) {
         }
     }
 
+    /* Latin-1 (#1): typed with Compose, measured, exported and imported */
+    {
+        static char m[2000];
+        static const u8 keys[] = {
+            1, '"', 0x41,               /* "a: a with diaeresis */
+            1, 0x41, '"',               /* either order */
+            1, 0x53, 0x53,              /* ss: sharp s */
+            1, '^', 0xC5,               /* ^E: E with circumflex */
+            1, 0xDE, 0x4E,              /* ~n (GET gives ~ as $DE) */
+            1, 0x51, 0x51,              /* qq: nothing */
+        };
+        wp_cmd(13);
+        for (i = 0; i < (int)sizeof keys; i++) {
+            wp_key(keys[i]);
+            if (keys[i] == 1) CHECK(msg[0] != 0);
+        }
+        CHECK(msg[0] != 0);                                         /* "Nothing to compose" */
+        CHECK(doc_len == 6 && TXT[0] == 0xE4 && TXT[1] == 0xE4 && TXT[2] == 0xDF && TXT[3] == 0xCA &&
+              TXT[4] == 0xF1 && cur == 5);
+        CHECK(char_w(0xE4, 0) == char_w('a', 0) && char_w(0xE4, A_BOLD) == char_w(0xE4, 0) + 1);
+        CHECK(char_w(0xC4, 3) > 8 && char_w(0xA0, 2) == 8);
+        check_layout();
+        screen_ppm("build/latin_page.ppm");
+        wp_cmd(7);
+        screen_ppm("build/latin_raw.ppm");
+        wp_cmd(7);
+        /* Markdown: UTF-8 */
+        md_out(m);
+        CHECK(strcmp(m, "\xc3\xa4\xc3\xa4\xc3\x9f\xc3\x8a\xc3\xb1\n\n") == 0);
+        md_in(m);
+        CHECK(doc_len == 6 && TXT[0] == 0xE4 && TXT[3] == 0xCA && TXT[4] == 0xF1);
+        /* RTF: \'hh */
+        rtf_out(m);
+        CHECK(strstr(m, "\\'e4\\'e4\\'df\\'ca\\'f1") != NULL);
+        rtf_round("Latin-1");
+        /* PETSCII text: as ASCII */
+        CHECK(doc_export() == 6 && MEM[SCRATCH_LIN] == 'A' && MEM[SCRATCH_LIN + 2] == 'S' &&
+              MEM[SCRATCH_LIN + 3] == 0xC5);
+    }
+
     /* random keys: the invariants hold */
     srand(getenv("SEED") ? (unsigned)atoi(getenv("SEED")) : 1);
     doc_load_help();
     for (i = 0; i < 20000; i++) {
-        static const u8 keys[] = {29, 157, 17, 145, 19, 147, 13, 20, 148, 9, 0x41, 0x42, 0x20, 0xC5, 0x2E};
+        static const u8 keys[] = {29, 157, 17, 145, 19, 147, 13, 20, 148, 9, 0x41, 0x42, 0x20, 0xC5, 0x2E, 1, '"'};
         int r = rand() % 40;
         if (i == 10000) wp_cmd(21);     /* the second half in list mode */
         if (r < (int)sizeof keys) { logop(keys[r]); wp_key(keys[r]); }

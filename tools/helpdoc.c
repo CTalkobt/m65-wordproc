@@ -80,6 +80,13 @@ static const struct run help[] = {
             "F10 copy   F11 cut   F12 paste\r" },
     { 0, "Typing replaces the selection.\r" },
     { 0, "\r" },
+    { HEAD, "Accents: Compose" },
+    { 0, "\r" },
+    { 0, "CTRL+A, then two characters, types one with an accent: "
+         "\"a \xe4, 'e \xe9, `e \xe8 (` is SHIFT+@), ^o \xf4, ~n \xf1, ,c \xe7, oa \xe5, ss \xdf, "
+         "ae \xe6, o/ \xf8, << \xab, >> \xbb, ?? \xbf, !! \xa1, co \xa9, L- \xa3, oo \xb0 "
+         "(either order, capitals too: \"A \xc4).\r" },
+    { 0, "\r" },
     { HEAD, "Menu (ESC)" },
     { 0, "\r" },
     { MONO, "N new     L load     S save\r"

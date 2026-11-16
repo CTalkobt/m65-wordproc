@@ -23,13 +23,18 @@ static const char *const align_tags[4] = { "", "[Center]", "[Right]", "[Just]" }
 static u8 is_break(u8 c) { return c == CH_CR || c == CH_FF; }
 
 u8 char_w(u8 c, u8 a) {
-    const struct font *f;
-    if (c < FONT_FIRST || c > 126) {
-        if (is_break(c)) return 0;
-        c = '?';
+    const struct font *f = fonts[a & A_FONT];
+    u8 w;
+    if (c >= FONT_HI) {
+        w = mem_get(f->offs + (u16)((c - FONT_FIRST) * 3));
+    } else {
+        if (c < FONT_FIRST || c > 126) {
+            if (is_break(c)) return 0;
+            c = '?';
+        }
+        w = f->w[c - FONT_FIRST];
     }
-    f = fonts[a & A_FONT];
-    return (u8)(f->w[c - FONT_FIRST] + ((a & A_BOLD) ? 1 : 0));
+    return (u8)(w + ((a & A_BOLD) ? 1 : 0));
 }
 
 /* ---- raw view tags ---- */

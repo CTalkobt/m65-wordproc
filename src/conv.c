@@ -100,19 +100,19 @@ u16 build_end(void) {
     return (u16)(b_n - 1);
 }
 
-/* Unicode as the document's characters (ASCII: these, then Latin-1's
- * letters U+00C0-U+00FF without their accents; others "?"), in b_attr */
-static const u16 uni[] = { 0xDF, 0xA0, 0x2018, 0x2019, 0x201A, 0xB4, 0x201C, 0x201D, 0x201E, 0xAB, 0xBB,
-                           0x2013, 0x2010, 0x2212, 0x2014, 0x2026, 0x2022, 0xB7, 0x2192, 0x2190, 0xA9 };
-static const char *const uni_as[] = { "ss", " ", "'", "'", "'", "'", "\"", "\"", "\"", "\"", "\"",
-                                      "-", "-", "-", "--", "...", "*", "*", "->", "<-", "(c)" };
-static const char latin[] = "AAAAAAACEEEEIIIIDNOOOOOxOUUUUYPsaaaaaaaceeeeiiiidnooooo/ouuuuypy";
+/* Unicode as the document's characters (Latin-1: U+0020-U+007E and
+ * U+00A0-U+00FF as they are; these others as ASCII; the rest "?"), in
+ * b_attr */
+static const u16 uni[] = { 0x2018, 0x2019, 0x201A, 0x201C, 0x201D, 0x201E, 0x2013, 0x2010, 0x2212,
+                           0x2014, 0x2026, 0x2022, 0x2192, 0x2190, 0x20AC };
+static const char *const uni_as[] = { "'", "'", "'", "\"", "\"", "\"", "-", "-", "-",
+                                      "--", "...", "*", "->", "<-", "EUR" };
 
 void build_uni(u16 u) {
     u8 k;
     const char *s;
-    if (u < 128) {
-        if (u >= 32) build_put((u8)u);
+    if (u < 128 || (u >= FONT_HI && u <= 0xFF)) {
+        if (u >= 32 && u != 127) build_put((u8)u);
         return;
     }
     for (k = 0; k < sizeof uni / sizeof uni[0]; k++)
@@ -120,5 +120,14 @@ void build_uni(u16 u) {
             for (s = uni_as[k]; *s; s++) build_put((u8)*s);
             return;
         }
-    build_put(u >= 0xC0 && u <= 0xFF ? (u8)latin[u - 0xC0] : '?');
+    build_put('?');
+}
+
+/* Latin-1's letters U+00C0-U+00FF without their accents */
+static const char latin[] = "AAAAAAACEEEEIIIIDNOOOOOxOUUUUYPsaaaaaaaceeeeiiiidnooooo/ouuuuypy";
+
+u8 as_ascii(u8 c) {
+    if (c < 0x80) return c;
+    if (c >= 0xC0) return (u8)latin[c - 0xC0];
+    return c == FONT_HI ? ' ' : '?';
 }

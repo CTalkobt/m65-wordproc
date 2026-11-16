@@ -1,4 +1,4 @@
-/* md.c — Markdown export and import (UTF-8 / ASCII text, LF line ends)
+/* md.c — Markdown export and import (UTF-8 text, LF line ends)
  *
  * Export (md_export: the document to SCRATCH_LIN):
  *   a paragraph             a line; paragraphs that follow each other with
@@ -16,14 +16,14 @@
  *   page break              <div style="page-break-after: always"></div>
  *   Serif, Head in part     (no Markdown for them: plain text)
  * Punctuation that Markdown reads is escaped with "\"; spaces at a
- * paragraph's start are &nbsp;. Empty paragraphs are not written.
+ * paragraph's start are &nbsp;. Empty paragraphs are not written. Latin-1
+ * characters are written as UTF-8.
  *
  * Import (md_import: SCRATCH_LIN, as FREAD# left it, as the document):
  * the above, and setext headings, lists and quotes (their markers kept as
  * text), links ([text](url) -> "text (url)", images: their text), HTML
- * tags left out, the common entities, and UTF-8 characters as the nearest
- * ASCII (accented letters without their accents, curly quotes, dashes, ...;
- * others "?"). Blocks are separated by an empty paragraph (not after a
+ * tags left out, the common entities, and UTF-8 characters (Latin-1's as
+ * they are, curly quotes, dashes, ... as ASCII, others "?": build_uni). Blocks are separated by an empty paragraph (not after a
  * heading). Emphasis is paired within a paragraph; an unpaired * or _ is
  * text.
  */
@@ -49,6 +49,15 @@ static u8 raw_style(u16 i) {
     u8 a = atr_at(i), s = a & M_FLAGS;
     if ((a & A_FONT) == F_MONO && txt_at(i) != '`') s |= M_CODE;
     return s;
+}
+
+/* a character as UTF-8 (Latin-1: two bytes from $80) */
+static void out_utf8(u8 c) {
+    if (c >= 0x80) {
+        out((u8)(0xC0 | (c >> 6)));
+        c = (u8)(0x80 | (c & 0x3F));
+    }
+    out(c);
 }
 
 /* the markers, outermost first */
@@ -95,7 +104,7 @@ static void out_para(u16 ps, u16 pe, u8 code) {
     while (i < pe) {
         c = txt_at(i);
         if (code) {
-            out(c);
+            out_utf8(c);
             i++;
             continue;
         }
@@ -113,7 +122,7 @@ static void out_para(u16 ps, u16 pe, u8 code) {
         s = raw_style(i);
         restyle_to(s);
         if (s & M_CODE) {
-            out(c);
+            out_utf8(c);
         } else {
             /* escaped: what Markdown would read as markup (at the start: a
              * heading, quote, list, or the dot or ) after a number) */
@@ -121,7 +130,7 @@ static void out_para(u16 ps, u16 pe, u8 code) {
             if (in_set("\\`*_[]~", c) || (lead && in_set("#>-+=", c)) || (digits && !lead && in_set(".)", c)) ||
                 (c == '<' && (is_letter(n) || in_set("/!?", n))) || (c == '&' && (is_letter(n) || n == '#')))
                 out('\\');
-            out(c);
+            out_utf8(c);
         }
         if (c < '0' || c > '9') digits = 0;
         lead = 0;
@@ -364,7 +373,10 @@ static void inline_md(u16 i, u16 e) {
             i += k;
             if (in(i) == ' ' && in(j - 1) == ' ' && j - i > 2) i++, j--;
             code = 1;
-            for (; i < j; i++) put(in(i));
+            while (i < j) {
+                if (in(i) >= 0x80) i += utf8(i);
+                else put(in(i++));
+            }
             code = 0;
             i = (u16)(cl + k);
             continue;

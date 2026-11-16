@@ -44,7 +44,8 @@ void color_row(u8 row, const u8 *c) {
     for (i = 0; i < COLS; i++) colram[((u16)row * COLS + i) * 2 + 1] = c[i];
 }
 
-/* the fonts' glyphs, as BASIC's BLOAD puts them (the file's 2-byte load address skipped) */
+/* the fonts' glyphs, as BASIC's BLOAD puts them (the file's 2-byte load
+ * address skipped) to the scratch area, then installed as BASIC has them */
 void video_on(void) {
     static int loaded;
     FILE *f;
@@ -56,8 +57,9 @@ void video_on(void) {
     }
     fgetc(f);
     fgetc(f);
-    if (fread(MEM + FONT_LIN, 1, 12288, f) == 0) perror("src/writer.fnt");
+    if (fread(MEM + SCRATCH_LIN, 1, 30720, f) == 0) perror("src/writer.fnt");
     fclose(f);
+    font_install();
     loaded = 1;
 }
 void video_off(void) {}

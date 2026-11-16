@@ -135,7 +135,7 @@ $(BUILD)/test_wp: tests/test_wp.c tests/host.c tools/helpdoc.c $(PORTABLE) $(HEA
 
 test: $(BUILD)/test_wp
 	$(BUILD)/test_wp
-	python3 -c "from PIL import Image; [Image.open('$(BUILD)/%s.ppm' % n).save('$(BUILD)/%s.png' % n) for n in ('page', 'raw', 'list_page', 'list_raw', 'long', 'justify', 'fuzz', 'fuzz2')]"
+	python3 -c "from PIL import Image; [Image.open('$(BUILD)/%s.ppm' % n).save('$(BUILD)/%s.png' % n) for n in ('page', 'raw', 'list_page', 'list_raw', 'latin_page', 'latin_raw', 'long', 'justify', 'fuzz', 'fuzz2')]"
 
 fonts:
 	python3 tools/mkfonts.py src/fonts.c src/writer.fnt $(BUILD)/fonts.png

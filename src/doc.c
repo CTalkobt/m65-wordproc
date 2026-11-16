@@ -274,7 +274,7 @@ u16 doc_export(void) {
     u16 i;
     o_start();
     for (i = 0; i < doc_len; i++) {
-        u8 c = txt_at(i);
+        u8 c = as_ascii(txt_at(i));
         if (c >= 'a' && c <= 'z') c = (u8)(c - 32);
         else if (c >= 'A' && c <= 'Z') c = (u8)(c + 128);
         else if (c == CH_FF) c = CH_CR;
