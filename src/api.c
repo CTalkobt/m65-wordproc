@@ -37,6 +37,7 @@
 #define CMD_ALL 18
 #define CMD_CLEAN 20
 #define CMD_LIST 21
+#define CMD_STYLE 32             /* + a kind (K_...): doc_style */
 
 #define GET_DIRTY 0
 #define GET_LEN 1
@@ -54,6 +55,7 @@
 #define GET_RTFCHUNK 13
 #define GET_RTFEND 14
 #define GET_FONTS 15
+#define GET_KIND 16              /* the kind of the cursor's (the selection's first) paragraph */
 
 static u8 started;
 u8 mod_cmd;
@@ -119,23 +121,16 @@ static u16 line_y(u16 l) {
     return L.y;
 }
 
+/* a screenful up or down: the cursor a line at a time (keeping its x)
+ * until it has moved VIEW_H or can go no further, the view with it */
 static void page_move(signed char d) {
-    u16 l = line_of(cur), y = line_y(l), t;
-    if (!goal_valid) {
-        goal_x = x_of(l, cur);
-        goal_valid = 1;
-    }
-    if (d < 0) {
-        t = y > VIEW_H ? (u16)(y - VIEW_H) : 0;
-        while (l > 0 && line_y(l) > t) l--;
-        view_y = view_y > VIEW_H ? (u16)(view_y - VIEW_H) : 0;
-    } else {
-        t = (u16)(y + VIEW_H);
-        ensure_y((u16)(t + VIEW_H));
-        while (l + 1 < nlines && line_y(l) < t) l++;
-        view_y += VIEW_H;
-    }
-    cur = pos_at_x(l, goal_x);
+    u16 y = line_y(line_of(cur)), c, ny;
+    do {
+        c = cur;
+        vertical(d);
+        ny = line_y(line_of(cur));
+    } while (cur != c && (u16)(d < 0 ? y - ny : ny - y) < VIEW_H);
+    view_y = d > 0 ? (u16)(view_y + VIEW_H) : view_y > VIEW_H ? (u16)(view_y - VIEW_H) : 0;
 }
 
 /* CTRL + a cursor key selects: a selection started at the cursor when
@@ -339,7 +334,9 @@ void wp_cmd(u8 c) {
         relayout = 0;
         break;
     default:
-        return;
+        if ((u8)(c - CMD_STYLE) >= NKINDS) return;
+        doc_style((u8)(c - CMD_STYLE));
+        break;
     }
     refresh(relayout);
 }
@@ -365,6 +362,7 @@ u16 wp_get(u8 w) {
     case GET_RTFCHUNK: return mod_run(MOD_RTF_CHUNK);
     case GET_LISTOK: return list_check();
     case GET_FONTS: font_install(); return 0;
+    case GET_KIND: return cur_kind();
     case GET_IMPORT:
     case GET_MDIMPORT:
     case GET_RTFEND: {

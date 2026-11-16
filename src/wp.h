@@ -65,9 +65,26 @@ typedef uint32_t u32;
 #define A_ITAL  0x08
 #define A_UNDER 0x10
 #define A_STYLE 0x1F            /* what a character carries */
-#define A_ALIGN 0x60            /* a paragraph's CR / FF: 0 left, 1 centre, 2 right, 3 justify */
+/* a paragraph's CR / FF carries the paragraph's properties instead: */
+#define A_KIND  0x07            /* its kind (style): K_... */
+#define A_ALIGN 0x60            /* 0 left, 1 centre, 2 right, 3 justify */
 #define A_ALIGN_SHIFT 5
+#define A_PARA (A_KIND | A_ALIGN)
 #define NFONTS 4
+#define F_SANS 0
+#define F_SERIF 1
+#define F_MONO 2
+#define F_HEAD 3
+
+/* paragraph kinds (issue #4): what the paragraph is, which the converters
+ * carry (Markdown #, >, ```; RTF \outlinelevel, \s), and how it is laid
+ * out: a quote and a code block have an indent (a quote a bar in it, a code
+ * block a dotted line). Applied as a style (doc_style) its characters take
+ * kind_attr's font and style. */
+enum { K_NORMAL, K_H1, K_H2, K_H3, K_QUOTE, K_CODE, NKINDS };
+#define KIND_TAB 8                      /* (the tables: kinds 6 and 7, spare, as normal) */
+extern const u8 kind_attr[KIND_TAB];    /* (layout.c) the characters' style */
+extern const char *const kind_names[KIND_TAB];
 
 /* ---- screen geometry ---- */
 #define SCR_W 640
@@ -116,7 +133,6 @@ enum { VIEW_PAGE = 0, VIEW_RAW = 1 };
 #define G_BLOCK 128
 struct font {
     u8 height, ascent;
-    const u8 *w;                /* advance of each code FONT_FIRST.. */
     u32 offs;                   /* each code's record, 32-255 (FONT_LIN / HI_LIN + ...): its advance, its glyph's first byte from bits (2) */
     u32 bits;                   /* the glyphs: rows of 1 byte (width <= 8) or 2 */
 };
@@ -137,7 +153,7 @@ struct line {
     u8 h, asc;                  /* height, baseline from the top */
     u16 x;                      /* first character's x from the text's left */
     u8 extra, nsp;              /* justify: pixels spread over nsp spaces */
-    u8 page, pad;
+    u8 page, kind;              /* (page view) its paragraph's kind */
 };
 
 /* ---- platform (m65.c / tests/host.c) ---- */
@@ -147,7 +163,7 @@ void mem_copy(u32 dst, u32 src, u16 n);        /* overlapping: dst < src only */
 void mem_fill(u32 dst, u16 n, u8 v);
 void mem_read(u8 *dst, u32 src, u16 n);        /* far memory to a bank 0 buffer */
 void mem_write(u32 dst, const u8 *src, u16 n); /* a bank 0 buffer to far memory */
-void blit_row(u16 sy, const u8 *src);           /* 80 bytes to screen row sy */
+void blit_row(u16 sy, const u8 *src, u8 n);     /* n bytes to screen row sy's first n cells */
 void color_fill(u8 row, u8 col, u8 n, u8 c);    /* cells' foreground colour */
 void color_row(u8 row, const u8 *c);            /* a row's 80 colours */
 void video_on(void);
@@ -209,6 +225,8 @@ u16 md_import(void);            /* Markdown at SCRATCH_LIN as the document; its 
 #define SCRATCH_MAX 30720u      /* the scratch area's size */
 u8 txt_at(u16 i);               /* TXT[i], ATR[i]: smaller code than the far access */
 u8 atr_at(u16 i);
+void txt_put(u16 i, u8 c);      /* TXT[i] = c, ATR[i] = a */
+void atr_put(u16 i, u8 a);
 /* output: bytes to SCRATCH_LIN (o_n of them; past SCRATCH_MAX counted, not written) */
 extern u16 o_n;
 void o_start(void);
@@ -260,7 +278,7 @@ void rtf_main(void);                    /* RTF.OVL's entry (rtf.c) */
  * bytes, past the drawing's buffers (mod_area.r: at most LIST_OFS bytes),
  * so it costs no memory of its own; a module run in mod_area (Markdown)
  * overwrites it, so list_ok is then 0 until BASIC has loaded it again. */
-#define LIST_OFS 3712           /* (wp.bas's too) */
+#define LIST_OFS 4352           /* (wp.bas's too) */
 #define LIST_SIZE (MOD_SIZE - LIST_OFS)
 extern u8 list_ok, list_on;             /* LIST.OVL loaded (and from this build); asked for */
 extern u16 hk_l;                        /* the line drawn (raw view: >= nlines, a row past the end) */
@@ -269,6 +287,9 @@ u8 list_check(void);                    /* list_ok, from LIST.OVL's header (and 
 void list_main(void);                   /* LIST.OVL's entry (list.c) */
 u16 para_end(u16 i);            /* the CR / FF ending the paragraph of i */
 u8 para_al(u16 i);              /* its alignment (0 left, 1 centre, 2 right, 3 justify) */
+u8 para_kind(u16 i);            /* its kind (K_...) */
+u8 cur_kind(void);              /* the kind of the cursor's paragraph (the selection's first) */
+void doc_style(u8 k);           /* kind k applied: to the paragraphs selected whole (or the cursor's), as character style to the rest of the selection */
 u8 attr_at_cursor(void);
 u16 sel_lo(void);
 u16 sel_hi(void);
@@ -301,6 +322,9 @@ void scroll_to_cursor(void);
 u16 doc_height(void);
 
 /* ---- drawing (render.c) ---- */
+/* the menu's panel: panel rows (0 or 2) above the bottom bar, menu_text */
+#define PANEL_ROWS 2
+
 /* What was drawn where: a segment of the view (a line's band, blank page,
  * desk) starting at a screen row, with a hash of what it shows. */
 #define MAXSEG 40               /* (a page view frame has at most ~31; more: drawn again) */
@@ -314,9 +338,14 @@ struct seg {
  * share their memory with the module region: a module (an .OVL file run
  * once: Markdown, ...) is loaded there by BASIC, run by mod_run, and the
  * screen then drawn again. */
+#define TMP_LINES 32
 union mod_area {
     struct {
+        char menu_text[PANEL_ROWS][81]; /* (first: BASIC pokes it at mod_area) */
+        struct line lay_tmp[TMP_LINES]; /* layout_update's new lines */
         u8 band[BAND_H * COLS];
+        char bar_t[COLS + 2];          /* a bar's new text */
+        char tag_buf[48];              /* raw_tag's tags, when not wanted */
         struct seg segs[2][MAXSEG];    /* this frame's and the last one's, in screen order */
         char bar_text[4][COLS + 2];    /* what each bar shows ("" : unknown) */
         u8 row_desk[COLS];             /* the desk between pages */
@@ -332,15 +361,14 @@ union mod_area {
 };
 extern union mod_area mod_area;
 extern char msg[81];            /* the bottom bar's message ("": the status) */
-/* the menu's panel: panel rows (0 or 2) above the bottom bar, menu_text */
-#define PANEL_ROWS 2
 extern u8 panel;
-extern char menu_text[PANEL_ROWS][81];
+#define menu_text mod_area.r.menu_text
 void band_xor(u16 x0, u16 x1, u8 r0, u8 r1);    /* the band's pixels x0..x1-1, rows r0..r1-1, inverted */
 extern char fname[17];          /* the document's name */
 void render(void);
 void render_bars(void);
 void render_invalidate(void);   /* the colours rewritten next time */
+void wp_drop(u8 k);             /* the style drop-down under the top bar, k lit (0xFF: closed) */
 u8 petscii_to_ascii(u8 c);
 
 #endif

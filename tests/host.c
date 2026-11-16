@@ -24,14 +24,14 @@ void mem_read(u8 *dst, u32 src, u16 n) { memcpy(dst, MEM + src, n); }
 void mem_write(u32 dst, const u8 *src, u16 n) { memcpy(MEM + dst, src, n); }
 void mem_fill(u32 dst, u16 n, u8 v) { memset(MEM + dst, v, n); }
 
-void blit_row(u16 sy, const u8 *src) {
+void blit_row(u16 sy, const u8 *src, u8 n) {
     u32 dst = BITMAP_LIN + (u32)(sy >> 3) * (COLS * 8) + (sy & 7);
     u8 i;
     if (sy >= SCR_H) {
         fprintf(stderr, "blit_row: row %u off the screen\n", sy);
         return;
     }
-    for (i = 0; i < COLS; i++) MEM[dst + i * 8] = src[i];
+    for (i = 0; i < n; i++) MEM[dst + i * 8] = src[i];
 }
 
 void color_fill(u8 row, u8 col, u8 n, u8 c) {

@@ -39,7 +39,6 @@ union mod_area mod_area;
 #define sb mod_area.r.sb
 
 u8 panel;
-char menu_text[PANEL_ROWS][81];
 
 /* LIST.OVL: at the end of mod_area (wp.h), past the drawing's buffers */
 #define list_area (mod_area.m + LIST_OFS)
@@ -180,19 +179,19 @@ static u32 line_hash(u16 l, const struct line *L) {
     u16 i = L->start, e = line_end(l);
     hs1 = 0x17;
     hs2 = 0x5A;
-    hmix(L->x);
+    hmix((u16)(L->x | (L->kind << 12)));
     hmix((u16)(L->extra | (L->nsp << 8)));
     hmix((u16)(L->h | (L->asc << 8)));
     hmix((u16)(e - i));
     if (view_mode == VIEW_RAW) {
         /* (and whether it starts a paragraph: its alignment's tag) */
-        hmix((u16)(prev_style(i) | ((i == 0 || TXT[i - 1] == CH_CR || TXT[i - 1] == CH_FF) << 8)));
-        hmix(ATR[para_end(i)]);
+        hmix((u16)(prev_style(i) | ((i == 0 || txt_at(i - 1) == CH_CR || txt_at(i - 1) == CH_FF) << 8)));
+        hmix(atr_at(para_end(i)));
     }
     for (; i < e; i++) {
-        hs1 += TXT[i];
+        hs1 += txt_at(i);
         hs2 += hs1;
-        hs1 += ATR[i];
+        hs1 += atr_at(i);
         hs2 += hs1;
     }
     i = L->start;
@@ -313,11 +312,11 @@ static void raw_invert_cell(u8 col) {
 
 static void band_out(u16 sy, u8 r0, u8 n) {
     u8 i;
-    for (i = 0; i < n; i++) blit_row((u16)(sy + i), band + (r0 + i) * COLS);
+    for (i = 0; i < n; i++) blit_row((u16)(sy + i), band + (r0 + i) * COLS, COLS);
 }
 
 static void rows_out(u16 sy, u16 n, const u8 *pattern) {
-    while (n--) blit_row(sy++, pattern);
+    while (n--) blit_row(sy++, pattern, COLS);
 }
 
 /* ---- text for the bars and the page numbers: put into sb (sn long) ---- */
@@ -338,10 +337,14 @@ static void put_num(u16 v) {
 }
 
 /* ---- the bars ---- */
+/* the top bar's style field: cells BOX_LO..BOX_HI-1, not inverted */
+#define BOX_LO 1
+#define BOX_HI 14
+
 /* bar which from sb: its left part sb[0..ln-1], at its right end sb[ln..sn-1] */
 static void bar(u8 which, u8 ln, u16 sy) {
     u8 i, rn = (u8)(sn - ln);
-    char t[COLS + 2], *o = bar_text[which];
+    char *t = mod_area.r.bar_t, *o = bar_text[which];
     for (i = 0; i < COLS; i++) t[i] = ' ';
     for (i = 0; i < ln; i++) t[i] = sb[i];
     for (i = 0; i < rn; i++) t[COLS - rn + i] = sb[ln + i];
@@ -352,7 +355,8 @@ static void bar(u8 which, u8 ln, u16 sy) {
     band_fill(RAW_H, row_desk);
     for (i = 0; i < COLS; i++) {
         o[i] = t[i];
-        if (t[i] != ' ') raw_cell(i, (u8)t[i], 0xFF);
+        if (!which && i >= BOX_LO && i < BOX_HI) raw_cell(i, (u8)t[i], 0);
+        else if (t[i] != ' ') raw_cell(i, (u8)t[i], 0xFF);
     }
     o[COLS] = '|';
     o[COLS + 1] = 0;
@@ -374,8 +378,12 @@ void render_bars(void) {
     u16 li = nlines ? line_of(cur) : 0;
     struct line L;
     if (!inited) init_rows();
+    /* the style field: the kind of the cursor's paragraph (CTRL+D: the drop-down) */
     sn = 0;
-    put_str(" MEGA65 Writer  ");
+    put_str("  ");
+    put_str(kind_names[cur_kind()]);
+    while (sn < BOX_HI - 2) sb[sn++] = ' ';
+    put_str("v  MEGA65 Writer  ");
     put_str(fname);
     if (dirty) put_str(" *");
     ln = sn;
@@ -449,9 +457,14 @@ static void draw_line(u16 l, const struct line *L) {
         lo = sel_lo();
         hi = sel_hi();
     }
+    if (L->kind >= K_QUOTE) {
+        /* a quote's bar, a code block's dotted line, in its indent */
+        u8 r, k = L->kind == K_CODE;
+        for (r = 0; r < h; r = (u8)(r + 1 + k)) band_xor(TEXT_X + 6, TEXT_X + 9 - 2 * k, r, (u8)(r + 1));
+    }
     x = (u16)(TEXT_X + L->x);
     for (; i < e; i++) {
-        u8 c = TXT[i], a = ATR[i], w;
+        u8 c = txt_at(i), a = atr_at(i), w;
         const struct font *f = fonts[a & A_FONT];
         if (i == cur) cx = x;
         if (c == CH_CR || c == CH_FF) {
@@ -556,11 +569,52 @@ static void render_page(void) {
     }
 }
 
+/* ---- the style drop-down (BASIC's CTRL+D: wp_drop with the one lit,
+ * as the cursor keys move it; then 0xFF, and the screen drawn again) ----
+ * Each kind's name in its own font and style, in a box at the screen's
+ * left under the top bar's style field. */
+#define DROP_W 20               /* cells */
+#define DROP_H 24               /* rows an item */
+#define DROP_ASC 18             /* its baseline */
+void wp_drop(u8 k) {
+    u8 n, r, a, *d;
+    u16 x, sy = BAR_H;
+    const char *s;
+    const struct font *f;
+    if (k == 0xFF) {
+        render_invalidate();
+        render();
+        return;
+    }
+    for (n = 0; n < NKINDS; n++) {
+        a = kind_attr[n];
+        f = fonts[a & A_FONT];
+        band_fill(DROP_H, row_blank);
+        x = 12;
+        for (s = kind_names[n]; *s; s++) {
+            draw_glyph(f, (u8)*s, x, (u8)(DROP_ASC - f->ascent), a);
+            x += char_w((u8)*s, a);
+        }
+        if (n == k) band_xor(0, DROP_W * 8, 0, DROP_H);
+        for (r = 0, d = band; r < DROP_H; r++, d += COLS) {
+            d[0] |= 0x80;
+            d[DROP_W - 1] |= 1;
+            blit_row(sy++, d, DROP_W);
+        }
+    }
+    blit_row(sy, row_desk, DROP_W);
+    for (n = BAR_H / 8; n < sy / 8; n++) {
+        color_fill(n, 0, DROP_W, C_BLACK);
+        rowcol[n] = 0xFF;
+    }
+}
+
 /* ---- raw view ---- */
 static u8 tag_colour(const char *t) {
     /* t: the tag's text after '[' */
     if (*t == '/') t++;
     if ((t[0] == 'B' || t[0] == 'I' || t[0] == 'U') && t[1] == ']') return C_BLUE;
+    if (t[0] == 'Q' || (t[0] == 'H' && t[1] < 'A') || (t[0] == 'C' && t[1] == 'o')) return C_GREEN;     /* a kind */
     if (t[0] == 'C' || t[0] == 'R' || t[0] == 'J' || t[0] == 'P') return C_RED;
     return C_PURPLE;
 }
@@ -586,7 +640,7 @@ static void render_raw(void) {
             u16 i = L.start, e = line_end(l);
             col = 0;
             for (; i < e && col < COLS; i++) {
-                u8 c = TXT[i], n = raw_tag(i, tags), k, tc = C_BLUE;
+                u8 c = txt_at(i), n = raw_tag(i, tags), k, tc = C_BLUE;
                 for (k = 0; k < n && col < COLS; k++) {
                     if (tags[k] == '[') tc = tag_colour(tags + k + 1);
                     raw_cell(col, (u8)tags[k], 0);

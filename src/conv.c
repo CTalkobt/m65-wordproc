@@ -18,6 +18,8 @@
  * some 30 bytes of code, a call to these 10) */
 u8 txt_at(u16 i) { return TXT[i]; }
 u8 atr_at(u16 i) { return ATR[i]; }
+void txt_put(u16 i, u8 c) { TXT[i] = c; }
+void atr_put(u16 i, u8 a) { ATR[i] = a; }
 
 /* ==== output: bytes to SCRATCH_LIN ==== */
 u16 o_n;
@@ -81,8 +83,8 @@ void build_start(void) {
 
 void build_put(u8 c) {
     if (b_n >= DOC_MAX - 1) return;     /* (room kept for the final CR) */
-    TXT[b_n] = c;
-    ATR[b_n] = b_attr;
+    txt_put(b_n, c);
+    atr_put(b_n, b_attr);
     b_n++;
 }
 
@@ -91,8 +93,8 @@ void build_put(u8 c) {
  * variables the module's must then miss) */
 u16 build_end(void) {
     if (!b_n || txt_at(b_n - 1) != CH_CR) {
-        TXT[b_n] = CH_CR;
-        ATR[b_n] = 0;
+        txt_put(b_n, CH_CR);
+        atr_put(b_n, 0);
         b_n++;
     }
     doc_len = b_n;

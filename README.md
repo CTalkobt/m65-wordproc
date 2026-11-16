@@ -58,10 +58,32 @@ keyboard buffer and saves a screenshot, e.g.
 | F10 / F11 / F12 | copy / cut / paste |
 | F8 or HELP | the help (`WRITER.HELP`) as the document (after asking about unsaved changes) |
 | ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text; Markdown for a name ending in `.md`, RTF for `.rtf`), Directory; Redraw, List on / off (with `LIST.OVL`), Help, Quit (ESC also ends a selection) |
+| CTRL+D | the style drop-down (below) |
 | CTRL+L | redraw the whole screen |
 | CTRL+A | Compose: the next two characters make an accented one (below) |
 
 Styles and fonts apply to the selection, or to what you type next.
+
+**Paragraph styles** ([#4](https://github.com/CTalkobt/m65-wordproc/issues/4)):
+the top bar's left end shows the style of the cursor's paragraph: Normal,
+Heading 1, Heading 2, Heading 3, Quote or Code. CTRL+D drops the list down
+under it, each style in its own look; the cursor keys move through it and
+RETURN applies the one lit (or N 1 2 3 Q C at once; ESC leaves it).
+
+- A paragraph the selection holds whole (all its text), or with no
+  selection the cursor's, becomes that kind. Its characters in the old
+  style's font and style take the new one's (Heading 1: Head, bold;
+  Heading 2: Head; Heading 3: Serif, bold; Quote: Serif, italic; Code:
+  Mono; Normal: Sans), while other fonts are kept, and so is bold, italic
+  or underline added on top of the old style.
+- The rest of the selection, part of a paragraph, takes the style's font
+  and look as a character style (Normal: plain Sans), and its paragraph
+  keeps its kind. A selection over part of one paragraph, then whole ones,
+  then part of another does each its way.
+- A quote is laid out indented with a bar beside it, and a code block
+  indented with a dotted line. RETURN at a heading's end starts a Normal
+  paragraph; the raw view shows a kind as a green tag (`[H1]`, `[Quote]`,
+  `[Code]`) at the paragraph's start.
 
 **List mode** (ESC T; [#2](https://github.com/CTalkobt/m65-wordproc/issues/2)),
 as vi's `:set list`, shows the text's invisible structure in either view,
@@ -136,7 +158,8 @@ the room for it. Two kinds:
 
 - **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6.25 KB in
   bank 0), which is also where the drawing keeps its buffers and caches
-  (the band, the redraw cache, the bars' text, the row patterns: 3.4 KB),
+  (the band, the redraw cache, the bars' text, the row patterns, and the
+  layout's buffer of new lines and the menu's text: 4.3 KB),
   all remade after a full redraw. So a module costs bank 0 only what it
   needs beyond those, once for all modules.
 - **Running it** (run once): BASIC `BLOAD`s it into `mod_area` (`bload
@@ -245,11 +268,14 @@ the C64's. Each cell has its own colour (text, desk, tags, bars).
 
 ### Files
 
-A document (`S`ave / `L`oad) is a PRG file: `"WP"`, version 1, the length
+A document (`S`ave / `L`oad) is a PRG file: `"WP"`, version 2, the length
 (2 bytes), the text (Latin-1: ASCII, and `$A0`-`$FF` for the accented
-characters; CR ends a paragraph, FF a page), then the attributes. The attribute byte: bits 0-1 font,
-2 bold, 3 italic, 4 underline; on a paragraph's CR (or page break) bits 5-6
-its alignment. Import / Export use sequential files: plain PETSCII text
+characters; CR ends a paragraph, FF a page), then the attributes. A
+character's attribute byte: bits 0-1 font, 2 bold, 3 italic, 4 underline.
+A paragraph's CR (or page break) holds the paragraph's: bits 0-2 its kind
+(0 Normal, 1-3 Heading 1-3, 4 Quote, 5 Code; 6 and 7 are spare, read as
+Normal), bits 5-6 its alignment. Version 1 files (before the kinds: their
+CRs had the typing style in bits 0-4) load as Normal paragraphs. Import / Export use sequential files: plain PETSCII text
 (accents left out on export: PETSCII has none), Markdown when the name ends
 in `.md`, RTF for `.rtf`.
 
@@ -262,9 +288,10 @@ from elsewhere.
 | Writer | Markdown |
 |--------|----------|
 | a paragraph | a line; paragraphs one after another with no empty one between them (and the same alignment) are one Markdown paragraph with hard breaks (`\` at the line's end); others are blocks with a blank line between |
-| a paragraph all in Head | `# ` heading (import: any level, and setext `===` / `---` underlines) |
-| a paragraph all in Mono, unstyled | a fenced code block; one line a paragraph |
-| bold, italic, underline | `**…**`, `*…*`, `<u>…</u>` |
+| Heading 1, 2, 3 | `# `, `## `, `### ` (import: `####` and deeper as Heading 3; setext `===` Heading 1, `---` Heading 2) |
+| Quote | `> ` (quote paragraphs one after another: one quote with hard breaks; import: a `>` line alone ends a paragraph in it, a line without `>` goes on with it) |
+| Code | a fenced code block, a line a paragraph (empty ones too) |
+| bold, italic, underline | `**…**`, `*…*`, `<u>…</u>`, where they differ from the paragraph style's own (a heading's bold is not written) |
 | Mono inside a paragraph | `` `…` `` |
 | centre, right, justify | `<div align="center">` … `</div>` around the block |
 | page break | `<div style="page-break-after: always"></div>` |
@@ -276,7 +303,7 @@ would read them: `*`, `_`, `` ` ``, `[`, `]`, `\`, `~` everywhere; `#`, `>`, `-`
 name), and spaces at a paragraph's start are `&nbsp;`; empty paragraphs are
 not written (blocks are separated by blank lines instead).
 
-Import also takes lists and quotes (their markers kept as text, an item a
+Import also takes lists (their markers kept as text, an item a
 paragraph), links (`[text](url)` becomes "text (url)", an image its text),
 `<br>`, the common entities, and UTF-8: Latin-1's characters (U+00A0-U+00FF)
 as they are; curly quotes, dashes, the ellipsis and € become ASCII, others
@@ -293,8 +320,11 @@ also checked with markdown-it (CommonMark): their text comes out exactly.
 Export (`src/rtf.c`, in the module `RTF.OVL`) is lossless for Writer's
 documents: a font table (`\f0` Sans `\fswiss`, `\f1` Serif `\froman`,
 `\f2` Mono `\fmodern`, `\f3` Head `\fswiss` at `\fs36`), `\b` `\i` `\ul`
-where they change, each paragraph as `\pard`, its alignment (`\ql` `\qc`
-`\qr` `\qj`) and `\par`, a page break as `\par\page`; `\ { }` escaped,
+where they change, a stylesheet (`\s0` Normal, `\s1`-`\s3` heading 1-3
+with `\outlinelevel`, `\s4` Quote and `\s5` Code with an indent, `\li`),
+each paragraph as `\pard`, its style with those properties (readers take
+them from the paragraph), its alignment (`\ql` `\qc` `\qr` `\qj`) and
+`\par`, a page break as `\par\page`; `\ { }` escaped,
 accented characters as `\'hh` (`\ansicpg1252`, which has Latin-1's).
 
 Import reads the file 1 KB at a time (BASIC streams it to the module, so
@@ -302,14 +332,18 @@ it may be larger than the scratch area): control words, control symbols,
 groups (which keep the character formatting) and text. Fonts map by their
 family in `\fonttbl` (`\froman` Serif, `\fmodern` Mono, others Sans), a
 size of 14 pt or more is Head; `\b`, `\i`, the underlines, `\plain`,
-`\pard`, alignment; `\par`, `\line` and `\row` end a paragraph, `\page`
+`\pard`, alignment; a paragraph's kind from `\outlinelevelN` (heading N+1,
+from 3 on heading 3) or from its `\sN`, by the style's name in the
+`\stylesheet` ("heading N" as its level, "Title" Heading 1, a name with
+"quot" Quote, with "code", "preformatted" or "source" Code); `\par`, `\line` and `\row` end a paragraph, `\page`
 ends a page; `\tab` and `\cell` are spaces; `\uN` (skipping `\ucN`
 characters after it) and `\'hh` (Windows-1252) are Latin-1's characters, or ASCII
-for the punctuation it does not have; `\binN` data is skipped. `\colortbl`, `\stylesheet`, `\info`,
+for the punctuation it does not have; `\binN` data is skipped. `\colortbl`, `\info`,
 pictures, headers, footers, footnotes and every `{\* ...}` group are left
 out, as are unknown control words. Writer's own RTF round-trips exactly
 (the host tests check it, and random documents); pandoc's imports with its
-headings as Head and its code as Mono.
+headings as headings (`\outlinelevel`) and its code as Mono (it marks a
+quote only with an indent, so that comes in as Normal).
 
 ### Fonts
 
@@ -317,8 +351,7 @@ headings as Head and its code as Mono.
 Mono 13 and DejaVu Sans Bold 19 (1-bit, hinted, whole-pixel advances) and
 the X11 8×13 font for the raw view, codes 32-126 and Latin-1's
 `$A0`-`$FF`; `make fonts` rebuilds `src/fonts.c` (metrics, where each
-font's block is, and the advance widths of codes 32-128, kept in bank 0
-for the layout) and `src/writer.fnt`. Each font is one block: a 3-byte
+font's block is) and `src/writer.fnt`. Each font is one block: a 3-byte
 record for each code 32-255 (its advance, where its glyph starts; codes
 129-159 are `?`), then the glyphs; the raw font is 13 bytes a code. The
 blocks, with the compose table, do not fit bank 4's 12 KB together, so
@@ -326,8 +359,8 @@ mkfonts.py places each, the largest first, in bank 4 or in colour RAM's
 last 20 KB (`HI_LIN`, `$FF83000`: every MEGA65 has 32 KB of colour RAM,
 and the screen's cells use only `$FF81000`-`$FF82F3F`). BASIC `BLOAD`s the
 file to the scratch area at the start and `font_install` copies the two
-parts by DMA. Layout reads a Latin-1 character's width from its record
-(far memory) rather than the bank-0 table. Mono's accented capitals lose
+parts by DMA. Layout reads each character's width from its record (far
+memory: one `LDA [zp],Z`), so the fonts keep no table in bank 0. Mono's accented capitals lose
 their top pixel row, and Head's Æ is cut at 16 pixels, the widest a glyph
 can be.
 
@@ -366,7 +399,15 @@ can be.
   starts at `$3600`. The converters' shared code (`conv.c`, above) and a
   smaller `mod_area` then left the C data ending at `$BB00`: 1024 bytes
   free; the accented characters (#1: the Compose key, the glyph lookup)
-  took half of that, so it ends at `$BD00`. (Its
+  took half of that, so it ends at `$BD00`. Paragraph styles (#4) took
+  2.3 KB at first; to make room, BASIC's two `select`s of keys (the main
+  loop's and the menu's) became tables (`instr` over a string of key
+  codes, then `ON ... GOSUB`), as basic45 spends some 60 bytes on each
+  `case`: the BASIC program went from 5614 to 4756 bytes, so the C half
+  starts at `$3300`; the fonts' width tables went to far memory (above);
+  and the layout's line buffer, the menu's text and a few work buffers
+  moved into `mod_area`'s drawing memory (`LIST_OFS` 4352). The C data now
+  ends at `$BC00`. (Its
   two `poke`s of `$D1` / `$F7` are written in decimal: `--minify` turns
   `poke $d1` into a variable,
   [M65Compiler #603](https://github.com/CTalkobt/M65Compiler/issues/603).)

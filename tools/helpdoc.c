@@ -14,9 +14,15 @@ struct run { u8 attr; const char *s; };
 #define JUST (3 << 5)
 #define MONO 2
 #define HEAD 3
+#define H1 (HEAD | A_BOLD)      /* (kind_attr: a heading's characters) */
+#define H2 HEAD
+#define QUOTE (1 | A_ITAL)
+/* A run's attribute is its characters'; a run that is only "\r" gives a
+ * paragraph's end its kind and alignment, and one in a longer run is a
+ * code block's (in Mono) or a normal paragraph's */
 static const struct run help[] = {
-    { HEAD | CENTRE, "MEGA65 Writer" },
-    { CENTRE, "\r" },
+    { H1, "MEGA65 Writer" },
+    { K_H1 | CENTRE, "\r" },
     { 1 | A_ITAL, "A graphical word processor in BASIC 65 and C" },
     { CENTRE, "\r" },
     { 0, "\r" },
@@ -52,11 +58,14 @@ static const struct run help[] = {
     { 0, "This paragraph is right aligned." },
     { RIGHT, "\r" },
     { 0, "\r" },
+    { QUOTE, "A quote: indented, with a bar beside it. Paragraph styles (CTRL+D) are Normal, Heading 1 to 3, Quote and Code." },
+    { K_QUOTE, "\r" },
+    { 0, "\r" },
     { 0, "And this one is justified: the spaces between its words are stretched so that each line but the last fills the width of the text exactly, as in a book. Select text with F9 (or CTRL and the cursor keys), then press F3, F5 or F7 to style it, F2 to change its font or F4 to align its paragraph." },
     { JUST, "\r" },
     { 0, "\r" },
-    { HEAD, "Editing" },
-    { 0, "\r" },
+    { H2, "Editing" },
+    { K_H2, "\r" },
     { MONO, "Typing     inserts; RETURN: a new paragraph\r"
             "DEL / INST deletes left / right\r"
             "Cursors    move; HOME line start / end;\r"
@@ -64,31 +73,35 @@ static const struct run help[] = {
             "F13 / F14  page up / down\r"
             "TAB        four spaces\r" },
     { 0, "\r" },
-    { HEAD, "Formatting" },
-    { 0, "\r" },
+    { H2, "Formatting" },
+    { K_H2, "\r" },
     { 0, "The selection, or what you type next:\r" },
     { MONO, "F3 bold    F5 italic    F7 underline\r"
             "F2 font: Sans, Serif, Mono, Head\r"
             "F4 paragraph: left, centre, right, justify\r"
-            "F6 page break           F1 page / raw view\r" },
+            "F6 page break           F1 page / raw view\r"
+            "CTRL+D     style: the drop-down at the top left\r" },
+    { 0, "A style applies to the paragraphs the selection holds whole, or the cursor's; "
+         "to the rest of the selection as a character style (Normal: plain). In the "
+         "drop-down: cursor keys and RETURN, or N 1 2 3 Q C; ESC leaves it.\r" },
     { 0, "\r" },
-    { HEAD, "Selection and clipboard" },
-    { 0, "\r" },
+    { H2, "Selection and clipboard" },
+    { K_H2, "\r" },
     { MONO, "F9         start / end a selection\r"
             "CTRL+crsr  start or extend a selection\r"
             "ESC        end the selection\r"
             "F10 copy   F11 cut   F12 paste\r" },
     { 0, "Typing replaces the selection.\r" },
     { 0, "\r" },
-    { HEAD, "Accents: Compose" },
-    { 0, "\r" },
+    { H2, "Accents: Compose" },
+    { K_H2, "\r" },
     { 0, "CTRL+A, then two characters, types one with an accent: "
          "\"a \xe4, 'e \xe9, `e \xe8 (` is SHIFT+@), ^o \xf4, ~n \xf1, ,c \xe7, oa \xe5, ss \xdf, "
          "ae \xe6, o/ \xf8, << \xab, >> \xbb, ?? \xbf, !! \xa1, co \xa9, L- \xa3, oo \xb0 "
          "(either order, capitals too: \"A \xc4).\r" },
     { 0, "\r" },
-    { HEAD, "Menu (ESC)" },
-    { 0, "\r" },
+    { H2, "Menu (ESC)" },
+    { K_H2, "\r" },
     { MONO, "N new     L load     S save\r"
             "I import  E export   (PETSCII text; Markdown\r"
             "          for name.md, RTF for name.rtf)\r"
@@ -110,7 +123,7 @@ void doc_load_help(void) {
         a = help[i].attr;
         for (s = help[i].s; *s; s++) {
             TXT[doc_len] = (u8)*s;
-            ATR[doc_len] = a;
+            ATR[doc_len] = *s == '\r' && help[i].s[1] ? ((a & A_FONT) == F_MONO ? K_CODE : K_NORMAL) : a;
             doc_len++;
         }
     }

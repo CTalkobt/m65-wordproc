@@ -6,7 +6,10 @@
  *                     (\fmodern), \f3 Head (\fswiss, at \fs36; the others
  *                     \fs24)
  *   styles            \b \b0, \i \i0, \ul \ulnone, written where they change
- *   a paragraph       \pard, its alignment (\ql \qc \qr \qj), its text, \par
+ *   a paragraph       \pard, its kind (\sN of a stylesheet: Normal, heading
+ *                     1-3 with \outlinelevel, Quote and Code with an indent,
+ *                     \li, given in the paragraph too, as readers want), its
+ *                     alignment (\ql \qc \qr \qj), its text, \par
  *   a page break      \par\page (the paragraph ends the page)
  *   \ { }             escaped with "\"; Latin-1 characters as \'hh
  *                     (\ansicpg1252: Windows-1252 has them)
@@ -25,6 +28,11 @@
  *                     others Sans; a size of 14 pt or more (\fs28) is Head
  *   \b \i \ul (\ulnone, \ul0, the other underlines), \plain, \pard
  *   \ql \qc \qr \qj   alignment
+ *   \outlinelevelN    heading N + 1 (from 3: heading 3)
+ *   \sN               the kind of the stylesheet's style N, by its name:
+ *                     "heading N" (as \outlinelevel), "Title" heading 1,
+ *                     one with "quot" a quote, with "code", "preformatted"
+ *                     or "source" code; others normal
  *   \par \line \row   a paragraph's end; \sect too after text
  *   \page             a page break (ending the paragraph, or the one that
  *                     just ended)
@@ -33,15 +41,12 @@
  *                     punctuation, else "?" (build_uni; \ucN characters
  *                     after \u skipped)
  *   \binN             N bytes of binary data skipped
- * and leaves out \colortbl, \stylesheet, \info, pictures, headers,
+ * and leaves out \colortbl, \info, pictures, headers,
  * footers, footnotes and every {\* ...} group (as the spec says a reader
  * should for those it does not know). Unknown control words are ignored.
  */
 #include "wp.h"
 
-#define F_SERIF 1
-#define F_MONO 2
-#define F_HEAD 3
 #define CHUNK 1024
 
 /* ==== export ==== */
@@ -50,7 +55,12 @@
 
 static const char rtf_head[] =
     "{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0\\fswiss Sans;}{\\f1\\froman Serif;}"
-    "{\\f2\\fmodern Mono;}{\\f3\\fswiss Head;}}\r\n";
+    "{\\f2\\fmodern Mono;}{\\f3\\fswiss Head;}}\r\n"
+    "{\\stylesheet{\\s0 Normal;}{\\s1\\outlinelevel0 heading 1;}{\\s2\\outlinelevel1 heading 2;}"
+    "{\\s3\\outlinelevel2 heading 3;}{\\s4\\li540 Quote;}{\\s5\\li360 Code;}}\r\n";
+/* a paragraph kind's \sN and the rest of its properties */
+static const char *const kind_rtf[KIND_TAB] = { "\\s0", "\\s1\\outlinelevel0", "\\s2\\outlinelevel1",
+                                                "\\s3\\outlinelevel2", "\\s4\\li540", "\\s5\\li360", "\\s0", "\\s0" };
 static const char *const q_word[4] = { "\\ql", "\\qc", "\\qr", "\\qj" };
 static const char hex[] = "0123456789abcdef";
 
@@ -63,6 +73,7 @@ static u16 rtf_export(void) {
     while ((ev = walk_next()) != EV_END) {
         if (ev == EV_PARA) {
             outs("\\pard");
+            outs(kind_rtf[w_attr & A_KIND]);
             outs(q_word[(w_attr & A_ALIGN) >> A_ALIGN_SHIFT]);
             sp = 1;                     /* the control words' ending space */
         } else if (ev == EV_RUN) {
@@ -104,7 +115,8 @@ static u16 rtf_export(void) {
 
 /* ==== import ==== */
 enum { S_TEXT, S_ESC, S_WORD, S_PARAM, S_HEX1, S_HEX2, S_DONE };
-enum { D_TEXT, D_SKIP, D_FONTS };      /* what a group's text is */
+enum { D_TEXT, D_SKIP, D_FONTS, D_STYLES };     /* what a group's text is */
+#define NSTYLE 16
 #define DEPTH 24                        /* groups whose state is kept (deeper: not) */
 #define NFONT 24
 
@@ -114,7 +126,12 @@ static int16_t param;
 static u16 binskip;                     /* \bin's bytes left */
 static u8 uskip;                        /* characters left to skip after \u */
 static u8 pempty;                       /* nothing since the last paragraph's end */
-static u8 align;
+static u8 align, pkind;                 /* the paragraph's alignment, kind */
+
+/* the stylesheet: a style's number, the paragraph kind its name gives */
+static int16_t s_num[NSTYLE], s_cur;
+static u8 s_kind[NSTYLE], nstyle, s_len;
+static char s_name[24];                 /* (lower case) */
 
 /* the group's state (saved at {, put back at }) */
 static u8 font, flags, fs, uc, dest;
@@ -147,7 +164,7 @@ static void uchar(u16 u) {
 static void put(u8 c) { uchar(c); }
 
 static void end_para(u8 c) {
-    b_attr = (u8)(align << A_ALIGN_SHIFT);
+    b_attr = (u8)((align << A_ALIGN_SHIFT) | pkind);
     build_put(c);
     pempty = 1;
 }
@@ -156,11 +173,18 @@ static void end_para(u8 c) {
 static const u8 cp_byte[] = { 0x85, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97 };
 static const u16 cp_uni[] = { 0x2026, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014 };
 
+static void style_end(void);
+
 /* a character of the text (c: a byte of the file, or a \'hh) */
 static void text(u8 c, u8 hex) {
     u8 k;
     if (uskip) {
         uskip--;
+        return;
+    }
+    if (dest == D_STYLES) {
+        if (c == ';') style_end();
+        else if (s_len < sizeof s_name - 1) s_name[s_len++] = (char)(c | (is_letter(c) ? 0x20 : 0));
         return;
     }
     if (dest == D_FONTS) {
@@ -186,6 +210,36 @@ static void text(u8 c, u8 hex) {
         return;
     }
     uchar(c);
+}
+
+/* does the style's name have s in it? */
+static u8 has(const char *s) {
+    u8 i, k;
+    for (i = 0; i < s_len; i++) {
+        for (k = 0; s[k] && s[k] == s_name[i + k]; k++) ;
+        if (!s[k]) return 1;
+    }
+    return 0;
+}
+
+/* a heading's kind from its outline level (0: heading 1) */
+static u8 level_kind(int16_t n) { return n < 0 ? K_NORMAL : n >= 2 ? K_H3 : (u8)(K_H1 + n); }
+
+/* the stylesheet's style s_cur ended (its name in s_name): its kind */
+static void style_end(void) {
+    u8 k = pkind;
+    s_name[s_len] = 0;
+    if (has("heading ")) k = level_kind(s_name[8] - '1');
+    else if (has("title") && !has("sub")) k = K_H1;
+    else if (has("quot")) k = K_QUOTE;
+    else if (has("code") || has("preformatted") || has("source")) k = K_CODE;
+    if (k && s_cur >= 0 && nstyle < NSTYLE) {
+        s_num[nstyle] = s_cur;
+        s_kind[nstyle++] = k;
+    }
+    s_len = 0;
+    s_cur = -1;
+    pkind = 0;
 }
 
 static void push(void) {
@@ -235,19 +289,20 @@ static u8 lookup(const char *list) {
 
 /* the destinations left out */
 static const char skips[] =
-    "colortbl stylesheet info pict nonshppict header headerl headerr headerf footer footerl footerr "
+    "colortbl info pict nonshppict header headerl headerr headerf footer footerl footerr "
     "footerf footnote object fldinst themedata listtable listoverridetable rsidtbl xe tc";
 /* the control words read (W_...: their place in the list) */
 static const char words[] =
     "par line row sect page tab cell pard plain ql qc qr qj b i ul ulnone uld ulw uldb "
-    "f fs u uc bin deff fonttbl froman fmodern emdash endash lquote rquote ldblquote rdblquote bullet";
+    "f fs u uc bin deff fonttbl froman fmodern s outlinelevel stylesheet "
+    "emdash endash lquote rquote ldblquote rdblquote bullet";
 enum { W_PAR = 1, W_LINE, W_ROW, W_SECT, W_PAGE, W_TAB, W_CELL, W_PARD, W_PLAIN, W_QL, W_QC, W_QR, W_QJ,
        W_B, W_I, W_UL, W_ULNONE, W_ULD, W_ULW, W_ULDB, W_F, W_FS, W_U, W_UC, W_BIN, W_DEFF, W_FONTTBL,
-       W_FROMAN, W_FMODERN, W_EMDASH, W_ENDASH, W_LQUOTE, W_RQUOTE, W_LDBLQUOTE, W_RDBLQUOTE, W_BULLET };
+       W_FROMAN, W_FMODERN, W_S, W_OUTLINELEVEL, W_STYLESHEET, W_EMDASH, W_ENDASH, W_LQUOTE, W_RQUOTE, W_LDBLQUOTE, W_RDBLQUOTE, W_BULLET };
 static const u16 named[] = { 0x2014, 0x2013, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022 };
 
 static void ctrl_word(void) {
-    u8 w = lookup(words), on1 = !has_param || param != 0;
+    u8 w = lookup(words), on1 = !has_param || param != 0, k;
     if (w == W_BIN) {
         binskip = has_param ? (u16)param : 0;
         return;
@@ -264,6 +319,13 @@ static void ctrl_word(void) {
         }
         return;
     }
+    if (dest == D_STYLES) {
+        /* a style's number (a character or table style's: none), its level */
+        if (w == W_S) s_cur = param;
+        else if ((word[0] == 'c' || word[0] == 't' || word[0] == 'd') && word[1] == 's' && !word[2]) s_cur = -1;
+        else if (w == W_OUTLINELEVEL) pkind = level_kind(param);
+        return;
+    }
     if (depth >= 2 && lookup(skips)) {
         dest = D_SKIP;
         return;
@@ -276,12 +338,23 @@ static void ctrl_word(void) {
     case W_LINE:
     case W_ROW: end_para(CH_CR); break;
     case W_PAGE:
-        if (pempty && b_n && txt_at(b_n - 1) == CH_CR) TXT[b_n - 1] = CH_FF;
+        if (pempty && b_n && txt_at(b_n - 1) == CH_CR) txt_put(b_n - 1, CH_FF);
         else end_para(CH_FF);
         break;
     case W_CELL: put(' '); /* fall through */
     case W_TAB: put(' '); break;
-    case W_PARD: align = 0; break;
+    case W_PARD: align = pkind = 0; break;
+    case W_S:
+        pkind = 0;
+        for (k = 0; k < nstyle; k++)
+            if (s_num[k] == param) pkind = s_kind[k];
+        break;
+    case W_OUTLINELEVEL: pkind = level_kind(param); break;
+    case W_STYLESHEET:
+        dest = D_STYLES;
+        s_len = 0;
+        s_cur = -1;
+        break;
     case W_PLAIN:
         font = deff_fam;
         flags = 0;
@@ -400,9 +473,9 @@ static void rtf_begin(void) {
     st = S_TEXT;
     build_start();
     binskip = 0;
-    uskip = depth = over = nfont = 0;
+    uskip = depth = over = nfont = nstyle = s_len = 0;
     pempty = 1;
-    align = font = flags = deff_fam = 0;
+    align = font = flags = deff_fam = pkind = 0;
     deff = 0;
     fs = 24;
     uc = 1;

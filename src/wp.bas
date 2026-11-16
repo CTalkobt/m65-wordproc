@@ -33,6 +33,7 @@
 #define CMD_ALL 18
 #define CMD_CLEAN 20
 #define CMD_LIST 21
+#define CMD_STYLE 32
 
 #define GET_DIRTY 0
 #define GET_PACK 2
@@ -49,9 +50,10 @@
 #define GET_RTFCHUNK 13
 #define GET_RTFEND 14
 #define GET_FONTS 15
+#define GET_KIND 16
 
 ' LIST.OVL's place: mod_area + LIST_OFS (wp.h)
-#define LIST_OFS 3712
+#define LIST_OFS 4352
 
 ' the file image's place: bank 5, $7600 (SCRATCH_LIN in wp.h)
 #define IMG 30208
@@ -89,46 +91,36 @@ waitkey:
   sys {wp_idle}
   get k$ : if k$ = "" then waitkey
   k = asc(k$)
-  select k
-  case 133
-    sys {wp_cmd}, CMD_VIEW
-  case 134
-    sys {wp_cmd}, CMD_BOLD
-  case 135
-    sys {wp_cmd}, CMD_ITALIC
-  case 136
-    sys {wp_cmd}, CMD_UNDER
-  case 137
-    sys {wp_cmd}, CMD_FONT
-  case 138
-    sys {wp_cmd}, CMD_ALIGN
-  case 139
-    sys {wp_cmd}, CMD_PAGEBREAK
-  case 140, 132
-    call loadhelp
-  case 16
-    sys {wp_cmd}, CMD_MARK
-  case 21
-    sys {wp_cmd}, CMD_COPY
-    call say(p"Copied.")
-  case 22
-    sys {wp_cmd}, CMD_CUT
-  case 23
-    sys {wp_cmd}, CMD_PASTE
-  case 25
-    sys {wp_cmd}, CMD_PGUP
-  case 26
-    sys {wp_cmd}, CMD_PGDN
-  case 12
-    ' CTRL+L: the whole screen drawn again
-    sys {wp_redraw}
-  case 27
-    sys {wp_get}, GET_SEL : rreg se
-    if se then sys {wp_cmd}, CMD_UNMARK : else call menu
-  case else
-    sys {wp_key}, k
-  endselect
+  ' a command key: its command (wp_cmd), by a table (as select's cases
+  ' cost some 60 bytes each): F1 view, F3 / F5 / F7 bold / italic /
+  ' underline, F2 font, F4 align, F6 page break, F9 mark, F11 cut, F12
+  ' paste, F13 / F14 page up / down (CMD_... in the second string)
+  i = instr("{$85}{$86}{$87}{$88}{$89}{$8a}{$8b}{$10}{$16}{$17}{$19}{$1a}", k$)
+  if i then sys {wp_cmd}, asc(mid$("{$07}{$01}{$02}{$03}{$04}{$05}{$06}{$08}{$0b}{$0c}{$10}{$11}", i, 1)) : goto mainloop
+  ' F8 / HELP the help, F10 copy, CTRL+D the style drop-down, CTRL+L the
+  ' screen drawn again, ESC the menu (or the selection's end)
+  i = instr("{$8c}{$84}{$15}{$04}{$0c}{$1b}", k$)
+  if i then on i gosub loadhelp, loadhelp, copysel, stylemenu, redraw, escape : goto mainloop
+  sys {wp_key}, k
   goto mainloop
+
+proc copysel
+  sys {wp_cmd}, CMD_COPY
+  call say(p"Copied.")
+endproc
+
+proc redraw
+  sys {wp_redraw}
+endproc
+
+proc escape
+  sys {wp_get}, GET_SEL : rreg se
+  if se then sys {wp_cmd}, CMD_UNMARK : else call menu
+endproc
+
+proc listmode
+  if lv then sys {wp_cmd}, CMD_LIST
+endproc
 
 ' ---- the menu (ESC): a panel of three rows at the bottom, the commands
 ' grouped (List only when LIST.OVL is loaded) ----
@@ -139,35 +131,31 @@ proc menu
     b$ = p"  T)List on"
     if lq then b$ = p"  T)List off"
   endif
-  call setstr(p"Menu:", {menu_text})
-  call setstr(p"File:  N)ew  L)oad  S)ave  I)mport  E)xport  D)ir", {menu_text} + 81)
+  call setstr(p"Menu:", {mod_area})
+  call setstr(p"File:  N)ew  L)oad  S)ave  I)mport  E)xport  D)ir", {mod_area} + 81)
   call setstr(p"View:  R)edraw" + b$ + p"    H)elp  Q)uit    ESC: back", {msg})
   sys {wp_panel}, 2
   getkey m$
   sys {wp_panel}, 0
-  m = asc(m$) and 127
-  select m
-  case 78
-    call newdoc
-  case 76
-    call loaddoc
-  case 83
-    call savedoc
-  case 73
-    call importtext
-  case 69
-    call exporttext
-  case 68
-    call showdir
-  case 72
-    call loadhelp
-  case 82
-    sys {wp_redraw}
-  case 84
-    if lv then sys {wp_cmd}, CMD_LIST
-  case 81
-    call quit
-  endselect
+  on instr(p"nlsiedhrtq", chr$(asc(m$) and 127)) gosub newdoc, loaddoc, savedoc, importtext, exporttext, showdir, loadhelp, redraw, listmode, quit
+endproc
+
+' ---- the style drop-down (CTRL+D) under the top bar's style field: the
+' cursor keys move it, RETURN applies the style lit (to the paragraphs
+' selected whole, or the cursor's; as a character style to the rest of the
+' selection), N 1 2 3 Q C at once, ESC leaves it ----
+proc stylemenu
+  sys {wp_get}, GET_KIND : rreg sv
+  do
+    sys {wp_drop}, sv
+    getkey m$ : m = asc(m$)
+    ' (a comparison is -1 when true)
+    sv = mod(sv - (m = 17) + (m = 145) + 6, 6)
+    i = instr(p"n123qc", m$)
+    if i then sv = i - 1 : m = 13
+  loop until m = 13 or m = 27
+  sys {wp_drop}, 255
+  if m = 13 then sys {wp_cmd}, CMD_STYLE + sv
 endproc
 
 ' s$ (PETSCII, at most 78 characters) poked at sa in bank 0, then a 0

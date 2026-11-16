@@ -2,49 +2,13 @@
 #include "wp.h"
 
 /* font_sans: 15 rows, baseline 12 */
-static const u8 font_sans_w[97] = {
-    4, 5, 6, 10, 8, 11, 9, 3, 5, 5, 6, 10, 4, 4, 4, 4,
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 4, 4, 10, 10, 10, 6,
-    12, 8, 8, 8, 9, 8, 7, 9, 9, 4, 4, 8, 7, 10, 9, 9,
-    7, 9, 8, 8, 7, 9, 8, 12, 8, 7, 8, 5, 4, 5, 10, 6,
-    6, 7, 8, 7, 8, 7, 4, 8, 8, 3, 3, 7, 3, 12, 8, 7,
-    8, 8, 5, 6, 5, 8, 7, 10, 7, 7, 6, 8, 4, 8, 10, 4,
-    4,
-};
+const struct font font_sans = { 15, 12, HI_LIN + 4512UL, HI_LIN + 4512 + 672UL };
 /* font_serif: 15 rows, baseline 12 */
-static const u8 font_serif_w[97] = {
-    4, 5, 6, 10, 8, 11, 11, 3, 5, 5, 6, 10, 4, 4, 4, 4,
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 4, 4, 10, 10, 10, 6,
-    12, 9, 9, 9, 10, 9, 8, 10, 10, 5, 5, 9, 8, 12, 10, 10,
-    8, 10, 9, 8, 8, 10, 9, 12, 9, 8, 8, 5, 4, 5, 10, 6,
-    6, 7, 8, 7, 8, 7, 4, 8, 8, 4, 4, 7, 4, 11, 8, 7,
-    8, 8, 6, 6, 5, 8, 7, 10, 7, 7, 6, 8, 4, 8, 10, 4,
-    4,
-};
+const struct font font_serif = { 15, 12, HI_LIN + 0UL, HI_LIN + 0 + 672UL };
 /* font_mono: 15 rows, baseline 11 */
-static const u8 font_mono_w[97] = {
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
-    8,
-};
+const struct font font_mono = { 15, 11, HI_LIN + 8739UL, HI_LIN + 8739 + 672UL };
 /* font_head: 23 rows, baseline 18 */
-static const u8 font_head_w[97] = {
-    7, 9, 10, 16, 13, 16, 16, 6, 9, 9, 10, 16, 7, 8, 7, 7,
-    13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 8, 8, 16, 16, 16, 11,
-    16, 15, 14, 14, 16, 13, 13, 16, 16, 7, 7, 15, 12, 16, 16, 16,
-    14, 16, 15, 14, 13, 15, 15, 16, 15, 14, 14, 9, 7, 9, 16, 10,
-    10, 13, 14, 11, 14, 13, 8, 14, 14, 7, 7, 13, 7, 16, 14, 13,
-    14, 14, 9, 11, 9, 14, 12, 16, 12, 12, 11, 14, 7, 14, 16, 7,
-    7,
-};
-const struct font font_sans = { 15, 12, font_sans_w, HI_LIN + 4512UL, HI_LIN + 4512 + 672UL };
-const struct font font_serif = { 15, 12, font_serif_w, HI_LIN + 0UL, HI_LIN + 0 + 672UL };
-const struct font font_mono = { 15, 11, font_mono_w, HI_LIN + 8739UL, HI_LIN + 8739 + 672UL };
-const struct font font_head = { 23, 18, font_head_w, FONT_LIN + 0UL, FONT_LIN + 0 + 672UL };
+const struct font font_head = { 23, 18, FONT_LIN + 0UL, FONT_LIN + 0 + 672UL };
 
 /* the raw-view font: 8 x 13 */
 const u32 font_raw_at = FONT_LIN + 8791UL;

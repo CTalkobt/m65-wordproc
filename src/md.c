@@ -6,10 +6,13 @@
  *                           are one Markdown paragraph with hard breaks
  *                           ("\" at the line's end); others are separate
  *                           blocks (a blank line between)
- *   all Head font           "# " heading
- *   all Mono, unstyled      a fenced code block (``` ... ```), one line a
- *                           paragraph
- *   bold, italic            **...**, *...*
+ *   paragraph kinds         heading 1-3: "#", "##", "###"; quote: "> "
+ *                           (quote paragraphs that follow each other: one
+ *                           quote, with hard breaks); code: a fenced code
+ *                           block (``` ... ```), a line a paragraph
+ *   bold, italic            **...**, *...* (where they differ from the
+ *                           paragraph kind's own style: a heading's bold is
+ *                           not written)
  *   underline               <u>...</u>
  *   Mono in a paragraph     `...`
  *   centre, right, justify  <div align="center"> ... </div> around it
@@ -20,8 +23,8 @@
  * characters are written as UTF-8.
  *
  * Import (md_import: SCRATCH_LIN, as FREAD# left it, as the document):
- * the above, and setext headings, lists and quotes (their markers kept as
- * text), links ([text](url) -> "text (url)", images: their text), HTML
+ * the above (headings past ### as heading 3), setext headings (= heading
+ * 1, - heading 2), lists (their markers kept as text), links ([text](url) -> "text (url)", images: their text), HTML
  * tags left out, the common entities, and UTF-8 characters (Latin-1's as
  * they are, curly quotes, dashes, ... as ASCII, others "?": build_uni). Blocks are separated by an empty paragraph (not after a
  * heading). Emphasis is paired within a paragraph; an unpaired * or _ is
@@ -29,8 +32,6 @@
  */
 #include "wp.h"
 
-#define F_MONO 2
-#define F_HEAD 3
 #define M_CODE 0x80             /* export: a character shown as code */
 #define M_FLAGS (A_UNDER | A_BOLD | A_ITAL)
 
@@ -43,11 +44,14 @@ static u8 is_letter(u8 c) { return (u8)((c | 0x20) - 'a') < 26; }
 static u8 is_alnum(u8 c) { return is_letter(c) || (u8)(c - '0') < 10; }
 static u8 is_punct(u8 c) { return c > ' ' && c < 127 && !is_alnum(c); }
 
-/* the Markdown style of character i: its underline / bold / italic, and
- * M_CODE for Mono (never for a backtick, which a code span cannot hold) */
+static u8 base;                 /* the paragraph kind's own style (kind_attr) */
+
+/* the Markdown style of character i: its underline / bold / italic (those
+ * the paragraph's kind does not give it), and M_CODE for Mono in another
+ * kind (never for a backtick, which a code span cannot hold) */
 static u8 raw_style(u16 i) {
-    u8 a = atr_at(i), s = a & M_FLAGS;
-    if ((a & A_FONT) == F_MONO && txt_at(i) != '`') s |= M_CODE;
+    u8 a = atr_at(i), s = a & M_FLAGS & ~base;
+    if ((a & A_FONT) == F_MONO && (base & A_FONT) != F_MONO && txt_at(i) != '`') s |= M_CODE;
     return s;
 }
 
@@ -139,7 +143,8 @@ static void out_para(u16 ps, u16 pe, u8 code) {
     restyle_to(0);
 }
 
-enum { K_NONE, K_PLAIN, K_HEAD, K_CODE, K_BREAK };
+#define P_NONE 0xFF             /* (prev: no block yet; a page break) */
+#define P_BREAK 0xFE
 
 static const char *const align_attr[4] = { "", "center", "right", "justify" };
 static u8 prev, pal;            /* the last block's kind; its alignment (a div open) */
@@ -148,70 +153,66 @@ static u8 prev, pal;            /* the last block's kind; its alignment (a div o
 static void end_block(void) {
     if (prev == K_CODE) outs("\n```");
     if (pal) outs("\n\n</div>");
-    if (prev != K_NONE) outs("\n\n");
+    if (prev != P_NONE) outs("\n\n");
     pal = 0;
 }
 
 /* the document as Markdown at SCRATCH_LIN; its size (0: more than fits) */
 u16 md_export(void) {
-    u16 ps, pe, i;
-    u8 ev, kind, al, gap = 0, a, head, mono, any;
+    u16 ps, pe;
+    u8 ev, kind, al, gap = 0, k;
     o_start();
     walk_start();
-    prev = pal = K_NONE;
+    prev = P_NONE;
+    pal = 0;
     while ((ev = walk_next()) != EV_END) {
         if (ev == EV_PEND && w_attr == CH_FF) {
             end_block();
             outs("<div style=\"page-break-after: always\"></div>");
-            prev = K_BREAK;
+            prev = P_BREAK;
             gap = 1;
         }
         if (ev != EV_PARA) continue;
         ps = w_pos;
         pe = w_to;
+        kind = w_attr & A_KIND;
         al = (u8)((w_attr & A_ALIGN) >> A_ALIGN_SHIFT);
-        if (pe > ps) {
-            /* its kind: all Head, all unstyled Mono (its spaces aside: a
-             * code span or block takes them in), or plain */
-            head = mono = 1;
-            any = 0;
-            for (i = ps; i < pe; i++) {
-                a = atr_at(i);
-                if (is_sp(txt_at(i))) continue;
-                any = 1;
-                if ((a & A_FONT) != F_HEAD) head = 0;
-                if ((a & A_FONT) != F_MONO || (a & M_FLAGS)) mono = 0;
-            }
-            kind = !any ? K_PLAIN : head ? K_HEAD : mono ? K_CODE : K_PLAIN;
-            if (kind == K_CODE) al = 0;
-            if (!gap && kind == prev && kind == K_CODE) {
-                out('\n');
-            } else if (!gap && kind == prev && kind == K_PLAIN && al == pal) {
-                outs("\\\n");
-            } else {
-                end_block();
-                if (al) {
-                    outs("<div align=\"");
-                    outs(align_attr[al]);
-                    outs("\">\n\n");
-                }
-                if (kind == K_HEAD) outs("# ");
-                if (kind == K_CODE) outs("```\n");
-                pal = al;
-            }
-            out_para(ps, pe, kind == K_CODE);
-            prev = kind;
-            gap = 0;
-        } else {
+        if (kind == K_CODE) al = 0;
+        /* (an empty paragraph: a gap, but an empty line in a code block) */
+        if (pe == ps && (kind != K_CODE || prev != K_CODE || gap)) {
             gap = 1;
+            continue;
         }
+        if (!gap && kind == prev && kind == K_CODE) {
+            out('\n');
+        } else if (!gap && kind == prev && (kind == K_NORMAL || kind == K_QUOTE) && al == pal) {
+            outs("\\\n");
+        } else {
+            end_block();
+            if (al) {
+                outs("<div align=\"");
+                outs(align_attr[al]);
+                outs("\">\n\n");
+            }
+            if ((u8)(kind - K_H1) < 3) {
+                for (k = kind; k; k--) out('#');
+                out(' ');
+            }
+            if (kind == K_CODE) outs("```\n");
+            pal = al;
+        }
+        if (kind == K_QUOTE) outs("> ");
+        base = kind_attr[kind];
+        out_para(ps, pe, kind == K_CODE);
+        prev = kind;
+        gap = 0;
     }
     end_block();
     return o_end();
 }
 
 /* ==== import ==== */
-static u8 base_font;            /* Head in a heading */
+static u8 pk, base_attr;        /* the paragraph's kind, its style (kind_attr) */
 static u8 flags;                /* bold / italic / underline open */
 static u8 code;                 /* in a code span or block */
 static u8 para_open, after_head, align, hard;
@@ -254,7 +255,7 @@ static void raw(u8 c, u8 a) {
 }
 
 /* the style of the text now */
-static void style(void) { b_attr = (u8)((code ? F_MONO : base_font) | flags); }
+static void style(void) { b_attr = (u8)((code ? F_MONO : base_attr) | flags); }
 
 static void put(u8 c) {
     style();
@@ -272,7 +273,7 @@ static void lit(u8 c, u8 k) {
 /* the paragraph's end: a CR with its alignment */
 static void end_para(void) {
     if (!para_open) return;
-    raw(CH_CR, (u8)(align << A_ALIGN_SHIFT));
+    raw(CH_CR, (u8)((align << A_ALIGN_SHIFT) | pk));
     para_open = 0;
     flags = code = 0;
 }
@@ -284,10 +285,12 @@ static void block_start(void) {
     after_head = 0;
 }
 
-/* a paragraph starts */
-static void para_start(void) {
+/* a paragraph of kind k starts */
+static void para_start(u8 k) {
     para_open = 1;
     pstart = b_n;
+    pk = k;
+    base_attr = kind_attr[k];
 }
 
 /* a closing c (not after a space) from i to the paragraph's end (a blank line) */
@@ -463,10 +466,10 @@ static void inline_md(u16 i, u16 e) {
  * the document; its length */
 u16 md_import(void) {
     u16 i = 0, ls, le, e, j, t;
-    u8 c, fence = 0, n, item = 0;
+    u8 c, fence = 0, n, item = 0, q;
     mem_put(SCRATCH_LIN + SCRATCH_MAX - 1, 0);  /* (an end, even for a file that fills it) */
     build_start();
-    para_open = after_head = align = hard = flags = code = base_font = 0;
+    para_open = after_head = align = hard = flags = code = pk = base_attr = 0;
     while (in(i)) {
         /* the line ls..le-1 (without its CR / LF) */
         for (ls = i; (c = in(i)) != 0 && c != '\n' && c != '\r'; i++) ;
@@ -483,7 +486,7 @@ u16 md_import(void) {
             }
             if (fence == 1) block_start();
             fence = 2;
-            para_start();
+            para_start(K_CODE);
             code = 1;
             for (e = ls; e < le; e++) {
                 c = in(e);
@@ -527,7 +530,8 @@ u16 md_import(void) {
             for (e = j, n = 0; e < le && (in(e) == c || in(e) == ' '); e++) n += in(e) == c;
             if (e == le && (para_open ? c == '=' || c == '-' : n >= 3)) {
                 if (para_open) {
-                    for (e = pstart; e < b_n; e++) ATR[e] = (u8)((atr_at(e) & ~A_FONT) | F_HEAD);
+                    pk = c == '=' ? K_H1 : K_H2;
+                    for (e = pstart; e < b_n; e++) atr_put(e, (u8)(kind_attr[pk] | (atr_at(e) & M_FLAGS)));
                     end_para();
                     after_head = 1;
                 }
@@ -543,17 +547,19 @@ u16 md_import(void) {
                 for (e = le; e > j && in(e - 1) == ' '; e--) ;
                 for (t = e; t > j && in(t - 1) == '#'; t--) ;
                 if (t < e && (t == j || in(t - 1) == ' ')) e = t;
-                base_font = F_HEAD;
-                para_start();
+                para_start((u8)(n > 3 ? K_H3 : n));
                 inline_md(skip((u16)(j + n), ' '), e);
                 end_para();
-                base_font = 0;
                 after_head = 1;
                 continue;
             }
         }
-        /* quotes: their > left out */
+        /* quotes: their > left out, a quote paragraph (lines without one
+         * go on with it); ">" alone ends a paragraph in it */
+        q = in(j) == '>';
         while (in(j) == '>') j = skip((u16)(j + 1), ' ');
+        if (q && (j >= le || pk != K_QUOTE)) end_para();
+        if (j >= le) continue;
         c = in(j);
         /* list items: a paragraph each, their marker kept */
         n = 0;
@@ -567,12 +573,12 @@ u16 md_import(void) {
             end_para();
             if (!item) block_start();
             item = 1;
-            para_start();
+            para_start(q ? K_QUOTE : K_NORMAL);
             for (; n; n--) put(in(j++));
         } else if (!para_open) {
             /* a new paragraph */
             block_start();
-            para_start();
+            para_start(q ? K_QUOTE : K_NORMAL);
         } else if (hard) {
             /* after a hard break: a paragraph with no empty one before it */
             line_break();

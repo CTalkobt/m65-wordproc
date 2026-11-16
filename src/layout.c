@@ -20,20 +20,22 @@ const struct font *const fonts[NFONTS] = { &font_sans, &font_serif, &font_mono, 
 const char *const font_names[NFONTS] = { "Sans", "Serif", "Mono", "Head" };
 static const char *const align_tags[4] = { "", "[Center]", "[Right]", "[Just]" };
 
+/* the paragraph kinds (wp.h): their characters' style, names, raw view tags */
+const u8 kind_attr[KIND_TAB] = { F_SANS, F_HEAD | A_BOLD, F_HEAD, F_SERIF | A_BOLD, F_SERIF | A_ITAL, F_MONO };
+const char *const kind_names[KIND_TAB] = { "Normal", "Heading 1", "Heading 2", "Heading 3", "Quote", "Code", "Normal",
+                                           "Normal" };
+static const char *const kind_tags[KIND_TAB] = { "", "[H1]", "[H2]", "[H3]", "[Quote]", "[Code]", "", "" };
+/* the indent of a quote, a code block */
+static const u8 kind_indent[KIND_TAB] = { 0, 0, 0, 0, 24, 16 };
+
 static u8 is_break(u8 c) { return c == CH_CR || c == CH_FF; }
 
 u8 char_w(u8 c, u8 a) {
     const struct font *f = fonts[a & A_FONT];
     u8 w;
-    if (c >= FONT_HI) {
-        w = mem_get(f->offs + (u16)((c - FONT_FIRST) * 3));
-    } else {
-        if (c < FONT_FIRST || c > 126) {
-            if (is_break(c)) return 0;
-            c = '?';
-        }
-        w = f->w[c - FONT_FIRST];
-    }
+    if (is_break(c)) return 0;
+    if (c < FONT_FIRST || (c > 126 && c < FONT_HI)) c = '?';
+    w = mem_get(f->offs + (u16)((c - FONT_FIRST) * 3));
     return (u8)(w + ((a & A_BOLD) ? 1 : 0));
 }
 
@@ -54,12 +56,12 @@ u8 prev_style(u16 i) {
 
 /* the tags shown before character i (into out, when not NULL); their length */
 u8 raw_tag(u16 i, char *out) {
-    char buf[48];
     u8 n = 0, prev, now, c = txt_at(i);
-    if (!out) out = buf;
+    if (!out) out = mod_area.r.tag_buf;
     if (i == 0 || is_break(txt_at(i - 1))) {
-        u8 al = para_al(i);
-        if (al) n = tag_put(out, n, align_tags[al]);
+        u8 pa = atr_at(para_end(i));
+        n = tag_put(out, n, kind_tags[pa & A_KIND]);
+        n = tag_put(out, n, align_tags[(pa & A_ALIGN) >> A_ALIGN_SHIFT]);
     }
     if (c == CH_FF) return tag_put(out, n, "[Page]");
     if (c == CH_CR) return n;
@@ -106,7 +108,7 @@ static u8 tok_w(u16 i) {
 u8 layout_done;
 struct lstate {
     u16 pos, yin, row;
-    u8 page, para, al;
+    u8 page, para, al, kind;
 };
 static struct lstate lz;
 
@@ -114,8 +116,7 @@ static u8 pend, pend_multi;     /* an edit to lay out; more than one */
 static u16 pend_lo, pend_hi;    /* the first position changed; the end of the change (before it) */
 static int16_t pend_delta;      /* characters added (removed: negative) */
 
-#define TMP_LINES 32
-static struct line tmp[TMP_LINES];
+#define tmp mod_area.r.lay_tmp     /* (the drawing's memory: not in use while laying out) */
 
 /* The line table is in bank 4: a line is read and written whole (one DMA)
  * and its fields used near, as each far LINES[l].field costs ~60 bytes of
@@ -172,7 +173,7 @@ static void state_at(u16 l, struct lstate *st) {
         st->pos = st->yin = st->row = 0;
         st->page = 0;
         st->para = 1;
-        st->al = 0;
+        st->al = st->kind = 0;
         return;
     }
     get_line(l, &L);
@@ -183,12 +184,13 @@ static void state_at(u16 l, struct lstate *st) {
     st->yin = (u16)(L.y - (PAGE_GAP + st->page * PAGE_STRIDE + MARGIN_TOP));
     st->para = (u8)(p == 0 || is_break(txt_at(p - 1)));
     st->al = para_al(p);
+    st->kind = L.kind;
 }
 
 /* the next line from st into *L, st moved past it; 0 at the document's end */
 static u8 produce(struct lstate *st, struct line *L) {
-    u16 pos = st->pos, end, i, width, tw;
-    u8 hard, asc, desc, nsp, trail, x;
+    u16 pos = st->pos, end, i, width, tw, tmax;
+    u8 hard, asc, desc, nsp, trail, x, ind, k;
     const struct font *f;
     if (pos >= doc_len) return 0;
     if (view_mode == VIEW_RAW) {
@@ -198,13 +200,19 @@ static u8 produce(struct lstate *st, struct line *L) {
         L->h = RAW_H;
         L->asc = 11;
         L->x = 0;
-        L->extra = L->nsp = L->page = 0;
+        L->extra = L->nsp = L->page = L->kind = 0;
         st->row++;
         st->pos = end;
         return 1;
     }
-    if (st->para) st->al = para_al(pos);
-    end = break_line(pos, TEXT_W, &hard);
+    if (st->para) {
+        st->al = para_al(pos);
+        st->kind = para_kind(pos);
+    }
+    k = st->kind;
+    ind = kind_indent[k];
+    tmax = TEXT_W - ind;
+    end = break_line(pos, tmax, &hard);
     /* the line's metrics: its width without the spaces at its end, its
      * spaces, its tallest ascent and descent */
     asc = desc = 0;
@@ -213,7 +221,10 @@ static u8 produce(struct lstate *st, struct line *L) {
     tw = 0;
     for (i = pos; i < end; i++) {
         u8 c = txt_at(i), a = atr_at(i);
-        if (is_break(c) && i > pos) continue;
+        if (is_break(c)) {
+            if (i > pos) continue;
+            a = kind_attr[k];               /* (an empty paragraph: its kind's height) */
+        }
         f = fonts[a & A_FONT];
         if (f->ascent > asc) asc = f->ascent;
         if (f->height - f->ascent > desc) desc = (u8)(f->height - f->ascent);
@@ -236,11 +247,11 @@ static u8 produce(struct lstate *st, struct line *L) {
         st->yin = 0;
     }
     {
-        u16 room = width < TEXT_W ? (u16)(TEXT_W - width) : 0;
-        L->x = 0;
+        u16 room = width < tmax ? (u16)(tmax - width) : 0;
+        L->x = ind;
         L->extra = L->nsp = 0;
-        if (st->al == 1) L->x = room / 2;
-        else if (st->al == 2) L->x = room;
+        if (st->al == 1) L->x += room / 2;
+        else if (st->al == 2) L->x += room;
         else if (st->al == 3 && !hard && nsp && room < 256) {
             L->extra = (u8)room;
             L->nsp = nsp;
@@ -251,6 +262,7 @@ static u8 produce(struct lstate *st, struct line *L) {
     L->h = (u8)(asc + desc);
     L->asc = asc;
     L->page = st->page;
+    L->kind = k;
     st->yin += asc + desc;
     if (hard && txt_at(end - 1) == CH_FF) {
         st->page++;

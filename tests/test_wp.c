@@ -118,12 +118,12 @@ static u16 rtf_in(const char *s) {
 }
 
 /* the document as it matters to a file: the text, each character's style,
- * each paragraph's alignment */
+ * each paragraph's kind and alignment */
 static u16 doc_sig(u8 *t, u8 *a) {
     u16 i;
     for (i = 0; i < doc_len; i++) {
         t[i] = TXT[i];
-        a[i] = (u8)(ATR[i] & (TXT[i] == CH_CR || TXT[i] == CH_FF ? A_ALIGN : A_STYLE));
+        a[i] = (u8)(ATR[i] & (TXT[i] == CH_CR || TXT[i] == CH_FF ? A_PARA : A_STYLE));
     }
     return doc_len;
 }
@@ -643,6 +643,109 @@ int main(void) {
             CHECK((ATR[22] & A_UNDER) && !(ATR[28] & A_UNDER));
             CHECK((ATR[31] & A_FONT) == 2 && (ATR[36] & A_FONT) == 1 && (ATR[35] & A_FONT) == 0);
         }
+    }
+
+    /* paragraph kinds (#4): the styles applied, typed after, laid out,
+     * shown, exported and imported */
+    {
+        static char m1[4000], m2[4000], tags[48];
+        struct line L;
+        u8 r;
+        wp_cmd(13);
+        if (view_mode != VIEW_PAGE) wp_cmd(7);
+        type("Title\nBody text here\nmore");
+        wp_key(147);                                    /* (the start) */
+        wp_cmd(32 + K_H1);                              /* no selection: the cursor's paragraph */
+        CHECK(para_kind(0) == K_H1 && ATR[0] == (F_HEAD | A_BOLD) && ATR[4] == (F_HEAD | A_BOLD) && para_kind(6) == 0);
+        CHECK(wp_get(16) == K_H1);                      /* GET_KIND */
+        CHECK(raw_tag(0, tags) >= 4 && memcmp(tags, "[H1]", 4) == 0);
+        /* RETURN at a heading's end: a normal paragraph after it */
+        wp_cmd(14);
+        type("\nx");
+        CHECK(para_kind(0) == K_H1 && para_kind(6) == K_NORMAL && ATR[6] == 0);
+        wp_key(20);
+        wp_key(20);                                     /* (the empty paragraph gone: the heading kept) */
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "Title\rBody text here\rmore\r") == 0 && para_kind(0) == K_H1);
+        /* part of a paragraph: a character style */
+        sel_on = 1;
+        sel_anchor = 11;
+        cur = 15;
+        wp_cmd(32 + K_CODE);
+        CHECK(ATR[10] == 0 && ATR[11] == F_MONO && ATR[14] == F_MONO && ATR[15] == 0 && para_kind(6) == K_NORMAL);
+        /* part of one, all of the next: each its way */
+        sel_anchor = 16;
+        cur = 25;
+        wp_cmd(32 + K_QUOTE);
+        CHECK(ATR[16] == (F_SERIF | A_ITAL) && para_kind(6) == K_NORMAL);
+        CHECK(para_kind(21) == K_QUOTE && ATR[21] == (F_SERIF | A_ITAL) && ATR[24] == (F_SERIF | A_ITAL));
+        /* a whole paragraph: the characters in the old kind's style take
+         * the new one's, others keep their font (and what was added) */
+        sel_on = 0;
+        cur = 8;
+        wp_cmd(32 + K_QUOTE);
+        CHECK(para_kind(6) == K_QUOTE && ATR[6] == (F_SERIF | A_ITAL) && ATR[11] == (F_MONO | A_ITAL));
+        wp_cmd(32 + K_NORMAL);
+        CHECK(para_kind(6) == K_NORMAL && ATR[6] == 0 && ATR[11] == F_MONO && ATR[16] == 0);
+        CHECK(para_kind(21) == K_QUOTE);
+        /* a quote laid out with its indent */
+        get_line(line_of(21), &L);
+        CHECK(L.x == 24 && L.kind == K_QUOTE);
+        /* the top bar's style field, the drop-down */
+        cur = 22;
+        wp_key(29);
+        CHECK(strstr(mod_area.r.bar_text[0], "Quote") != NULL);
+        wp_drop(K_H2);
+        screen_ppm("build/style_drop.ppm");
+        for (r = 0, i = 0; i < 6 * 24; i++) r |= MEM[BITMAP_LIN + (u32)((16 + i) >> 3) * 640 + ((16 + i) & 7) + 8];
+        CHECK(r != 0);
+        wp_drop(0xFF);
+
+        /* Markdown: each kind, and back */
+        md_in("# One\n\n## Two\n\n### Three\n\n#### Four\n\ntext *it*\n\n> q1 *it* **b**\n> q2\\\n> q3\n>\n> q4\n\n"
+              "```\ncode\n\n  more\n```\n\nSetext\n------\n");
+        text_of(buf, sizeof buf);
+        /* (no empty paragraph after a heading; q1's next line is the same
+         * paragraph, q2's \ a hard break, > alone a paragraph's end) */
+        CHECK(strcmp(buf, "One\rTwo\rThree\rFour\rtext it\r\rq1 it b q2\rq3\r\rq4\r\rcode\r\r  more\r\rSetext\r") == 0);
+        CHECK(para_kind(0) == K_H1 && para_kind(4) == K_H2 && para_kind(8) == K_H3 && para_kind(14) == K_H3 &&
+              para_kind(19) == K_NORMAL);
+        CHECK(ATR[0] == (F_HEAD | A_BOLD) && ATR[8] == (F_SERIF | A_BOLD) && ATR[24] == A_ITAL);
+        CHECK(para_kind(28) == K_QUOTE && ATR[28] == (F_SERIF | A_ITAL) && ATR[34] == (F_SERIF | A_ITAL | A_BOLD));
+        CHECK(para_kind(39) == K_QUOTE && para_kind(42) == K_NORMAL && para_kind(43) == K_QUOTE);
+        CHECK(para_kind(47) == K_CODE && para_kind(52) == K_CODE && para_kind(53) == K_CODE && ATR[47] == F_MONO);
+        CHECK(para_kind(61) == K_H2 && ATR[61] == F_HEAD);
+        md_out(m1);
+        CHECK(strstr(m1, "# One\n\n## Two\n\n### Three\n\n### Four\n\ntext *it*\n\n> q1 it **b** q2\\\n> q3\n\n> q4") != NULL);
+        CHECK(strstr(m1, "```\ncode\n\n  more\n```\n\n## Setext") != NULL);
+        md_fixed_point(m1, m2, "kinds");
+        rtf_round("kinds (Markdown)");
+        wp_redraw();
+        screen_ppm("build/kinds_page.ppm");
+        wp_cmd(7);
+        screen_ppm("build/kinds_raw.ppm");
+        wp_cmd(7);
+
+        /* RTF from elsewhere: the stylesheet's names, \outlinelevel */
+        rtf_in("{\\rtf1\\ansi{\\stylesheet{\\s0 Normal;}{\\s2\\sbasedon0\\cf1 heading 1;}{\\s7 Intense Quote;}"
+               "{\\s9 HTML Preformatted;}{\\*\\cs10 Strong;}{\\s11 Title;}{\\s12 Subtitle;}}"
+               "\\pard\\s2 A\\par\\pard\\s7 B\\par\\pard\\s9 C\\par\\pard\\outlinelevel1 D\\par"
+               "\\pard\\s11 E\\par\\pard\\s12 F\\par\\pard G\\par}");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "A\rB\rC\rD\rE\rF\rG\r") == 0);
+        CHECK(para_kind(0) == K_H1 && para_kind(2) == K_QUOTE && para_kind(4) == K_CODE && para_kind(6) == K_H2 &&
+              para_kind(8) == K_H1 && para_kind(10) == K_NORMAL && para_kind(12) == K_NORMAL);
+
+        /* a version 1 file: its paragraph ends' style bits cleared */
+        wp_cmd(13);
+        type("ab");
+        ATR[2] = (u8)(A_BOLD | 3 | (2 << A_ALIGN_SHIFT));
+        n = doc_pack();
+        MEM[SCRATCH_LIN + 2] = 1;
+        CHECK(doc_unpack() == 0 && ATR[2] == (2 << A_ALIGN_SHIFT) && para_kind(0) == K_NORMAL);
+        MEM[SCRATCH_LIN + 2] = 3;
+        CHECK(doc_unpack() == 1);                       /* (a later version: refused) */
+        (void)n;
     }
 
     /* Latin-1 (#1): typed with Compose, measured, exported and imported */

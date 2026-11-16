@@ -30,9 +30,9 @@ void mem_fill(u32 dst, u16 n, u8 v) {
     if (n) dma_fill_far(dst, n, v);
 }
 
-void blit_row(u16 sy, const u8 *src) {
+void blit_row(u16 sy, const u8 *src, u8 n) {
     u32 dst = BITMAP_LIN + (u32)(sy >> 3) * (COLS * 8) + (sy & 7);
-    dma_copy_far_step(dst, 8, (u32)(u16)src, 1, COLS);
+    dma_copy_far_step(dst, 8, (u32)(u16)src, 1, n);
 }
 
 void color_fill(u8 row, u8 col, u8 n, u8 c) {
@@ -54,16 +54,11 @@ static u8 is_on, screen_made;
 
 static void make_screen(void) {
     u16 i;
-    u8 row[COLS * 2];
-    u8 r, c;
+    u8 __far *p = (u8 __far *)SCREEN_LIN;
     /* cell n shows character n */
-    for (r = 0; r < ROWS; r++) {
-        i = (u16)r * COLS;
-        for (c = 0; c < COLS; c++, i++) {
-            row[c * 2] = (u8)i;
-            row[c * 2 + 1] = (u8)(i >> 8);
-        }
-        dma_copy_far(SCREEN_LIN + (u32)r * COLS * 2, (u32)(u16)row, COLS * 2);
+    for (i = 0; i < COLS * ROWS; i++) {
+        *p++ = (u8)i;
+        *p++ = (u8)(i >> 8);
     }
     /* colour RAM: the first byte of every cell 0, the colour black */
     dma_fill_far_step(COLRAM, 2, COLS * ROWS, 0);

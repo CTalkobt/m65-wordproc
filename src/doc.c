@@ -14,8 +14,8 @@ u8 goal_valid;
 u16 clip_len;
 
 void doc_new(void) {
-    TXT[0] = CH_CR;
-    ATR[0] = 0;
+    txt_put(0, CH_CR);
+    atr_put(0, 0);
     doc_len = 1;
     cur = 0;
     sel_on = 0;
@@ -38,6 +38,11 @@ u16 para_end(u16 i) {
 /* the alignment of the paragraph holding i (0 left .. 3 justify) */
 u8 para_al(u16 i) { return (u8)((atr_at(para_end(i)) & A_ALIGN) >> A_ALIGN_SHIFT); }
 
+/* its kind (K_...) */
+u8 para_kind(u16 i) { return atr_at(para_end(i)) & A_KIND; }
+
+u8 cur_kind(void) { return para_kind(sel_on ? sel_lo() : cur); }
+
 static u8 is_break(u8 c) { return c == CH_CR || c == CH_FF; }
 
 /* the start of the paragraph holding i */
@@ -50,6 +55,7 @@ static u16 para_start(u16 i) {
  * paragraph's start) the one after it */
 u8 attr_at_cursor(void) {
     if (cur > 0 && !is_break(txt_at(cur - 1))) return atr_at(cur - 1) & A_STYLE;
+    if (is_break(txt_at(cur))) return kind_attr[atr_at(cur) & A_KIND];     /* (an empty paragraph: its kind's) */
     return atr_at(cur) & A_STYLE;
 }
 
@@ -72,11 +78,10 @@ u8 doc_insert(u16 at, const u8 *s, const u8 *a, u16 n) {
     if (n == 0) return 0;
     if (doc_len + n > DOC_MAX) return 1;
     open_gap(at, n);
-    for (i = 0; i < n; i++) {
-        TXT[at + i] = s[i];
-        ATR[at + i] = a[i];
+    mem_write(TEXT_LIN + at, s, n);
+    mem_write(ATTR_LIN + at, a, n);
+    for (i = 0; i < n; i++)
         if (is_break(s[i])) lo = 0xFFFF;
-    }
     /* a paragraph end inserted: the lines before it, in its paragraph,
      * take its alignment */
     if (lo == 0xFFFF) lo = para_start(at);
@@ -92,10 +97,12 @@ void doc_delete(u16 from, u16 to) {
     if (to > doc_len - 1) to = doc_len - 1;
     if (from >= to) return;
     /* a paragraph end deleted: the paragraph before it takes the next one's
-     * alignment */
+     * kind and alignment, unless nothing of that one is left (the end after
+     * the deletion: an empty paragraph joined), when it keeps its own */
     for (i = from; i < to; i++)
         if (is_break(txt_at(i))) {
             lo = para_start(from);
+            if (is_break(txt_at(to))) atr_put(to, atr_at(i));
             break;
         }
     n = doc_len - to;
@@ -115,17 +122,26 @@ static void delete_selection(void) {
 
 /* an ASCII character (or CR / FF) typed at the cursor */
 u8 doc_type(u8 c) {
-    u8 a;
+    u8 a, k, brk = is_break(c), at_end;
     if (sel_on) {
         typing_attr = atr_at(sel_lo()) & A_STYLE;
         delete_selection();
     }
     a = typing_attr;
-    if (is_break(c) && nlines >= MAX_LINES - 8) return 1;   /* the line table is (almost) full */
-    if (is_break(c))    /* the new paragraph end keeps the paragraph's alignment */
-        a |= atr_at(para_end(cur)) & A_ALIGN;
+    at_end = is_break(txt_at(cur));
+    if (brk) {
+        if (nlines >= MAX_LINES - 8) return 1;  /* the line table is (almost) full */
+        /* the new paragraph end keeps the paragraph's kind and alignment */
+        a = atr_at(para_end(cur)) & A_PARA;
+    }
     if (doc_insert(cur, &c, &a, 1)) return 1;
     cur++;
+    k = (u8)((a & A_KIND) - K_H1);
+    if (brk && at_end && k < 3) {
+        /* after a heading's end: a normal paragraph */
+        atr_put(cur, (u8)(atr_at(cur) & ~A_KIND));
+        typing_attr = kind_attr[K_NORMAL];
+    }
     goal_valid = 0;
     return 0;
 }
@@ -153,7 +169,8 @@ void doc_delete_fwd(void) {
  * is its first character's */
 static void restyle(u8 keep, u8 set) {
     u16 lo = sel_lo(), hi = sel_hi(), i;
-    for (i = lo; i < hi; i++) ATR[i] = (u8)((atr_at(i) & keep) | set);
+    for (i = lo; i < hi; i++)
+        if (!is_break(txt_at(i))) atr_put(i, (u8)((atr_at(i) & keep) | set));
     typing_attr = atr_at(lo) & A_STYLE;
     dirty = 1;
     layout_edit(lo, hi, 0);
@@ -182,10 +199,48 @@ void doc_cycle_align(void) {
     u16 e = para_end(lo), ps = para_start(lo);
     u8 al = (u8)((((atr_at(e) & A_ALIGN) >> A_ALIGN_SHIFT) + 1) & 3);
     for (;;) {
-        ATR[e] = (u8)((atr_at(e) & ~A_ALIGN) | (al << A_ALIGN_SHIFT));
+        atr_put(e, (u8)((atr_at(e) & ~A_ALIGN) | (al << A_ALIGN_SHIFT)));
         if (e >= hi || e >= doc_len - 1) break;
         e = para_end(e + 1);
     }
+    dirty = 1;
+    layout_edit(ps, e, 0);
+}
+
+/* Style k (a paragraph kind) applied: a paragraph the selection holds
+ * whole (all its text; with no selection, the cursor's) becomes of kind k,
+ * its characters in k's font and style where they were in its old kind's
+ * (others keep their font; bold, italic, underline added to the old kind's
+ * stay); the selection's part of any other paragraph takes k's font and
+ * style as they are (Normal: plain). */
+void doc_style(u8 k) {
+    u16 lo = cur, hi = cur, p, e, i, ps;
+    u8 a, f, of, keep, ka = kind_attr[k], kf = ka & A_FONT, kfl = ka & ~A_FONT;
+    if (sel_on) {
+        lo = sel_lo();
+        hi = sel_hi();
+    }
+    p = ps = para_start(lo);
+    for (;;) {
+        e = para_end(p);
+        if (!sel_on || (lo <= p && hi >= e)) {
+            a = kind_attr[atr_at(e) & A_KIND];
+            of = a & A_FONT;
+            keep = (u8)(~a & (A_BOLD | A_ITAL | A_UNDER));
+            for (i = p; i < e; i++) {
+                a = atr_at(i);
+                f = a & A_FONT;
+                if (f == of) f = kf;
+                atr_put(i, (u8)(f | (a & keep) | kfl));
+            }
+            atr_put(e, (u8)((atr_at(e) & ~A_KIND) | k));
+        } else {
+            for (i = lo > p ? lo : p; i < e && i < hi; i++) atr_put(i, ka);
+        }
+        if (!sel_on || e + 1 >= hi || e >= doc_len - 1) break;
+        p = (u16)(e + 1);
+    }
+    typing_attr = attr_at_cursor();
     dirty = 1;
     layout_edit(ps, e, 0);
 }
@@ -226,11 +281,14 @@ void doc_paste(void) {
 
 /* ---- files ----
  * The image BASIC saves with BSAVE and loads with BLOAD, at SCRATCH_LIN:
- * "WP", version 1, the length (2 bytes), the text, the attributes. */
+ * "WP", version 2, the length (2 bytes), the text, the attributes.
+ * (Version 1, before paragraph kinds: a CR / FF's attribute also had the
+ * typing style in its low bits, cleared when one is loaded.) */
+#define WP_VERSION 2
 u16 doc_pack(void) {
     mem_put(SCRATCH_LIN, 'W');
     mem_put(SCRATCH_LIN + 1, 'P');
-    mem_put(SCRATCH_LIN + 2, 1);
+    mem_put(SCRATCH_LIN + 2, WP_VERSION);
     mem_put(SCRATCH_LIN + 3, (u8)doc_len);
     mem_put(SCRATCH_LIN + 4, (u8)(doc_len >> 8));
     mem_copy(SCRATCH_LIN + 5, TEXT_LIN, doc_len);
@@ -239,12 +297,16 @@ u16 doc_pack(void) {
 }
 
 u8 doc_unpack(void) {
-    u16 n;
-    if (mem_get(SCRATCH_LIN) != 'W' || mem_get(SCRATCH_LIN + 1) != 'P' || mem_get(SCRATCH_LIN + 2) != 1) return 1;
+    u16 n, i;
+    u8 v = mem_get(SCRATCH_LIN + 2);
+    if (mem_get(SCRATCH_LIN) != 'W' || mem_get(SCRATCH_LIN + 1) != 'P' || !v || v > WP_VERSION) return 1;
     n = mem_get(SCRATCH_LIN + 3) | (u16)(mem_get(SCRATCH_LIN + 4) << 8);
     if (n == 0 || n > DOC_MAX) return 1;
     mem_copy(TEXT_LIN, SCRATCH_LIN + 5, n);
     mem_copy(ATTR_LIN, SCRATCH_LIN + 5 + n, n);
+    if (v == 1)
+        for (i = 0; i < n; i++)
+            if (is_break(txt_at(i))) atr_put(i, atr_at(i) & A_ALIGN);
     doc_len = n;
     doc_loaded(0);
     return 0;
@@ -255,10 +317,10 @@ u8 doc_unpack(void) {
 void doc_loaded(u8 d) {
     if (!doc_len || txt_at(doc_len - 1) != CH_CR) {
         if (doc_len < DOC_MAX) {
-            ATR[doc_len] = 0;
+            atr_put(doc_len, 0);
             doc_len++;
         }
-        TXT[doc_len - 1] = CH_CR;
+        txt_put(doc_len - 1, CH_CR);
     }
     cur = 0;
     sel_on = 0;
