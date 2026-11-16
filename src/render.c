@@ -106,8 +106,9 @@ static void list_marks(u16 l, const struct line *L) {
 
 /* Run the module BASIC loaded into mod_area (cmd: what it is to do; its
  * result, or 0xFFFF when there is none, or it is from another build). It
- * starts "WM", the build's id, then a JMP to its mod_main. The header is
- * cleared after it: the drawing soon overwrites the rest. */
+ * starts "WM", the build's id, then its entry. The header is cleared after
+ * it (the drawing soon overwrites the rest), unless cmd says more calls
+ * follow (MOD_MORE: BASIC draws nothing until the last). */
 u16 mod_run(u8 cmd) {
     mod_ret = 0xFFFF;
 #ifdef __cc45__
@@ -115,13 +116,18 @@ u16 mod_run(u8 cmd) {
         mod_cmd = cmd;
         ((void (*)(void))&mod_area.m[4])();
     }
-    mod_area.m[0] = 0;
     list_ok = 0;                /* (LIST.OVL overwritten: loaded again by BASIC) */
 #else
     mod_cmd = cmd;
-    mod_main();
+    if (cmd <= MOD_MD_IMPORT) md_main();
+    else rtf_main();
 #endif
-    render_invalidate();
+    /* (not while more calls follow: the caches written here are in the
+     * module's memory) */
+    if (!(cmd & MOD_MORE)) {
+        mod_area.m[0] = 0;
+        render_invalidate();
+    }
     return mod_ret;
 }
 

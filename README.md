@@ -29,7 +29,8 @@ On a MEGA65: copy `build/writer.d81` to the SD card, mount it, then
 help: a Writer document shown when the program starts and again with F8 / HELP;
 without it the program starts with an empty document), `MARKDOWN.OVL`
 (Markdown import and export, a module: without it the rest works, and a
-`.md` name gets "Markdown needs MARKDOWN.OVL on the disk") and `LIST.OVL`
+`.md` name gets "Markdown needs MARKDOWN.OVL on the disk"), `RTF.OVL` (RTF
+import and export, the same for `.rtf`) and `LIST.OVL`
 (list mode, a module: without it the menu does not offer it).
 
 `tools/xemu_run.py` runs it headless in xemu, types keys into the KERNAL's
@@ -54,7 +55,7 @@ keyboard buffer and saves a screenshot, e.g.
 | CTRL + cursor keys | start a selection at the cursor, or extend the one there is |
 | F10 / F11 / F12 | copy / cut / paste |
 | F8 or HELP | the help (`WRITER.HELP`) as the document (after asking about unsaved changes) |
-| ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text, or Markdown for a name ending in `.md`), Directory; Redraw, List on / off (with `LIST.OVL`), Help, Quit (ESC also ends a selection) |
+| ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text; Markdown for a name ending in `.md`, RTF for `.rtf`), Directory; Redraw, List on / off (with `LIST.OVL`), Help, Quit (ESC also ends a selection) |
 | CTRL+L | redraw the whole screen |
 
 Styles and fonts apply to the selection, or to what you type next.
@@ -76,6 +77,7 @@ and `~` in raw view's rows past the end. The keys are the same.
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
 | `src/m65.c` | C | the VIC-IV screen mode, DMA and colour RAM |
 | `src/md.c` | C | Markdown export and import (below): the module `MARKDOWN.OVL` |
+| `src/rtf.c` | C | RTF export and (streamed) import: the module `RTF.OVL` |
 | `src/list.c` | C | list mode's markers: the module `LIST.OVL` |
 | `src/api.c` | C | the functions BASIC calls with `SYS {name}, a` (and reads with `RREG`) |
 | `tools/helpdoc.c`, `tools/mkhelp.c` | C (host) | the help document, written as a Writer file by the C half itself |
@@ -95,8 +97,13 @@ has no use for one leaves it off the disk and the program does not need
 the room for it. Two kinds:
 
 - **Run once** (as one job over the document), loaded just before it runs:
-  Markdown (`MARKDOWN.OVL`, from `src/md.c`); PETSCII graphics, PDF export,
-  find and replace or a word count would fit the same way.
+  Markdown (`MARKDOWN.OVL`, from `src/md.c`), RTF (`RTF.OVL`, from
+  `src/rtf.c`); PETSCII graphics, PDF export, find and replace or a word
+  count would fit the same way. One can also be called several times in a
+  row (a command with `MOD_MORE`: `mod_run` then leaves it and the drawing's
+  caches alone, as they share its memory): RTF import is streamed that way,
+  1 KB of the file a call, as files from other word processors are often
+  larger than the 30 KB scratch area.
 - **Resident**, loaded at the start and called while drawing: list mode
   (`LIST.OVL`, from `src/list.c`). It lives in `mod_area`'s last
   `LIST_SIZE` bytes (`LIST_OFS`, past the drawing's buffers), so it too
@@ -233,6 +240,28 @@ exported, imported and exported again give the same Markdown; Markdown
 from elsewhere imported as expected. The exported random documents were
 also checked with markdown-it (CommonMark): their text comes out exactly.
 
+### RTF
+
+Export (`src/rtf.c`, in the module `RTF.OVL`) is lossless for Writer's
+documents: a font table (`\f0` Sans `\fswiss`, `\f1` Serif `\froman`,
+`\f2` Mono `\fmodern`, `\f3` Head `\fswiss` at `\fs36`), `\b` `\i` `\ul`
+where they change, each paragraph as `\pard`, its alignment (`\ql` `\qc`
+`\qr` `\qj`) and `\par`, a page break as `\par\page`; `\ { }` escaped.
+
+Import reads the file 1 KB at a time (BASIC streams it to the module, so
+it may be larger than the scratch area): control words, control symbols,
+groups (which keep the character formatting) and text. Fonts map by their
+family in `\fonttbl` (`\froman` Serif, `\fmodern` Mono, others Sans), a
+size of 14 pt or more is Head; `\b`, `\i`, the underlines, `\plain`,
+`\pard`, alignment; `\par`, `\line` and `\row` end a paragraph, `\page`
+ends a page; `\tab` and `\cell` are spaces; `\uN` (skipping `\ucN`
+characters after it) and `\'hh` (Windows-1252) become ASCII where there is
+one; `\binN` data is skipped. `\colortbl`, `\stylesheet`, `\info`,
+pictures, headers, footers, footnotes and every `{\* ...}` group are left
+out, as are unknown control words. Writer's own RTF round-trips exactly
+(the host tests check it, and random documents); pandoc's imports with its
+headings as Head and its code as Mono.
+
 ### Fonts
 
 `tools/mkfonts.py` rasterises DejaVu Sans 12, DejaVu Serif 12, Liberation
@@ -270,8 +299,11 @@ then where each glyph starts).
 - **Bank 0**: the BASIC program, the C code and its data must end below
   `$C000` (the CPU stack is the page below it). With Markdown in the
   program it was full; as a module (above) the C data ended at `$B600`;
-  the menu's panel and the hooks for list mode (in BASIC and C) took
-  1.5 KB of that, so it ends at `$BC00`, leaving 768 bytes. The glyph
+  the menu's panel, the hooks for list mode and RTF's import and export
+  in BASIC took most of that, so it ends at `$BE00`, leaving 256 bytes
+  (basic45's `--minify` would save several hundred, once it works:
+  [M65Compiler #598](https://github.com/CTalkobt/M65Compiler/issues/598)).
+  The glyph
   bitmaps (the raw-view font's too, fetched by DMA) live in bank 4
   (`WRITER.FNT`), the C files that do not run on every key are compiled
   with `-O1`, the help is a

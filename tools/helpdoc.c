@@ -83,13 +83,13 @@ static const struct run help[] = {
     { HEAD, "Menu (ESC)" },
     { 0, "\r" },
     { MONO, "N new     L load     S save\r"
-            "I import  E export   (PETSCII text, or\r"
-            "          Markdown for a name ending .md)\r"
+            "I import  E export   (PETSCII text; Markdown\r"
+            "          for name.md, RTF for name.rtf)\r"
             "D directory   H this help   Q quit\r"
             "R redraw the screen (also CTRL+L)\r"
             "T list mode on / off\r" },
     { 0, "Saved Writer documents keep their fonts and styles. "
-         "Markdown is read and written by MARKDOWN.OVL, when it is on the disk. "
+         "Markdown is read and written by MARKDOWN.OVL, RTF by RTF.OVL, when they are on the disk. "
          "List mode (LIST.OVL) marks spaces, paragraph ends, wrapped lines "
          "and trailing spaces.\r" },
 };

@@ -95,6 +95,55 @@ static u16 md_out(char *out) {
 }
 
 /* Markdown s as the document (as FREAD# leaves it: the rest zero) */
+/* RTF: the document exported (into out, 0-ended; its size), and s
+ * imported as BASIC streams a file: 1 KB at a time, past its end CRs */
+static u16 rtf_out(char *out) {
+    u16 n = mod_run(MOD_RTF_EXPORT);
+    memcpy(out, MEM + SCRATCH_LIN, n);
+    out[n] = 0;
+    return n;
+}
+
+static u16 rtf_in(const char *s) {
+    size_t len = strlen(s), at = 0;
+    mod_run(MOD_RTF_BEGIN);
+    do {
+        size_t k = len - at < 1024 ? len - at : 1024;
+        memset(MEM + SCRATCH_LIN, CH_CR, 1024);
+        memcpy(MEM + SCRATCH_LIN, s + at, k);
+        mod_run(MOD_RTF_CHUNK);
+        at += k;
+    } while (at < len);
+    return mod_run(MOD_RTF_END);
+}
+
+/* the document as it matters to a file: the text, each character's style,
+ * each paragraph's alignment */
+static u16 doc_sig(u8 *t, u8 *a) {
+    u16 i;
+    for (i = 0; i < doc_len; i++) {
+        t[i] = TXT[i];
+        a[i] = (u8)(ATR[i] & (TXT[i] == CH_CR || TXT[i] == CH_FF ? A_ALIGN : A_STYLE));
+    }
+    return doc_len;
+}
+
+/* exported as RTF and imported again: the same document */
+static void rtf_round(const char *what) {
+    static u8 t1[DOC_MAX], a1[DOC_MAX], t2[DOC_MAX], a2[DOC_MAX];
+    static char r[32000];
+    u16 n1 = doc_sig(t1, a1), n2, k;
+    rtf_out(r);
+    rtf_in(r);
+    n2 = doc_sig(t2, a2);
+    if (n1 != n2 || memcmp(t1, t2, n1) || memcmp(a1, a2, n1)) {
+        for (k = 0; k < n1 && k < n2 && t1[k] == t2[k] && a1[k] == a2[k]; k++) ;
+        printf("FAIL: %s changed by an RTF round trip at %u (of %u, now %u): '%c' %02x, now '%c' %02x\n", what, k, n1,
+               n2, t1[k], a1[k], t2[k], a2[k]);
+        fails++;
+    }
+}
+
 static void md_in(const char *s) {
     memset(MEM + SCRATCH_LIN, 0, 30720);
     memcpy(MEM + SCRATCH_LIN, s, strlen(s));
@@ -511,6 +560,87 @@ int main(void) {
             n = md_out(m1);
             md_fixed_point(m1, m2, "random");
             if (fails > 10) break;
+        }
+    }
+
+    /* RTF (RTF.OVL): Writer's documents round trip exactly */
+    {
+        static char r[32000];
+        u16 k, n;
+        doc_load_help();
+        rtf_round("the help");
+        n = rtf_out(r);
+        CHECK(n > 0 && strncmp(r, "{\\rtf1\\ansi", 11) == 0 && r[n - 1] == '}');
+        /* escapes, page breaks (after text, and an empty paragraph's), every
+         * style and alignment */
+        wp_cmd(13);
+        for (k = 0; k < 40; k++) {
+            TXT[k] = (u8)("a{b}c\\d e  f\rg\f\fh  \ri j\rk\r"[k % 20]);
+            ATR[k] = (u8)(TXT[k] == CH_CR || TXT[k] == CH_FF ? (k % 4) << A_ALIGN_SHIFT : k % 32);
+        }
+        TXT[40] = CH_CR;
+        ATR[40] = 0;
+        doc_len = 41;
+        rtf_round("styles and breaks");
+        /* random documents */
+        srand(getenv("SEED") ? (unsigned)atoi(getenv("SEED")) : 1);
+        for (n = 0; n < 200 && fails < 10; n++) {
+            u16 len = (u16)(1 + rand() % 3000);
+            for (k = 0; k < len; k++) {
+                int r2 = rand() % 40;
+                TXT[k] = (u8)(r2 == 0 ? CH_CR : r2 == 1 ? CH_FF : r2 < 8 ? ' ' : 32 + rand() % 95);
+                ATR[k] = (u8)(TXT[k] == CH_CR || TXT[k] == CH_FF ? (rand() % 4) << A_ALIGN_SHIFT
+                                                                 : rand() % 3 ? ATR[k ? k - 1 : 0] & A_STYLE : rand() % 32);
+            }
+            TXT[len] = CH_CR;
+            ATR[len] = 0;
+            doc_len = (u16)(len + 1);
+            rtf_round("a random document");
+        }
+
+        /* as other word processors write it: a font table by family,
+         * destinations left out, Unicode, Windows-1252, \bin, tables, a
+         * page break after text, a bigger size as Head, more than 1 KB */
+        {
+            static char w[4000];
+            static const char *body =
+                "{\\rtf1\\ansi\\ansicpg1252\\deff0\\uc1"
+                "{\\fonttbl{\\f0\\froman\\fcharset0 Times New Roman{\\*\\panose 02020603}" ";}"
+                "{\\f1\\fswiss Arial;}{\\f2\\fmodern\\fprq1 Courier New;}}"
+                "{\\colortbl;\\red0\\green0\\blue0;}"
+                "{\\stylesheet{\\s0 Normal;}{\\s1\\fs32 heading 1;}}"
+                "{\\info{\\title Ignored}{\\author Nobody}}"
+                "{\\*\\generator Some Writer 1.0;}"
+                "\\pard\\plain\\s1\\qc\\fs32\\b Title\\par\r\n"
+                "\\pard\\plain\\f1\\fs24 Plain {\\b bold {\\i both}} {\\ul under\\ulnone  no}"
+                " {\\f2 mono} {\\f0 serif}\\par\r\n"
+                "\\pard\\qj caf\\'e9 \\'93q\\'94 \\u8212\\'97 \\u8216?x\\u-4064? {\\pict\\pngblip 89504e47}"
+                "{\\*\\bkmkstart b}{\\field{\\*\\fldinst HYPERLINK x}{\\fldrslt link}} \\{\\}\\\\\\par\r\n"
+                "\\pard a\\tab b\\line c\\page d\\par\r\n"
+                "\\trowd\\cellx1000\\cellx2000 x\\cell y\\cell\\row\r\n"
+                "\\pard{\\object\\objemb{\\*\\objdata 0102}}e\\bin3 }{\\f\\par\r\n";
+            u16 len;
+            static const char *want =
+                "Title\rPlain bold both under no mono serif\rcafe \"q\" -- 'x? link {}\\\ra b\rc\fd\rx  y  \ref\r";
+            strcpy(w, body);
+            len = (u16)strlen(w);
+            while (len < 1300) w[len++] = '\n';    /* (line ends: nothing in RTF) */
+            strcpy(w + len, "{\\pard\\qr Last}\\par}");
+            rtf_in(w);
+            text_of(r, sizeof r);
+            if (strncmp(r, want, strlen(want)) != 0 || strcmp(r + strlen(want), "Last\r") != 0) {
+                printf("FAIL: RTF import:\n  got:  ");
+                show(r);
+                printf("  want: ");
+                show(want);
+                fails++;
+            }
+            CHECK((ATR[0] & A_FONT) == 3 && (ATR[0] & A_BOLD));                 /* Title: 16 pt, Head */
+            CHECK(((ATR[5] & A_ALIGN) >> A_ALIGN_SHIFT) == 1);                  /* centred */
+            CHECK((ATR[6] & A_STYLE) == 0);                                     /* Plain: Arial, Sans */
+            CHECK((ATR[12] & A_STYLE) == A_BOLD && (ATR[17] & A_STYLE) == (A_BOLD | A_ITAL));
+            CHECK((ATR[22] & A_UNDER) && !(ATR[28] & A_UNDER));
+            CHECK((ATR[31] & A_FONT) == 2 && (ATR[36] & A_FONT) == 1 && (ATR[35] & A_FONT) == 0);
         }
     }
 

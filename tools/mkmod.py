@@ -7,7 +7,7 @@
     --at     the program's region the module runs in (_mod_area)
     --ofs    wp.h's #define of where in it (0)
     --size   wp.h's #define of the region's size (MOD_SIZE)
-    --entry  the module's entry, jumped to after the header (_mod_main)
+    --entry  the module's entry, called after the header (required)
     --from   the program functions that call the module, by commas
              (_mod_run; a static function's name has its file's suffix, and
              one cc45 inlined is not one: its callers are)
@@ -158,7 +158,7 @@ def macro(name):
 
 
 def main():
-    opt = {"--at": "_mod_area", "--ofs": "0", "--size": "MOD_SIZE", "--entry": "_mod_main", "--from": "_mod_run"}
+    opt = {"--at": "_mod_area", "--ofs": "0", "--size": "MOD_SIZE", "--entry": None, "--from": "_mod_run"}
     args = sys.argv[1:]
     while args and args[0] in opt:
         if len(args) < 2:
@@ -169,6 +169,8 @@ def main():
         die(__doc__)
     log, out, ident, objs = args[0], args[1], int(args[2]), args[3:]
     at, entry, site = opt["--at"], opt["--entry"], opt["--from"]
+    if not entry:
+        die("--entry: the module's entry function")
     size_max = macro(opt["--size"])
     base = os.path.splitext(out)[0]
     prog, pblocks, pcalls, image = program_map(log, base + ".prog.map")

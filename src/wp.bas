@@ -8,7 +8,7 @@
 ' document, lays it out and draws the 640 x 400 screen; BASIC calls it with
 ' SYS {name}, a and reads results with RREG.
 '
-' Modules (.OVL files: MARKDOWN.OVL, LIST.OVL) are loaded only when they
+' Modules (.OVL files: MARKDOWN.OVL, RTF.OVL, LIST.OVL) are loaded only when they
 ' are on the disk (below).
 '
 ' Build: make  (basic45 --link src/api.c ... src/wp.bas -o build/writer.prg)
@@ -44,6 +44,10 @@
 #define GET_MDEXPORT 8
 #define GET_MDIMPORT 9
 #define GET_LISTOK 10
+#define GET_RTFEXPORT 11
+#define GET_RTFBEGIN 12
+#define GET_RTFCHUNK 13
+#define GET_RTFEND 14
 
 ' LIST.OVL's place: mod_area + LIST_OFS (wp.h)
 #define LIST_OFS 3712
@@ -180,10 +184,7 @@ endproc
 
 ' the document's name in the top bar
 proc setname
-  bank 0
-  for i = 1 to len(fi$) : poke {fname} + i - 1, asc(mid$(fi$, i, 1)) : next
-  poke {fname} + len(fi$), 0
-  bank 128
+  call setstr(fi$, {fname})
   sys {wp_setname}
 endproc
 
@@ -272,26 +273,30 @@ proc importtext
   call discard
   if yes then
     a$ = ""
-    call ask(p"Import text file (name.md: Markdown): ")
+    call ask(p"Import (name.md: Markdown, name.rtf: RTF): ")
     if ok and a$ <> "" then
       call say(p"Importing " + a$ + "...")
-      call ismd
-      sys {wp_get}, GET_PREP
-      dopen#2, (a$)
-      ' 1 KB at a time until the end of the file (past it the drive gives CRs,
-      ' which the import trims) or the scratch area's end (30 KB)
-      p = 0
-      do
-        fread#2, $57600 + p * 1024, 1024
-        p = p + 1
-      loop until st <> 0 or p >= 30
-      dclose#2
-      ' (Markdown: by MARKDOWN.OVL, loaded last: drawing overwrites it)
+      call ftype
       ml = 1 : lo = 0 : hi = 0
-      if md then call loadmd
-      if ml then sys {wp_get}, GET_IMPORT + md * (GET_MDIMPORT - GET_IMPORT) : rreg lo, hi
+      if fk = 2 then
+        call rtfin
+      else
+        sys {wp_get}, GET_PREP
+        dopen#2, (a$)
+        ' 1 KB at a time until the end of the file (past it the drive gives
+        ' CRs, which the import trims) or the scratch area's end (30 KB)
+        p = 0
+        do
+          fread#2, $57600 + p * 1024, 1024
+          p = p + 1
+        loop until st <> 0 or p >= 30
+        dclose#2
+        ' (Markdown: by MARKDOWN.OVL, loaded last: drawing overwrites it)
+        if fk then call loadmod
+        if ml then sys {wp_get}, GET_IMPORT + fk * (GET_MDIMPORT - GET_IMPORT) : rreg lo, hi
+      endif
       sys {wp_video}, 1
-      if md then call loadlist
+      if fk then call loadlist
       call modsaid
       if ok then
         fi$ = p"untitled" : call setname
@@ -301,22 +306,41 @@ proc importtext
   endif
 endproc
 
+' RTF: by RTF.OVL, loaded first, the file streamed to it 1 KB at a time (it
+' can be larger than the scratch area); nothing is drawn until the end
+proc rtfin
+  call loadmod
+  if ml then
+    sys {wp_get}, GET_RTFBEGIN : rreg lo, hi
+    if lo <> 255 or hi <> 255 then
+      dopen#2, (a$)
+      do
+        fread#2, $57600, 1024
+        s = st
+        sys {wp_get}, GET_RTFCHUNK
+      loop until s <> 0
+      dclose#2
+      sys {wp_get}, GET_RTFEND : rreg lo, hi
+    endif
+  endif
+endproc
+
 proc exporttext
   a$ = ""
-  call ask(p"Export text as (name.md: Markdown): ")
+  call ask(p"Export as (name.md: Markdown, name.rtf: RTF): ")
   if ok and a$ <> "" then
-    call ismd
+    call ftype
     ml = 1 : lo = 0 : hi = 0
-    if md then
-      call loadmd
-      if ml then sys {wp_get}, GET_MDEXPORT : rreg lo, hi
+    if fk then
+      call loadmod
+      if ml then sys {wp_get}, GET_MDEXPORT + (fk - 1) * (GET_RTFEXPORT - GET_MDEXPORT) : rreg lo, hi
       call loadlist
     else
       sys {wp_get}, GET_EXPORT : rreg lo, hi
     endif
     n = lo + 256 * hi
     call modsaid
-    if ok and n = 0 then call say(p"Too long for Markdown (more than 30 KB).") : ok = 0
+    if ok and n = 0 then call say(p"Too long for " + mn$ + p" (more than 30 KB).") : ok = 0
     if ok then
       scratch (a$)
       dopen#2, (a$), w
@@ -330,7 +354,8 @@ endproc
 
 ' ---- modules: .OVL files on the disk, each loaded when it is needed into
 ' the C half's module region (mod_area, where the drawing keeps its
-' buffers) and run at once (SYS {wp_get}, ...): Markdown (MARKDOWN.OVL) ----
+' buffers) and run at once (SYS {wp_get}, ...): Markdown (MARKDOWN.OVL),
+' RTF (RTF.OVL); list mode (LIST.OVL) stays ----
 
 ' list mode: LIST.OVL, resident, loaded at the start (and again after a
 ' module run in mod_area has overwritten it) when it is on the disk; lv: 1
@@ -343,11 +368,11 @@ listback:
   sys {wp_get}, GET_LISTOK : rreg lv
 endproc
 
-' ml: 1 when MARKDOWN.OVL loaded
-proc loadmd
+' ml: 1 when the module mf$ loaded
+proc loadmod
   ml = 0
   trap nomd
-  bload "markdown.ovl", b0, p({mod_area})
+  bload (mf$), b0, p({mod_area})
   ml = 1
 mdback:
   trap errh
@@ -357,15 +382,18 @@ endproc
 ' lo / hi 255: the module from another build of Writer)
 proc modsaid
   ok = 1
-  if ml = 0 then call say(p"Markdown needs MARKDOWN.OVL on the disk.") : ok = 0
-  if lo = 255 and hi = 255 then call say(p"MARKDOWN.OVL is from another version of Writer.") : ok = 0
+  if ml = 0 then call say(mn$ + p" needs " + mu$ + p" on the disk.") : ok = 0
+  if lo = 255 and hi = 255 then call say(mu$ + p" is from another version of Writer.") : ok = 0
 endproc
 
-' md: 1 when a$ ends in .md (either case)
-proc ismd
-  md = 0
+' fk: what a$ is by its end (either case): 0 text, 1 .md (Markdown), 2 .rtf
+' (RTF); mf$: its module's file, mu$ its name shown, mn$ the format's
+proc ftype
+  fk = 0
   b$ = right$(a$, 3)
-  if b$ = p".md" or b$ = p".MD" then md = 1
+  if b$ = p".md" or b$ = p".MD" then fk = 1 : mf$ = "markdown.ovl" : mu$ = p"MARKDOWN.OVL" : mn$ = p"Markdown"
+  b$ = right$(a$, 4)
+  if b$ = p".rtf" or b$ = p".RTF" then fk = 2 : mf$ = "rtf.ovl" : mu$ = p"RTF.OVL" : mn$ = p"RTF"
 endproc
 
 proc showdir
@@ -416,7 +444,7 @@ endproc
 nolist:
   resume listback
 
-' no MARKDOWN.OVL
+' no module file (mf$)
 nomd:
   ml = 0
   resume mdback

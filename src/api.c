@@ -6,7 +6,8 @@
  *   wp_cmd(c)        a command (CMD_...: styles, view, selection, clipboard, ...)
  *   wp_get(w)        a value for BASIC (RREG lo, hi): GET_... (files: the
  *                    image, plain text or Markdown at SCRATCH_LIN; Markdown
- *                    by the module MARKDOWN.OVL, 65535 when it is not loaded)
+ *                    by the module MARKDOWN.OVL, RTF by RTF.OVL: 65535
+ *                    when it is not loaded)
  *   wp_setmsg        msg (poked by BASIC as PETSCII) shown in the bottom bar
  *   wp_setname       fname (PETSCII) as the document's name
  *   wp_panel(n)      the menu: n rows of menu_text above the bottom bar (msg);
@@ -48,6 +49,10 @@
 #define GET_MDEXPORT 8
 #define GET_MDIMPORT 9
 #define GET_LISTOK 10
+#define GET_RTFEXPORT 11
+#define GET_RTFBEGIN 12
+#define GET_RTFCHUNK 13
+#define GET_RTFEND 14
 
 static u8 started;
 u8 mod_cmd;
@@ -308,10 +313,14 @@ u16 wp_get(u8 w) {
         mem_fill(SCRATCH_LIN, 30720u, 0);       /* (all the scratch area: Markdown is longer) */
         return 0;
     case GET_MDEXPORT: return mod_run(MOD_MD_EXPORT);
+    case GET_RTFEXPORT: return mod_run(MOD_RTF_EXPORT);
+    case GET_RTFBEGIN: return mod_run(MOD_RTF_BEGIN);
+    case GET_RTFCHUNK: return mod_run(MOD_RTF_CHUNK);
     case GET_LISTOK: return list_check();
     case GET_IMPORT:
-    case GET_MDIMPORT: {
-        u16 n = w == GET_IMPORT ? doc_import() : mod_run(MOD_MD_IMPORT);
+    case GET_MDIMPORT:
+    case GET_RTFEND: {
+        u16 n = w == GET_IMPORT ? doc_import() : mod_run(w == GET_MDIMPORT ? MOD_MD_IMPORT : MOD_RTF_END);
         refresh(1);
         return n;
     }

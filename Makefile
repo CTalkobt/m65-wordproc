@@ -30,8 +30,8 @@ BUILD  = build
 TARGET = $(BUILD)/writer.prg
 DISK   = $(BUILD)/writer.d81
 
-CSRC    = src/api.c src/doc.c src/layout.c src/render.c src/md.c src/list.c src/m65.c src/fonts.c
-PORTABLE = src/api.c src/doc.c src/layout.c src/render.c src/md.c src/list.c src/fonts.c
+CSRC    = src/api.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/list.c src/m65.c src/fonts.c
+PORTABLE = src/api.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/list.c src/fonts.c
 HEADERS = src/wp.h
 
 # The C half is compiled here (basic45 --link takes the objects): -O2 for
@@ -55,7 +55,7 @@ $(BUILD)/obj/%.o45: src/%.c $(HEADERS)
 # linked by tools/mkmod.py to run at the program's mod_area, against its
 # map; the build's ID (of the sources and the tools) ties each to the
 # program it was linked with (render.c's mod_run refuses another's).
-MODS    = $(BUILD)/markdown.ovl $(BUILD)/list.ovl
+MODS    = $(BUILD)/markdown.ovl $(BUILD)/rtf.ovl $(BUILD)/list.ovl
 BUILD_ID := $(shell cat src/*.c src/*.h src/wp.bas tools/mkmod.py $(CC45) $(CC45_ROOT)/bin/ln45 2>/dev/null | cksum | awk '{print $$1 % 65536}')
 
 $(BUILD)/buildid.h: FORCE
@@ -70,7 +70,14 @@ $(BUILD)/obj/md_mod.o45: src/md.c $(HEADERS)
 	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
 
 $(BUILD)/markdown.ovl: $(TARGET) $(BUILD)/obj/md_mod.o45 tools/mkmod.py
-	python3 tools/mkmod.py $(BUILD)/link.log $@ $(BUILD_ID) $(BUILD)/obj/md_mod.o45
+	python3 tools/mkmod.py --entry _md_main $(BUILD)/link.log $@ $(BUILD_ID) $(BUILD)/obj/md_mod.o45
+
+$(BUILD)/obj/rtf_mod.o45: src/rtf.c $(HEADERS)
+	@mkdir -p $(BUILD)/obj
+	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+
+$(BUILD)/rtf.ovl: $(TARGET) $(BUILD)/obj/rtf_mod.o45 tools/mkmod.py
+	python3 tools/mkmod.py --entry _rtf_main $(BUILD)/link.log $@ $(BUILD_ID) $(BUILD)/obj/rtf_mod.o45
 
 # LIST.OVL: resident (loaded at the start), at the end of mod_area
 # (LIST_OFS); render.c's list_marks calls it while drawing (inlined: from
@@ -102,6 +109,7 @@ $(DISK): $(TARGET) src/writer.fnt $(BUILD)/help.prg $(MODS)
 	$(DISK45) add $@ src/writer.fnt "WRITER.FNT"
 	$(DISK45) add $@ $(BUILD)/help.prg "WRITER.HELP"
 	$(DISK45) add $@ $(BUILD)/markdown.ovl "MARKDOWN.OVL"
+	$(DISK45) add $@ $(BUILD)/rtf.ovl "RTF.OVL"
 	$(DISK45) add $@ $(BUILD)/list.ovl "LIST.OVL"
 
 # the document shown at the start, made on the host by the C half itself

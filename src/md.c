@@ -601,6 +601,6 @@ u16 md_import(void) {
 }
 
 /* MARKDOWN.OVL's entry (mod_run): export or import */
-void mod_main(void) {
+void md_main(void) {
     mod_ret = mod_cmd == MOD_MD_EXPORT ? md_export() : md_import();
 }

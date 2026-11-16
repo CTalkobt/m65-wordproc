@@ -196,12 +196,18 @@ u16 md_import(void);            /* Markdown at SCRATCH_LIN as the document; its 
  * A module is built apart (Makefile: linked at mod_area against the
  * program's map) and is at most MOD_SIZE bytes, code, data and variables. */
 #define MOD_SIZE 7168
+#define MOD_MORE 0x80                   /* (in a command: more calls follow, the module stays) */
 #define MOD_MD_EXPORT 0                 /* MARKDOWN.OVL: md_export */
 #define MOD_MD_IMPORT 1                 /* MARKDOWN.OVL: md_import */
-extern u8 mod_cmd;                      /* what mod_main is to do */
+#define MOD_RTF_EXPORT 2                /* RTF.OVL: the document as RTF at SCRATCH_LIN */
+#define MOD_RTF_BEGIN (MOD_MORE | 3)    /* RTF.OVL: an import starts */
+#define MOD_RTF_CHUNK (MOD_MORE | 4)    /* RTF.OVL: the next 1 KB of the file, at SCRATCH_LIN */
+#define MOD_RTF_END 5                   /* RTF.OVL: the import's end: the document's length */
+extern u8 mod_cmd;                      /* what the module is to do */
 extern u16 mod_ret;                     /* its result */
 u16 mod_run(u8 cmd);                    /* run the module loaded; 0xFFFF: none */
-void mod_main(void);                    /* a module's entry (md.c) */
+void md_main(void);                     /* MARKDOWN.OVL's entry (md.c) */
+void rtf_main(void);                    /* RTF.OVL's entry (rtf.c) */
 /* LIST.OVL (list.c), list mode: resident, it draws its markers over each
  * line drawn while list_on (render.c calls list_main with hk_l, hk_L: the
  * line). It is loaded by BASIC at the start into mod_area's last LIST_SIZE
