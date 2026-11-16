@@ -78,6 +78,7 @@ and `~` in raw view's rows past the end. The keys are the same.
 | `src/layout.c` | C | line breaking for both views, justification, pagination, raw-view tags, cursor ↔ position mapping; incremental and lazy (below) |
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
 | `src/m65.c` | C | the VIC-IV screen mode, DMA and colour RAM |
+| `src/conv.c` | C | what the converters share (below): output to the scratch area, a walk over the document for export, a builder for import, Unicode as the document's characters |
 | `src/md.c` | C | Markdown export and import (below): the module `MARKDOWN.OVL` |
 | `src/rtf.c` | C | RTF export and (streamed) import: the module `RTF.OVL` |
 | `src/list.c` | C | list mode's markers: the module `LIST.OVL` |
@@ -116,7 +117,7 @@ the room for it. Two kinds:
   line in `hk_l` / `hk_L`; it XORs its markers into the band. A feature
   that changes what keys do (undo) still belongs in the program.
 
-- **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 7 KB in
+- **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6.25 KB in
   bank 0), which is also where the drawing keeps its buffers and caches
   (the band, the redraw cache, the bars' text, the row patterns: 3.4 KB),
   all remade after a full redraw. So a module costs bank 0 only what it
@@ -140,6 +141,31 @@ the room for it. Two kinds:
   fits (`--size`). The build's ID is a
   checksum of the sources and the tools (`build/buildid.h`), so a module
   is only run by the program it was linked with.
+- **What the converters share** (`src/conv.c`, in the program, once; issue
+  #3): a format module holds only its syntax and calls the program for
+  the rest.
+  - *Output*: `o_start`, `o_put`, `o_puts`, `o_end` write to the scratch
+    area (and count past its end: `o_end` is then 0, too long).
+  - *Export*: `walk_start` / `walk_next` hand over the document an event
+    at a time (`EV_PARA` with its alignment, `EV_RUN` characters of one
+    style, `EV_PEND` a CR or a page break, `EV_END`). It is pulled rather
+    than calling the module back: a call through a pointer reaches every
+    function, so ln45 would have to keep every base-page block apart.
+  - *Import*: `build_start`, `build_put` (with `b_attr`), `build_uni` (a
+    Unicode character as the document's: ASCII, accents left out),
+    `build_end` (the final CR, the length). The program lays the document
+    out after the module returns (`doc_built`, from `mod_run`): called
+    from the module, the layout's base-page blocks would all have to miss
+    the module's.
+  - `txt_at` / `atr_at`: the document's character and attribute (a far
+    `TXT[i]` is some 30 bytes of code with cc45, a call 10). `doc.c` and
+    `layout.c` use them too.
+  - `conv.c` is compiled with `-fno-zp-locals`: its functions keep no
+    base-page variables, so nothing a module calls there meets its blocks.
+
+  The program grew by 530 bytes, the modules shrank by 700 (Markdown 6978
+  → 6236 bytes, RTF 4272 → 3576), so `MOD_SIZE` went from 7 KB to 6.25 KB.
+  The PETSCII text import and export (`doc.c`) use the same calls.
 - **The base page**: cc45 keeps the most used variables of functions that
   make calls in the program's base page (blocks placed by ln45 up to $F1).
   The module's header says it uses all of the register pool, so its own
@@ -305,7 +331,9 @@ then where each glyph starts).
   in BASIC took most of that, so it ended at `$BE00`. The BASIC program
   is now built with basic45's `--minify` (no comments or indentation,
   lines joined, short names: 5378 bytes rather than 6115), so the C half
-  starts at `$3600` and its data ends at `$BC00`, leaving 768 bytes. (Its
+  starts at `$3600`. The converters' shared code (`conv.c`, above) and a
+  smaller `mod_area` then left the C data ending at `$BB00`: 1024 bytes
+  free. (Its
   two `poke`s of `$D1` / `$F7` are written in decimal: `--minify` turns
   `poke $d1` into a variable,
   [M65Compiler #603](https://github.com/CTalkobt/M65Compiler/issues/603).)

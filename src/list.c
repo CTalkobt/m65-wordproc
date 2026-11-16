@@ -54,8 +54,8 @@ static u8 is_end(u8 c) { return c == CH_CR || c == CH_FF; }
  * (0xFFFF: the line does not end the paragraph) */
 static u16 trailing(u16 i, u16 e) {
     u16 t = (u16)(e - 1);
-    if (!is_end(TXT[t])) return 0xFFFF;
-    while (t > i && TXT[t - 1] == ' ') t--;
+    if (!is_end(txt_at(t))) return 0xFFFF;
+    while (t > i && txt_at(t - 1) == ' ') t--;
     return t;
 }
 
@@ -71,7 +71,7 @@ static void raw_marks(void) {
     e = line_end(hk_l);
     tr = trailing(i, e);
     for (; i < e && col < COLS; i++) {
-        c = TXT[i];
+        c = txt_at(i);
         col = (u8)(col + raw_tag(i, 0));
         if (c == CH_FF) continue;
         if (col >= COLS) break;
@@ -85,7 +85,7 @@ static void raw_marks(void) {
         }
         col++;
     }
-    if (col < COLS && !is_end(TXT[e - 1])) {
+    if (col < COLS && !is_end(txt_at(e - 1))) {
         blit(g_wrap, (u16)col * 8, 1);
         CELLCOL[col] = C_GREY;
     }
@@ -99,8 +99,8 @@ static void page_marks(void) {
     just_init(&j, L);
     tr = trailing(i, e);
     for (; i < e; i++) {
-        c = TXT[i];
-        a = ATR[i];
+        c = txt_at(i);
+        a = atr_at(i);
         if (is_end(c)) {
             blit(raw_glyph(G_PILCROW), x, (int16_t)(asc - 10));
             continue;
@@ -118,7 +118,7 @@ static void page_marks(void) {
         }
         x = (u16)(x + w);
     }
-    if (!is_end(TXT[e - 1])) blit(g_wrap, TEXT_X + TEXT_W + 4, (int16_t)(asc - 10));
+    if (!is_end(txt_at(e - 1))) blit(g_wrap, TEXT_X + TEXT_W + 4, (int16_t)(asc - 10));
 }
 
 void list_main(void) {

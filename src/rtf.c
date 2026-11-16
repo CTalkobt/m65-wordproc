@@ -40,22 +40,11 @@
 #define F_SERIF 1
 #define F_MONO 2
 #define F_HEAD 3
-#define RTF_MAX 30720u                  /* the scratch area */
 #define CHUNK 1024
 
-static u8 is_break(u8 c) { return c == CH_CR || c == CH_FF; }
-
 /* ==== export ==== */
-static u16 on;                          /* bytes written */
-
-static void out(u8 c) {
-    if (on < RTF_MAX) mem_put(SCRATCH_LIN + on, c);
-    on++;
-}
-
-static void outs(const char *s) {
-    while (*s) out((u8)*s++);
-}
+#define out o_put
+#define outs o_puts
 
 static const char rtf_head[] =
     "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fswiss Sans;}{\\f1\\froman Serif;}"
@@ -63,18 +52,18 @@ static const char rtf_head[] =
 static const char *const q_word[4] = { "\\ql", "\\qc", "\\qr", "\\qj" };
 
 static u16 rtf_export(void) {
-    u16 i = 0, pe;
-    u8 now = 0xFF, a, c, d, sp;         /* (now: none yet, so all written) */
-    on = 0;
+    u16 i;
+    u8 ev, now = 0xFF, a, c, d, sp = 0; /* (now: none yet, so all written) */
+    o_start();
     outs(rtf_head);
-    while (i < doc_len) {
-        for (pe = i; !is_break(TXT[pe]); pe++) ;
-        outs("\\pard");
-        outs(q_word[(ATR[pe] & A_ALIGN) >> A_ALIGN_SHIFT]);
-        sp = 1;                         /* the control words' ending space */
-        for (; i < pe; i++) {
-            a = ATR[i] & A_STYLE;
-            c = TXT[i];
+    walk_start();
+    while ((ev = walk_next()) != EV_END) {
+        if (ev == EV_PARA) {
+            outs("\\pard");
+            outs(q_word[(w_attr & A_ALIGN) >> A_ALIGN_SHIFT]);
+            sp = 1;                     /* the control words' ending space */
+        } else if (ev == EV_RUN) {
+            a = w_attr;
             if (a != now) {
                 d = now == 0xFF ? 0xFF : a ^ now;
                 if (d & A_FONT) {
@@ -90,14 +79,17 @@ static u16 rtf_export(void) {
             }
             if (sp) out(' ');
             sp = 0;
-            if (c == '\\' || c == '{' || c == '}') out('\\');
-            out(c);
+            for (i = w_pos; i < w_to; i++) {
+                c = txt_at(i);
+                if (c == '\\' || c == '{' || c == '}') out('\\');
+                out(c);
+            }
+        } else {
+            outs(w_attr == CH_FF ? "\\par\\page\r\n" : "\\par\r\n");
         }
-        outs(TXT[pe] == CH_FF ? "\\par\\page\r\n" : "\\par\r\n");
-        i = (u16)(pe + 1);
     }
     out('}');
-    return on <= RTF_MAX ? on : 0;
+    return o_end();
 }
 
 /* ==== import ==== */
@@ -109,7 +101,6 @@ enum { D_TEXT, D_SKIP, D_FONTS };      /* what a group's text is */
 static u8 st, wl, neg, has_param, hexv;
 static char word[16];
 static int16_t param;
-static u16 rn;                          /* the document's characters so far */
 static u16 binskip;                     /* \bin's bytes left */
 static u8 uskip;                        /* characters left to skip after \u */
 static u8 pempty;                       /* nothing since the last paragraph's end */
@@ -136,48 +127,24 @@ static u8 font_of(int16_t n) {
     return 0;
 }
 
-static void put(u8 c) {
-    if (rn >= DOC_MAX - 1) return;      /* (room kept for the final CR) */
-    TXT[rn] = c;
-    ATR[rn] = (u8)((fs >= 28 ? F_HEAD : font) | flags);
-    rn++;
-    pempty = 0;
+/* a Unicode character of the text (\u, \'hh, a byte of the file) */
+static void uchar(u16 u) {
+    b_attr = (u8)((fs >= 28 ? F_HEAD : font) | flags);
+    build_uni(u);
+    if (u >= 32) pempty = 0;
 }
 
+static void put(u8 c) { uchar(c); }
+
 static void end_para(u8 c) {
-    if (rn >= DOC_MAX - 1) return;
-    TXT[rn] = c;
-    ATR[rn] = (u8)(align << A_ALIGN_SHIFT);
-    rn++;
+    b_attr = (u8)(align << A_ALIGN_SHIFT);
+    build_put(c);
     pempty = 1;
 }
 
-/* Unicode (\u, and \'hh by way of Windows-1252) as ASCII */
-static const u16 uni[] = { 0xA0, 0x2018, 0x2019, 0x201C, 0x201D, 0x2013, 0x2014, 0x2026, 0x2022, 0xDF, 0xA9 };
-static const char *const uni_as[] = { " ", "'", "'", "\"", "\"", "-", "--", "...", "*", "ss", "(c)" };
-static const char latin[] = "AAAAAAACEEEEIIIIDNOOOOOxOUUUUYPsaaaaaaaceeeeiiiidnooooo/ouuuuypy";
 /* Windows-1252's $80-$9F that have an ASCII form: their Unicode */
 static const u8 cp_byte[] = { 0x85, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97 };
 static const u16 cp_uni[] = { 0x2026, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014 };
-
-static void uchar(u16 u) {
-    u8 k;
-    const char *s;
-    if (u < 128) {
-        if (u >= 32) put((u8)u);
-        return;
-    }
-    if (u >= 0xC0 && u <= 0xFF && u != 0xDF) {
-        put((u8)latin[u - 0xC0]);
-        return;
-    }
-    for (k = 0; k < sizeof uni / sizeof uni[0]; k++)
-        if (uni[k] == u) {
-            for (s = uni_as[k]; *s; s++) put((u8)*s);
-            return;
-        }
-    put('?');
-}
 
 /* a character of the text (c: a byte of the file, or a \'hh) */
 static void text(u8 c, u8 hex) {
@@ -196,7 +163,7 @@ static void text(u8 c, u8 hex) {
     }
     if (dest != D_TEXT) return;
     if (!hex && c < 128) {
-        if (c >= 32) put(c);
+        put(c);
         return;
     }
     if (c >= 0x80 && c < 0xA0) {
@@ -299,7 +266,7 @@ static void ctrl_word(void) {
     case W_LINE:
     case W_ROW: end_para(CH_CR); break;
     case W_PAGE:
-        if (pempty && rn && TXT[rn - 1] == CH_CR) TXT[rn - 1] = CH_FF;
+        if (pempty && b_n && txt_at(b_n - 1) == CH_CR) TXT[b_n - 1] = CH_FF;
         else end_para(CH_FF);
         break;
     case W_CELL: put(' '); /* fall through */
@@ -421,7 +388,8 @@ static u8 feed(u8 c) {
 
 static void rtf_begin(void) {
     st = S_TEXT;
-    rn = binskip = 0;
+    build_start();
+    binskip = 0;
     uskip = depth = over = nfont = 0;
     pempty = 1;
     align = font = flags = deff_fam = 0;
@@ -442,9 +410,7 @@ static void rtf_chunk(void) {
 
 static u16 rtf_end(void) {
     if (!pempty) end_para(CH_CR);
-    doc_len = rn;
-    doc_loaded(1);
-    return (u16)(doc_len - 1);
+    return build_end();
 }
 
 /* RTF.OVL's entry (mod_run) */

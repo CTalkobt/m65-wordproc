@@ -42,7 +42,7 @@ static u8 tag_put(char *out, u8 n, const char *s) {
 u8 prev_style(u16 i) {
     while (i > 0) {
         i--;
-        if (!is_break(TXT[i])) return ATR[i] & A_STYLE;
+        if (!is_break(txt_at(i))) return atr_at(i) & A_STYLE;
     }
     return 0;
 }
@@ -50,16 +50,16 @@ u8 prev_style(u16 i) {
 /* the tags shown before character i (into out, when not NULL); their length */
 u8 raw_tag(u16 i, char *out) {
     char buf[48];
-    u8 n = 0, prev, now, c = TXT[i];
+    u8 n = 0, prev, now, c = txt_at(i);
     if (!out) out = buf;
-    if (i == 0 || is_break(TXT[i - 1])) {
-        u8 al = (u8)((ATR[para_end(i)] & A_ALIGN) >> A_ALIGN_SHIFT);
+    if (i == 0 || is_break(txt_at(i - 1))) {
+        u8 al = para_al(i);
         if (al) n = tag_put(out, n, align_tags[al]);
     }
     if (c == CH_FF) return tag_put(out, n, "[Page]");
     if (c == CH_CR) return n;
     prev = prev_style(i);
-    now = ATR[i] & A_STYLE;
+    now = atr_at(i) & A_STYLE;
     if (prev == now) return n;
     if ((prev & A_BOLD) && !(now & A_BOLD)) n = tag_put(out, n, "[/B]");
     if ((prev & A_ITAL) && !(now & A_ITAL)) n = tag_put(out, n, "[/I]");
@@ -77,12 +77,12 @@ u8 raw_tag(u16 i, char *out) {
 
 /* a character's width in the current view: pixels, or cells with its tags */
 static u8 tok_w(u16 i) {
-    u8 c = TXT[i];
+    u8 c = txt_at(i);
     if (view_mode == VIEW_RAW) {
         if (c == CH_FF) return raw_tag(i, 0);
         return (u8)(raw_tag(i, 0) + 1);
     }
-    return char_w(c, ATR[i]);
+    return char_w(c, atr_at(i));
 }
 
 /* ---- breaking lines ----
@@ -132,7 +132,7 @@ static u16 break_line(u16 pos, u16 width, u8 *hard) {
     u16 i = pos, x = 0, brk = 0;
     u8 c, w;
     for (;;) {
-        c = TXT[i];
+        c = txt_at(i);
         if (is_break(c)) {
             if (view_mode == VIEW_RAW && x + tok_w(i) > width && i > pos) break;
             *hard = 1;
@@ -141,8 +141,8 @@ static u16 break_line(u16 pos, u16 width, u8 *hard) {
         w = tok_w(i);
         if (x + w > width && i > pos) {
             if (c == ' ') {         /* spaces hang past the edge */
-                while (TXT[i] == ' ') i++;
-                if (is_break(TXT[i])) {
+                while (txt_at(i) == ' ') i++;
+                if (is_break(txt_at(i))) {
                     *hard = 1;
                     return (u16)(i + 1);
                 }
@@ -176,8 +176,8 @@ static void state_at(u16 l, struct lstate *st) {
     st->row = l;
     st->page = L.page;
     st->yin = (u16)(L.y - (PAGE_GAP + st->page * PAGE_STRIDE + MARGIN_TOP));
-    st->para = (u8)(p == 0 || is_break(TXT[p - 1]));
-    st->al = (u8)((ATR[para_end(p)] & A_ALIGN) >> A_ALIGN_SHIFT);
+    st->para = (u8)(p == 0 || is_break(txt_at(p - 1)));
+    st->al = para_al(p);
 }
 
 /* the next line from st into *L, st moved past it; 0 at the document's end */
@@ -198,7 +198,7 @@ static u8 produce(struct lstate *st, struct line *L) {
         st->pos = end;
         return 1;
     }
-    if (st->para) st->al = (u8)((ATR[para_end(pos)] & A_ALIGN) >> A_ALIGN_SHIFT);
+    if (st->para) st->al = para_al(pos);
     end = break_line(pos, TEXT_W, &hard);
     /* the line's metrics: its width without the spaces at its end, its
      * spaces, its tallest ascent and descent */
@@ -207,7 +207,7 @@ static u8 produce(struct lstate *st, struct line *L) {
     nsp = trail = 0;
     tw = 0;
     for (i = pos; i < end; i++) {
-        u8 c = TXT[i], a = ATR[i];
+        u8 c = txt_at(i), a = atr_at(i);
         if (is_break(c) && i > pos) continue;
         f = fonts[a & A_FONT];
         if (f->ascent > asc) asc = f->ascent;
@@ -247,7 +247,7 @@ static u8 produce(struct lstate *st, struct line *L) {
     L->asc = asc;
     L->page = st->page;
     st->yin += asc + desc;
-    if (hard && TXT[end - 1] == CH_FF) {
+    if (hard && txt_at(end - 1) == CH_FF) {
         st->page++;
         st->yin = 0;
     }
@@ -379,7 +379,7 @@ void layout_update(void) {
                 ks = O.start;
             }
             if (k < old_n && (int32_t)ks + pend_delta == (int32_t)L->start && ks > pend_hi && O.y == L->y &&
-                O.page == L->page && (view_mode == VIEW_PAGE || !is_break(TXT[L->start - 1])) &&
+                O.page == L->page && (view_mode == VIEW_PAGE || !is_break(txt_at(L->start - 1))) &&
                 (u16)(l0 + n + (old_n - k)) <= MAX_LINES) {
                 /* the rest is as it was: the old lines from k, after the new ones */
                 base = (u16)(l0 + n);
@@ -463,7 +463,7 @@ u16 x_of(u16 l, u16 pos) {
     }
     just_init(&j, &L);
     x = L.x;
-    for (; i < pos; i++) x += just_w(TXT[i], ATR[i], &j);
+    for (; i < pos; i++) x += just_w(txt_at(i), atr_at(i), &j);
     return x;
 }
 
@@ -481,7 +481,7 @@ u16 pos_at_x(u16 l, u16 x) {
             if (x <= px) return i;
             nx = (u16)(px + 1 + raw_tag((u16)(i + 1), 0));
         } else {
-            nx = px + just_w(TXT[i], ATR[i], &j);
+            nx = px + just_w(txt_at(i), atr_at(i), &j);
             if (x < px + (nx - px) / 2) return i;
         }
         px = nx;

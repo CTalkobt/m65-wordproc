@@ -31,23 +31,26 @@ u16 sel_hi(void) { return sel_anchor < cur ? cur : sel_anchor; }
 
 /* the CR / FF that ends the paragraph holding i */
 u16 para_end(u16 i) {
-    while (i < doc_len - 1 && TXT[i] != CH_CR && TXT[i] != CH_FF) i++;
+    while (i < doc_len - 1 && txt_at(i) != CH_CR && txt_at(i) != CH_FF) i++;
     return i;
 }
+
+/* the alignment of the paragraph holding i (0 left .. 3 justify) */
+u8 para_al(u16 i) { return (u8)((atr_at(para_end(i)) & A_ALIGN) >> A_ALIGN_SHIFT); }
 
 static u8 is_break(u8 c) { return c == CH_CR || c == CH_FF; }
 
 /* the start of the paragraph holding i */
 static u16 para_start(u16 i) {
-    while (i > 0 && !is_break(TXT[i - 1])) i--;
+    while (i > 0 && !is_break(txt_at(i - 1))) i--;
     return i;
 }
 
 /* the style for typing at the cursor: the character before it, or (at a
  * paragraph's start) the one after it */
 u8 attr_at_cursor(void) {
-    if (cur > 0 && !is_break(TXT[cur - 1])) return ATR[cur - 1] & A_STYLE;
-    return ATR[cur] & A_STYLE;
+    if (cur > 0 && !is_break(txt_at(cur - 1))) return atr_at(cur - 1) & A_STYLE;
+    return atr_at(cur) & A_STYLE;
 }
 
 /* room for n characters at `at`: the text and attributes after it moved
@@ -91,7 +94,7 @@ void doc_delete(u16 from, u16 to) {
     /* a paragraph end deleted: the paragraph before it takes the next one's
      * alignment */
     for (i = from; i < to; i++)
-        if (is_break(TXT[i])) {
+        if (is_break(txt_at(i))) {
             lo = para_start(from);
             break;
         }
@@ -114,13 +117,13 @@ static void delete_selection(void) {
 u8 doc_type(u8 c) {
     u8 a;
     if (sel_on) {
-        typing_attr = ATR[sel_lo()] & A_STYLE;
+        typing_attr = atr_at(sel_lo()) & A_STYLE;
         delete_selection();
     }
     a = typing_attr;
     if (is_break(c) && nlines >= MAX_LINES - 8) return 1;   /* the line table is (almost) full */
     if (is_break(c))    /* the new paragraph end keeps the paragraph's alignment */
-        a |= ATR[para_end(cur)] & A_ALIGN;
+        a |= atr_at(para_end(cur)) & A_ALIGN;
     if (doc_insert(cur, &c, &a, 1)) return 1;
     cur++;
     goal_valid = 0;
@@ -150,8 +153,8 @@ void doc_delete_fwd(void) {
  * is its first character's */
 static void restyle(u8 keep, u8 set) {
     u16 lo = sel_lo(), hi = sel_hi(), i;
-    for (i = lo; i < hi; i++) ATR[i] = (u8)((ATR[i] & keep) | set);
-    typing_attr = ATR[lo] & A_STYLE;
+    for (i = lo; i < hi; i++) ATR[i] = (u8)((atr_at(i) & keep) | set);
+    typing_attr = atr_at(lo) & A_STYLE;
     dirty = 1;
     layout_edit(lo, hi, 0);
 }
@@ -160,14 +163,14 @@ static void restyle(u8 keep, u8 set) {
  * character has it already), else for what is typed next */
 void doc_toggle(u8 bit) {
     if (!sel_on) typing_attr ^= bit;
-    else if (ATR[sel_lo()] & bit) restyle((u8)~bit, 0);
+    else if (atr_at(sel_lo()) & bit) restyle((u8)~bit, 0);
     else restyle(0xFF, bit);
 }
 
 /* the next font: over the selection (after its first character's), else
  * for what is typed next */
 void doc_cycle_font(void) {
-    u8 a = sel_on ? ATR[sel_lo()] : typing_attr, f = (u8)(((a & A_FONT) + 1) % NFONTS);
+    u8 a = sel_on ? atr_at(sel_lo()) : typing_attr, f = (u8)(((a & A_FONT) + 1) % NFONTS);
     if (sel_on) restyle((u8)~A_FONT, f);
     else typing_attr = (u8)((typing_attr & ~A_FONT) | f);
 }
@@ -177,9 +180,9 @@ void doc_cycle_font(void) {
 void doc_cycle_align(void) {
     u16 lo = sel_on ? sel_lo() : cur, hi = sel_on ? sel_hi() : cur;
     u16 e = para_end(lo), ps = para_start(lo);
-    u8 al = (u8)((((ATR[e] & A_ALIGN) >> A_ALIGN_SHIFT) + 1) & 3);
+    u8 al = (u8)((((atr_at(e) & A_ALIGN) >> A_ALIGN_SHIFT) + 1) & 3);
     for (;;) {
-        ATR[e] = (u8)((ATR[e] & ~A_ALIGN) | (al << A_ALIGN_SHIFT));
+        ATR[e] = (u8)((atr_at(e) & ~A_ALIGN) | (al << A_ALIGN_SHIFT));
         if (e >= hi || e >= doc_len - 1) break;
         e = para_end(e + 1);
     }
@@ -250,7 +253,7 @@ u8 doc_unpack(void) {
 /* a document just loaded or imported (doc_len characters): its final CR
  * made sure of, the cursor at its start, laid out anew; d: changed */
 void doc_loaded(u8 d) {
-    if (!doc_len || TXT[doc_len - 1] != CH_CR) {
+    if (!doc_len || txt_at(doc_len - 1) != CH_CR) {
         if (doc_len < DOC_MAX) {
             ATR[doc_len] = 0;
             doc_len++;
@@ -269,15 +272,16 @@ void doc_loaded(u8 d) {
 /* the text as PETSCII (lower-case set) for a SEQ file; the size */
 u16 doc_export(void) {
     u16 i;
+    o_start();
     for (i = 0; i < doc_len; i++) {
-        u8 c = TXT[i];
+        u8 c = txt_at(i);
         if (c >= 'a' && c <= 'z') c = (u8)(c - 32);
         else if (c >= 'A' && c <= 'Z') c = (u8)(c + 128);
         else if (c == CH_FF) c = CH_CR;
         else if (c == '_') c = 0xA4;
-        mem_put(SCRATCH_LIN + i, c);
+        o_put(c);
     }
-    return doc_len;
+    return o_n;
 }
 
 /* a PETSCII text file read (FREAD#) to SCRATCH_LIN, after GET_IMPORT_PREP
@@ -285,23 +289,27 @@ u16 doc_export(void) {
 u16 doc_import(void) {
     u16 i;
     u8 c;
-    doc_len = 0;
+    build_start();
     for (i = 0; i < DOC_MAX - 1; i++) {
         c = mem_get(SCRATCH_LIN + i);
         if (!c) break;
-        if (c == CH_CR) {
-            TXT[doc_len] = CH_CR;
-        } else {
+        if (c != CH_CR) {
             if (c == 0xA0) c = ' ';
             c = petscii_to_ascii(c);
             if (!c) continue;
-            TXT[doc_len] = c;
         }
-        ATR[doc_len] = 0;
-        doc_len++;
+        build_put(c);
     }
     /* past the file's end the drive gives CRs: one CR at the end */
-    while (doc_len > 1 && TXT[doc_len - 1] == CH_CR && TXT[doc_len - 2] == CH_CR) doc_len--;
+    while (b_n > 1 && txt_at(b_n - 1) == CH_CR && txt_at(b_n - 2) == CH_CR) b_n--;
+    i = build_end();
+    doc_built();
+    return i;
+}
+
+/* an import built (build_end): the cursor at the start, laid out anew */
+void doc_built(void) {
+    if (!b_done) return;
+    b_done = 0;
     doc_loaded(1);
-    return (u16)(doc_len - 1);
 }

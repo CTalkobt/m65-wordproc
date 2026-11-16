@@ -31,8 +31,8 @@ TARGET = $(BUILD)/writer.prg
 MAP    = $(BUILD)/writer.map
 DISK   = $(BUILD)/writer.d81
 
-CSRC    = src/api.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/list.c src/m65.c src/fonts.c
-PORTABLE = src/api.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/list.c src/fonts.c
+CSRC    = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/list.c src/m65.c src/fonts.c
+PORTABLE = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/list.c src/fonts.c
 HEADERS = src/wp.h
 
 # The C half is compiled here (basic45 --link takes the objects): -O2 for
@@ -45,13 +45,16 @@ CC45FLAGS = -I$(CC45_ROOT)/lib/include -Isrc -I$(BUILD)
 # a page lower; needs M65Compiler #601, master since 6762f672)
 BASFLAGS ?= --minify
 FAST    = render m65 fonts
-SMALL   = api doc layout
+SMALL   = api conv doc layout
+# (conv.c is called by the modules, whose base-page blocks start at $80:
+# its functions keep their variables out of the base page)
+NOZP    = conv
 OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45)
 CCQUIET = 2>&1 | grep -v 'note:\|^ *[0-9]* |\|^ *|' || true
 
 $(BUILD)/obj/%.o45: src/%.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
-	$(CC45) $(if $(filter $*,$(SMALL)),-O1,-O2) $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+	$(CC45) $(if $(filter $*,$(SMALL)),-O1,-O2) $(if $(filter $*,$(NOZP)),-fno-zp-locals) $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
 
 # Modules (.OVL files, loaded by BASIC when used and only when on the disk):
 # linked by tools/mkmod.py to run at the program's mod_area, against its

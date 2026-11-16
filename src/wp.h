@@ -192,10 +192,42 @@ void doc_loaded(u8 d);          /* after a load / import: the final CR, the curs
 u16 md_export(void);            /* Markdown at SCRATCH_LIN; its size (0: too long) */
 u16 md_import(void);            /* Markdown at SCRATCH_LIN as the document; its length */
 
+/* ---- what the converters share (conv.c; issue #3) ---- */
+#define SCRATCH_MAX 30720u      /* the scratch area's size */
+u8 txt_at(u16 i);               /* TXT[i], ATR[i]: smaller code than the far access */
+u8 atr_at(u16 i);
+/* output: bytes to SCRATCH_LIN (o_n of them; past SCRATCH_MAX counted, not written) */
+extern u16 o_n;
+void o_start(void);
+void o_put(u8 c);
+void o_puts(const char *s);
+u16 o_end(void);                /* the size written; 0: more than fits */
+/* export: the document walked, an event at a time (walk_next):
+ *   EV_PARA  a paragraph: its text w_pos..w_to-1, w_to its CR / FF, w_attr
+ *            that one's attribute (its alignment)
+ *   EV_RUN   characters w_pos..w_to-1 of one style, w_attr (A_STYLE)
+ *   EV_PEND  the paragraph's end at w_pos: w_attr CH_CR, or CH_FF (a page)
+ *   EV_END   the document's end */
+enum { EV_END, EV_PARA, EV_RUN, EV_PEND };
+extern u16 w_pos, w_to;
+extern u8 w_attr;
+void walk_start(void);
+u8 walk_next(void);
+/* import: the document built from the start (b_n characters so far), each
+ * character with the attribute b_attr (a paragraph's CR / FF: its
+ * alignment); build_end: the document's length, set, and it laid out */
+extern u16 b_n;
+extern u8 b_attr, b_done;
+void build_start(void);
+void build_put(u8 c);
+void build_uni(u16 u);          /* a Unicode character as the document's (ASCII) */
+u16 build_end(void);            /* the final CR, doc_len, b_done; the length without the final CR */
+void doc_built(void);           /* after build_end (b_done): doc_loaded(1) (mod_run calls it) */
+
 /* ---- modules (.OVL files, loaded by BASIC into mod_area: render.c) ----
  * A module is built apart (Makefile: linked at mod_area against the
  * program's map) and is at most MOD_SIZE bytes, code, data and variables. */
-#define MOD_SIZE 7168
+#define MOD_SIZE 6400
 #define MOD_MORE 0x80                   /* (in a command: more calls follow, the module stays) */
 #define MOD_MD_EXPORT 0                 /* MARKDOWN.OVL: md_export */
 #define MOD_MD_IMPORT 1                 /* MARKDOWN.OVL: md_import */
@@ -222,6 +254,7 @@ extern const struct line *hk_L;
 u8 list_check(void);                    /* list_ok, from LIST.OVL's header (and then drawn) */
 void list_main(void);                   /* LIST.OVL's entry (list.c) */
 u16 para_end(u16 i);            /* the CR / FF ending the paragraph of i */
+u8 para_al(u16 i);              /* its alignment (0 left, 1 centre, 2 right, 3 justify) */
 u8 attr_at_cursor(void);
 u16 sel_lo(void);
 u16 sel_hi(void);

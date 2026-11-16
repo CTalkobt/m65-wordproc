@@ -122,6 +122,7 @@ u16 mod_run(u8 cmd) {
     if (cmd <= MOD_MD_IMPORT) md_main();
     else rtf_main();
 #endif
+    doc_built();
     /* (not while more calls follow: the caches written here are in the
      * module's memory) */
     if (!(cmd & MOD_MORE)) {
@@ -416,7 +417,7 @@ void render_bars(void) {
         put_str((a & A_BOLD) ? " B" : " -");
         put_str((a & A_ITAL) ? "I" : "-");
         put_str((a & A_UNDER) ? "U " : "- ");
-        put_str(align_names[(ATR[para_end(cur)] & A_ALIGN) >> A_ALIGN_SHIFT]);
+        put_str(align_names[para_al(cur)]);
         if (sel_on) {
             put_str("  SEL ");
             put_num((u16)(sel_hi() - sel_lo()));

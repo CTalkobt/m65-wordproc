@@ -147,7 +147,7 @@ static void rtf_round(const char *what) {
 static void md_in(const char *s) {
     memset(MEM + SCRATCH_LIN, 0, 30720);
     memcpy(MEM + SCRATCH_LIN, s, strlen(s));
-    md_import();
+    mod_run(MOD_MD_IMPORT);
 }
 
 static void show(const char *s) {

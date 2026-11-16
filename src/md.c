@@ -33,22 +33,12 @@
 #define F_HEAD 3
 #define M_CODE 0x80             /* export: a character shown as code */
 #define M_FLAGS (A_UNDER | A_BOLD | A_ITAL)
-#define MD_MAX 30720u           /* the scratch area */
 
 /* ==== export ==== */
-static u16 on;                  /* bytes written */
-
-static void out(u8 c) {
-    if (on < MD_MAX) mem_put(SCRATCH_LIN + on, c);
-    on++;
-}
-
-static void outs(const char *s) {
-    while (*s) out((u8)*s++);
-}
+#define out o_put
+#define outs o_puts
 
 static u8 is_sp(u8 c) { return c == ' '; }
-static u8 is_break(u8 c) { return c == CH_CR || c == CH_FF; }
 static u8 is_letter(u8 c) { return (u8)((c | 0x20) - 'a') < 26; }
 static u8 is_alnum(u8 c) { return is_letter(c) || (u8)(c - '0') < 10; }
 static u8 is_punct(u8 c) { return c > ' ' && c < 127 && !is_alnum(c); }
@@ -56,8 +46,8 @@ static u8 is_punct(u8 c) { return c > ' ' && c < 127 && !is_alnum(c); }
 /* the Markdown style of character i: its underline / bold / italic, and
  * M_CODE for Mono (never for a backtick, which a code span cannot hold) */
 static u8 raw_style(u16 i) {
-    u8 a = ATR[i], s = a & M_FLAGS;
-    if ((a & A_FONT) == F_MONO && TXT[i] != '`') s |= M_CODE;
+    u8 a = atr_at(i), s = a & M_FLAGS;
+    if ((a & A_FONT) == F_MONO && txt_at(i) != '`') s |= M_CODE;
     return s;
 }
 
@@ -100,10 +90,10 @@ static void out_para(u16 ps, u16 pe, u8 code) {
     open_st = 0;
     /* spaces at the end left out (two would be a hard break), unless
      * there is nothing else */
-    for (j = pe; j > ps && is_sp(TXT[j - 1]); j--) ;
+    for (j = pe; j > ps && is_sp(txt_at(j - 1)); j--) ;
     if (j > ps && !code) pe = j;
     while (i < pe) {
-        c = TXT[i];
+        c = txt_at(i);
         if (code) {
             out(c);
             i++;
@@ -113,7 +103,7 @@ static void out_para(u16 ps, u16 pe, u8 code) {
             /* a run of spaces: the markers the next character keeps stay
              * open over it; the others are closed before it, the new ones
              * opened after it (a marker never next to a space inside) */
-            for (j = i; j < pe && is_sp(TXT[j]); j++) ;
+            for (j = i; j < pe && is_sp(txt_at(j)); j++) ;
             s = j < pe ? raw_style(j) : 0;
             for (c = first_diff(s), s = 0; c-- > 0;) s |= open_st & mark_bit[c];
             restyle_to(s);
@@ -127,7 +117,7 @@ static void out_para(u16 ps, u16 pe, u8 code) {
         } else {
             /* escaped: what Markdown would read as markup (at the start: a
              * heading, quote, list, or the dot or ) after a number) */
-            u8 n = TXT[i + 1];
+            u8 n = txt_at(i + 1);
             if (in_set("\\`*_[]~", c) || (lead && in_set("#>-+=", c)) || (digits && !lead && in_set(".)", c)) ||
                 (c == '<' && (is_letter(n) || in_set("/!?", n))) || (c == '&' && (is_letter(n) || n == '#')))
                 out('\\');
@@ -155,21 +145,30 @@ static void end_block(void) {
 
 /* the document as Markdown at SCRATCH_LIN; its size (0: more than fits) */
 u16 md_export(void) {
-    u16 ps = 0, pe, i;
-    u8 kind, al, gap = 0, a, head, mono, any;
-    on = 0;
+    u16 ps, pe, i;
+    u8 ev, kind, al, gap = 0, a, head, mono, any;
+    o_start();
+    walk_start();
     prev = pal = K_NONE;
-    while (ps < doc_len) {
-        for (pe = ps; !is_break(TXT[pe]); pe++) ;
-        al = (u8)((ATR[pe] & A_ALIGN) >> A_ALIGN_SHIFT);
+    while ((ev = walk_next()) != EV_END) {
+        if (ev == EV_PEND && w_attr == CH_FF) {
+            end_block();
+            outs("<div style=\"page-break-after: always\"></div>");
+            prev = K_BREAK;
+            gap = 1;
+        }
+        if (ev != EV_PARA) continue;
+        ps = w_pos;
+        pe = w_to;
+        al = (u8)((w_attr & A_ALIGN) >> A_ALIGN_SHIFT);
         if (pe > ps) {
             /* its kind: all Head, all unstyled Mono (its spaces aside: a
              * code span or block takes them in), or plain */
             head = mono = 1;
             any = 0;
             for (i = ps; i < pe; i++) {
-                a = ATR[i];
-                if (is_sp(TXT[i])) continue;
+                a = atr_at(i);
+                if (is_sp(txt_at(i))) continue;
                 any = 1;
                 if ((a & A_FONT) != F_HEAD) head = 0;
                 if ((a & A_FONT) != F_MONO || (a & M_FLAGS)) mono = 0;
@@ -197,16 +196,9 @@ u16 md_export(void) {
         } else {
             gap = 1;
         }
-        if (TXT[pe] == CH_FF) {
-            end_block();
-            outs("<div style=\"page-break-after: always\"></div>");
-            prev = K_BREAK;
-            gap = 1;
-        }
-        ps = (u16)(pe + 1);
     }
     end_block();
-    return on <= MD_MAX ? on : 0;
+    return o_end();
 }
 
 /* ==== import ==== */
@@ -248,13 +240,17 @@ static u8 is_fence(u16 i) {
 
 /* a character into the document */
 static void raw(u8 c, u8 a) {
-    if (doc_len >= DOC_MAX - 1) return;     /* (room kept for the final CR) */
-    TXT[doc_len] = c;
-    ATR[doc_len] = a;
-    doc_len++;
+    b_attr = a;
+    build_put(c);
 }
 
-static void put(u8 c) { raw(c, (u8)((code ? F_MONO : base_font) | flags)); }
+/* the style of the text now */
+static void style(void) { b_attr = (u8)((code ? F_MONO : base_font) | flags); }
+
+static void put(u8 c) {
+    style();
+    build_put(c);
+}
 
 static void puts_(const char *s) {
     while (*s) put((u8)*s++);
@@ -275,14 +271,14 @@ static void end_para(void) {
 /* a block starts: an empty paragraph before it (not at the start, nor
  * after a heading or a page break) */
 static void block_start(void) {
-    if (doc_len && !after_head) raw(CH_CR, 0);
+    if (b_n && !after_head) raw(CH_CR, 0);
     after_head = 0;
 }
 
 /* a paragraph starts */
 static void para_start(void) {
     para_open = 1;
-    pstart = doc_len;
+    pstart = b_n;
 }
 
 /* a closing c (not after a space) from i to the paragraph's end (a blank line) */
@@ -301,15 +297,7 @@ static u8 closer(u8 c, u16 i) {
     }
 }
 
-/* UTF-8 characters as ASCII: these, then Latin-1 letters U+00C0-U+00FF
- * without their accents; others "?" */
-static const u16 uni[] = { 0xDF, 0xA0, 0x2018, 0x2019, 0x201A, 0xB4, 0x201C, 0x201D, 0x201E, 0xAB, 0xBB,
-                           0x2013, 0x2010, 0x2212, 0x2014, 0x2026, 0x2022, 0xB7, 0x2192, 0x2190, 0xA9 };
-static const char *const uni_as[] = { "ss", " ", "'", "'", "'", "'", "\"", "\"", "\"", "\"", "\"",
-                                      "-", "-", "-", "--", "...", "*", "*", "->", "<-", "(c)" };
-static const char latin[] = "AAAAAAACEEEEIIIIDNOOOOOxOUUUUYPsaaaaaaaceeeeiiiidnooooo/ouuuuypy";
-
-/* a UTF-8 character from i as ASCII; its length */
+/* a UTF-8 character from i as the document's (build_uni); its length */
 static u8 utf8(u16 i) {
     u8 c = in(i), n = c < 0xC0 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4, k;
     u16 u = c & (n == 2 ? 0x1F : 0x0F);
@@ -318,12 +306,8 @@ static u8 utf8(u16 i) {
         u = (u16)((u << 6) | (in(i + k) & 0x3F));
     }
     if (n == 1 || n == 4) u = '?';                  /* a stray continuation byte; beyond U+FFFF */
-    for (k = 0; k < sizeof uni / sizeof uni[0]; k++)
-        if (uni[k] == u) {
-            puts_(uni_as[k]);
-            return n;
-        }
-    put(u >= 0xC0 && u <= 0xFF ? (u8)latin[u - 0xC0] : '?');
+    style();
+    build_uni(u);
     return n;
 }
 
@@ -468,8 +452,8 @@ static void inline_md(u16 i, u16 e) {
 u16 md_import(void) {
     u16 i = 0, ls, le, e, j, t;
     u8 c, fence = 0, n, item = 0;
-    mem_put(SCRATCH_LIN + MD_MAX - 1, 0);   /* (an end, even for a file that fills it) */
-    doc_len = 0;
+    mem_put(SCRATCH_LIN + SCRATCH_MAX - 1, 0);  /* (an end, even for a file that fills it) */
+    build_start();
     para_open = after_head = align = hard = flags = code = base_font = 0;
     while (in(i)) {
         /* the line ls..le-1 (without its CR / LF) */
@@ -513,7 +497,7 @@ u16 md_import(void) {
             end_para();
             if (starts((u16)(j + 12), "page-break")) {
                 /* <div style="page-break-after: always"></div> */
-                if (doc_len) raw(CH_FF, 0);
+                if (b_n) raw(CH_FF, 0);
                 after_head = 1;
             } else {
                 /* <div align="...">: the alignment of what follows */
@@ -531,7 +515,7 @@ u16 md_import(void) {
             for (e = j, n = 0; e < le && (in(e) == c || in(e) == ' '); e++) n += in(e) == c;
             if (e == le && (para_open ? c == '=' || c == '-' : n >= 3)) {
                 if (para_open) {
-                    for (e = pstart; e < doc_len; e++) ATR[e] = (u8)((ATR[e] & ~A_FONT) | F_HEAD);
+                    for (e = pstart; e < b_n; e++) ATR[e] = (u8)((atr_at(e) & ~A_FONT) | F_HEAD);
                     end_para();
                     after_head = 1;
                 }
@@ -596,8 +580,7 @@ u16 md_import(void) {
         inline_md(j, e);
     }
     end_para();
-    doc_loaded(1);
-    return (u16)(doc_len - 1);
+    return build_end();
 }
 
 /* MARKDOWN.OVL's entry (mod_run): export or import */
