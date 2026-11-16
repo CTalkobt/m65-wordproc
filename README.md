@@ -197,7 +197,8 @@ then where each glyph starts).
   does. It has to be below `$2000`: BASIC 65 runs with its ROM mapped over
   `$2000`-`$BFFF`. Q)uit puts both back.
 - **Bank 0**: the BASIC program, the C code and its data must end below
-  `$C000`; with Markdown it is full (about 300 bytes left). So the glyph
+  `$C000`; with Markdown it is full: the C data ends at `$BF00`, rounded up to
+  a page, which leaves only the 256-byte CPU stack below `$C000`. So the glyph
   bitmaps (the raw-view font's too, fetched by DMA) live in bank 4
   (`WRITER.FNT`), the C files that do not run on every key are compiled
   with `-O1`, the help is a
