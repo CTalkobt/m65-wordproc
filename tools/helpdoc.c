@@ -58,8 +58,17 @@ static const struct run help[] = {
     { 0, "This paragraph is right aligned." },
     { RIGHT, "\r" },
     { 0, "\r" },
-    { QUOTE, "A quote: indented, with a bar beside it. Paragraph styles (CTRL+D) are Normal, Heading 1 to 3, Quote and Code." },
+    { QUOTE, "A quote: indented, with a bar beside it. Paragraph styles (CTRL+D) are Normal, Heading 1 to 3, Quote, Code and lists:" },
     { K_QUOTE, "\r" },
+    { 0, "\r" },
+    { 0, "Bulleted and numbered (their marks drawn, the numbers counted)" },
+    { K_BULLET, "\r" },
+    { 0, "TAB at an item's start indents it" },
+    { K_NUMBER | 1 << A_LEVEL_SHIFT, "\r" },
+    { 0, "DEL there takes it out a level" },
+    { K_NUMBER | 1 << A_LEVEL_SHIFT, "\r" },
+    { 0, "RETURN on an empty item ends the list" },
+    { K_BULLET, "\r" },
     { 0, "\r" },
     { 0, "And this one is justified: the spaces between its words are stretched so that each line but the last fills the width of the text exactly, as in a book. Select text with F9 (or CTRL and the cursor keys), then press F3, F5 or F7 to style it, F2 to change its font or F4 to align its paragraph." },
     { JUST, "\r" },
@@ -80,10 +89,11 @@ static const struct run help[] = {
             "F2 font: Sans, Serif, Mono, Head\r"
             "F4 paragraph: left, centre, right, justify\r"
             "F6 page break           F1 page / raw view\r"
-            "CTRL+D     style: the drop-down at the top left\r" },
+            "CTRL+D     style: the drop-down at the top left\r"
+            "TAB / DEL  at a list item's start: in / out\r" },
     { 0, "A style applies to the paragraphs the selection holds whole, or the cursor's; "
          "to the rest of the selection as a character style (Normal: plain). In the "
-         "drop-down: cursor keys and RETURN, or N 1 2 3 Q C; ESC leaves it.\r" },
+         "drop-down: cursor keys and RETURN, or N 1 2 3 Q C B #; ESC leaves it.\r" },
     { 0, "\r" },
     { H2, "Selection and clipboard" },
     { K_H2, "\r" },
@@ -109,7 +119,7 @@ static const struct run help[] = {
             "R redraw the screen (also CTRL+L)\r"
             "T list mode on / off\r" },
     { 0, "Saved Writer documents keep their fonts and styles. "
-         "Markdown is read and written by MARKDOWN.OVL, RTF by RTF.OVL, when they are on the disk. "
+         "Markdown is read by MDIMPORT.OVL and written by MDEXPORT.OVL, RTF by RTF.OVL, when they are on the disk. "
          "List mode (LIST.OVL) marks spaces, paragraph ends, wrapped lines "
          "and trailing spaces.\r" },
 };

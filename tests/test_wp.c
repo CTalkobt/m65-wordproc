@@ -500,7 +500,9 @@ int main(void) {
         CHECK(ATR[6] == A_ITAL && ATR[16] == A_BOLD && ATR[22] == 2 && ATR[27] == A_UNDER && ATR[0] == 0);
         md_in("# Title\n\nPara one\nwraps here.\n\n- item 1\n- item 2\n\n1. first\n2) second\n");
         text_of(buf, sizeof buf);
-        CHECK(strcmp(buf, "Title\rPara one wraps here.\r\r- item 1\r- item 2\r\r1. first\r2) second\r") == 0);
+        CHECK(strcmp(buf, "Title\rPara one wraps here.\r\ritem 1\ritem 2\rfirst\rsecond\r") == 0);
+        CHECK(para_kind(28) == K_BULLET && para_kind(35) == K_BULLET && para_kind(42) == K_NUMBER && item_num(42) == 1 &&
+              para_kind(48) == K_NUMBER && item_num(48) == 2);
         CHECK((ATR[0] & A_FONT) == 3 && (ATR[6] & A_FONT) == 0);
         md_in("Setext\n======\nnext\n");
         text_of(buf, sizeof buf);
@@ -690,13 +692,12 @@ int main(void) {
         CHECK(para_kind(21) == K_QUOTE);
         /* a quote laid out with its indent */
         get_line(line_of(21), &L);
-        CHECK(L.x == 24 && L.kind == K_QUOTE);
+        CHECK(L.x == 24 && (L.kind & A_KIND) == K_QUOTE);
         /* the top bar's style field, the drop-down */
         cur = 22;
         wp_key(29);
         CHECK(strstr(mod_area.r.bar_text[0], "Quote") != NULL);
         wp_drop(K_H2);
-        screen_ppm("build/style_drop.ppm");
         for (r = 0, i = 0; i < 6 * 24; i++) r |= MEM[BITMAP_LIN + (u32)((16 + i) >> 3) * 640 + ((16 + i) & 7) + 8];
         CHECK(r != 0);
         wp_drop(0xFF);
@@ -735,6 +736,63 @@ int main(void) {
         CHECK(strcmp(buf, "A\rB\rC\rD\rE\rF\rG\r") == 0);
         CHECK(para_kind(0) == K_H1 && para_kind(2) == K_QUOTE && para_kind(4) == K_CODE && para_kind(6) == K_H2 &&
               para_kind(8) == K_H1 && para_kind(10) == K_NORMAL && para_kind(12) == K_NORMAL);
+
+        /* lists: bulleted and numbered, nested, numbered as they are */
+        md_in("- one\n- two\n    1. a\n    2. b\n        - deep\n    3. c\n- three\n\n1. x\n\n2. y\n3) z\n\ntext\n");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "one\rtwo\ra\rb\rdeep\rc\rthree\rx\ry\rz\r\rtext\r") == 0);
+        CHECK(ATR[3] == K_BULLET && ATR[7] == K_BULLET && ATR[9] == (K_NUMBER | 1 << A_LEVEL_SHIFT) &&
+              ATR[16] == (K_BULLET | 2 << A_LEVEL_SHIFT) && ATR[18] == (K_NUMBER | 1 << A_LEVEL_SHIFT) &&
+              ATR[24] == K_BULLET && ATR[25] == 0);
+        CHECK(item_num(8) == 1 && item_num(10) == 2 && item_num(17) == 3);  /* (deep passed over) */
+        CHECK(item_num(25) == 1 && item_num(27) == 2 && item_num(29) == 3); /* (a loose list: one list) */
+        CHECK(para_kind(32) == K_NORMAL);
+        md_out(m1);
+        CHECK(strstr(m1, "- one\n- two\n    1. a\n    2. b\n        - deep\n    3. c\n- three\n1. x\n2. y\n3. z\n\ntext") != NULL);
+        md_fixed_point(m1, m2, "lists");
+        rtf_round("lists");
+        rtf_out(m1);
+        CHECK(strstr(m1, "\\pard\\s7\\ilvl1\\li720\\fi-360\\ql{\\listtext 2.\\tab}") != NULL);
+        /* drawn: a number in the indent; renumbered when one is taken out */
+        wp_redraw();
+        get_line(line_of(10), &L);
+        CHECK(L.x == 48 && (L.kind & L_FIRST));
+        screen_ppm("build/lists_page.ppm");
+        cur = 8;                                    /* "a": out of the list (level 1, then 0, then normal) */
+        wp_key(20);
+        CHECK(para_kind(8) == K_NUMBER && (ATR[9] & A_LEVEL) == 0 && strcmp((text_of(buf, sizeof buf), buf), "one\rtwo\ra\rb\rdeep\rc\rthree\rx\ry\rz\r\rtext\r") == 0);
+        CHECK(item_num(10) == 1);                   /* (b: the first at level 1 now) */
+        wp_key(9);                                  /* TAB: back in */
+        CHECK((ATR[9] & A_LEVEL) == 1 << A_LEVEL_SHIFT && item_num(10) == 2);
+        wp_key(20);
+        wp_key(20);
+        CHECK(para_kind(8) == K_NORMAL && ATR[9] == 0 && item_num(10) == 1);
+        /* RETURN on an empty item: out of the list */
+        wp_cmd(13);
+        wp_cmd(32 + K_BULLET);
+        type("p\n");
+        CHECK(para_kind(0) == K_BULLET && para_kind(2) == K_BULLET);
+        type("\n");
+        CHECK(doc_len == 3 && para_kind(2) == K_NORMAL);
+        type("q");
+        wp_key(147);
+        wp_key(9);
+        wp_cmd(32 + K_NUMBER);                      /* (a list's level kept as it changes kind) */
+        CHECK(ATR[1] == (K_NUMBER | 1 << A_LEVEL_SHIFT));
+        wp_cmd(32 + K_NORMAL);
+        CHECK(ATR[1] == 0);
+        wp_drop(K_NUMBER);
+        screen_ppm("build/style_drop.ppm");
+        wp_drop(0xFF);
+
+        /* RTF lists as Word writes them: \listtext before \pard, \ilvl */
+        rtf_in("{\\rtf1\\ansi{\\stylesheet{\\s0 Normal;}{\\s20 List Paragraph;}}"
+               "{\\listtext\\pard\\plain\\f3 \\'b7\\tab}\\pard\\s20\\ls1\\ilvl0 B1\\par"
+               "{\\listtext\\pard\\plain 1.\\tab}\\pard\\s20\\ls2\\ilvl1 N1\\par"
+               "{\\listtext\\pard\\plain 2.\\tab}\\pard\\s20\\ls2\\ilvl1 N2\\par\\pard After\\par}");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "B1\rN1\rN2\rAfter\r") == 0);
+        CHECK(ATR[2] == K_BULLET && ATR[5] == (K_NUMBER | 1 << A_LEVEL_SHIFT) && item_num(6) == 2 && ATR[11] == 0);
 
         /* a version 1 file: its paragraph ends' style bits cleared */
         wp_cmd(13);

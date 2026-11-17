@@ -29,10 +29,10 @@ On a MEGA65: copy `build/writer.d81` to the SD card, mount it, then
 `DLOAD "WRITER"` and `RUN`. The disk holds `WRITER` (the program),
 `WRITER.FNT` (the fonts' glyphs, loaded by the program), `WRITER.HELP` (the
 help: a Writer document shown when the program starts and again with F8 / HELP;
-without it the program starts with an empty document), `MARKDOWN.OVL`
-(Markdown import and export, a module: without it the rest works, and a
-`.md` name gets "Markdown needs MARKDOWN.OVL on the disk"), `RTF.OVL` (RTF
-import and export, the same for `.rtf`) and `LIST.OVL`
+without it the program starts with an empty document), `MDIMPORT.OVL` and
+`MDEXPORT.OVL` (Markdown import and export, modules: without them the rest
+works, and a `.md` name gets "Markdown needs MDIMPORT.OVL on the disk"),
+`RTF.OVL` (RTF import and export, the same for `.rtf`) and `LIST.OVL`
 (list mode, a module: without it the menu does not offer it).
 
 `tools/xemu_run.py` runs it headless in xemu, types keys into the KERNAL's
@@ -66,9 +66,10 @@ Styles and fonts apply to the selection, or to what you type next.
 
 **Paragraph styles** ([#4](https://github.com/CTalkobt/m65-wordproc/issues/4)):
 the top bar's left end shows the style of the cursor's paragraph: Normal,
-Heading 1, Heading 2, Heading 3, Quote or Code. CTRL+D drops the list down
-under it, each style in its own look; the cursor keys move through it and
-RETURN applies the one lit (or N 1 2 3 Q C at once; ESC leaves it).
+Heading 1, Heading 2, Heading 3, Quote, Code, Bullet or Numbered. CTRL+D
+drops the list down under it, each style in its own look; the cursor keys
+move through it and RETURN applies the one lit (or N 1 2 3 Q C B # at once;
+ESC leaves it).
 
 - A paragraph the selection holds whole (all its text), or with no
   selection the cursor's, becomes that kind. Its characters in the old
@@ -83,7 +84,17 @@ RETURN applies the one lit (or N 1 2 3 Q C at once; ESC leaves it).
 - A quote is laid out indented with a bar beside it, and a code block
   indented with a dotted line. RETURN at a heading's end starts a Normal
   paragraph; the raw view shows a kind as a green tag (`[H1]`, `[Quote]`,
-  `[Code]`) at the paragraph's start.
+  `[Code]`, `[List]`, `[Num2]`: a list item's level from the second on)
+  at the paragraph's start.
+- **Lists**: a bulleted or numbered item is a paragraph, indented by its
+  level (four levels). Its bullet (a square, hollow at the second and
+  fourth levels) or number is drawn in the indent, not stored as text: a
+  number counts the numbered items before it at its level, passing over
+  deeper ones and stopping at anything else, so the list renumbers itself
+  as you edit it. At an item's start TAB takes it a level in and DEL a
+  level out (from the first level: a Normal paragraph); RETURN makes the
+  next item, and RETURN on an empty item takes it out a level, so twice
+  ends the list. A list changed to the other kind keeps its levels.
 
 **List mode** (ESC T; [#2](https://github.com/CTalkobt/m65-wordproc/issues/2)),
 as vi's `:set list`, shows the text's invisible structure in either view,
@@ -118,7 +129,7 @@ letter with its accent), in `WRITER.FNT`.
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
 | `src/m65.c` | C | the VIC-IV screen mode, DMA and colour RAM |
 | `src/conv.c` | C | what the converters share (below): output to the scratch area, a walk over the document for export, a builder for import, Unicode as the document's characters |
-| `src/md.c` | C | Markdown export and import (below): the module `MARKDOWN.OVL` |
+| `src/md.c` | C | Markdown export and import (below): the modules `MDEXPORT.OVL` and `MDIMPORT.OVL` (`MD_PART` 1, 2) |
 | `src/rtf.c` | C | RTF export and (streamed) import: the module `RTF.OVL` |
 | `src/list.c` | C | list mode's markers: the module `LIST.OVL` |
 | `src/api.c` | C | the functions BASIC calls with `SYS {name}, a` (and reads with `RREG`) |
@@ -139,7 +150,8 @@ has no use for one leaves it off the disk and the program does not need
 the room for it. Two kinds:
 
 - **Run once** (as one job over the document), loaded just before it runs:
-  Markdown (`MARKDOWN.OVL`, from `src/md.c`), RTF (`RTF.OVL`, from
+  Markdown (`MDIMPORT.OVL` and `MDEXPORT.OVL`, both from `src/md.c`, built
+  apart so that neither sets `MOD_SIZE`), RTF (`RTF.OVL`, from
   `src/rtf.c`); PETSCII graphics, PDF export, find and replace or a word
   count would fit the same way. One can also be called several times in a
   row (a command with `MOD_MORE`: `mod_run` then leaves it and the drawing's
@@ -156,14 +168,14 @@ the room for it. Two kinds:
   line in `hk_l` / `hk_L`; it XORs its markers into the band. A feature
   that changes what keys do (undo) still belongs in the program.
 
-- **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6.25 KB in
+- **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6016 bytes in
   bank 0), which is also where the drawing keeps its buffers and caches
   (the band, the redraw cache, the bars' text, the row patterns, and the
   layout's buffer of new lines and the menu's text: 4.3 KB),
   all remade after a full redraw. So a module costs bank 0 only what it
   needs beyond those, once for all modules.
 - **Running it** (run once): BASIC `BLOAD`s it into `mod_area` (`bload
-  "markdown.ovl", b0, p({mod_area})`, under `TRAP`: no file, no module)
+  "mdimport.ovl", b0, p({mod_area})`, under `TRAP`: no file, no module)
   just before `SYS {wp_get}, ...` runs it, with nothing drawn between.
   `mod_run` checks its header (`"WM"`, the build's ID), calls its
   `mod_main` (what to do in `mod_cmd`, the result in `mod_ret`), then
@@ -273,15 +285,15 @@ A document (`S`ave / `L`oad) is a PRG file: `"WP"`, version 2, the length
 characters; CR ends a paragraph, FF a page), then the attributes. A
 character's attribute byte: bits 0-1 font, 2 bold, 3 italic, 4 underline.
 A paragraph's CR (or page break) holds the paragraph's: bits 0-2 its kind
-(0 Normal, 1-3 Heading 1-3, 4 Quote, 5 Code; 6 and 7 are spare, read as
-Normal), bits 5-6 its alignment. Version 1 files (before the kinds: their
+(0 Normal, 1-3 Heading 1-3, 4 Quote, 5 Code, 6 Bullet, 7 Numbered), bits
+3-4 a list item's level (0-3), bits 5-6 its alignment. Version 1 files (before the kinds: their
 CRs had the typing style in bits 0-4) load as Normal paragraphs. Import / Export use sequential files: plain PETSCII text
 (accents left out on export: PETSCII has none), Markdown when the name ends
 in `.md`, RTF for `.rtf`.
 
 ### Markdown
 
-Export (`src/md.c`, `md_export`, in the module `MARKDOWN.OVL`) writes
+Export (`src/md.c`, `md_export`, in the module `MDEXPORT.OVL`) writes
 UTF-8 with LF line ends; Import reads it back (up to 30 KB) and Markdown
 from elsewhere.
 
@@ -291,6 +303,7 @@ from elsewhere.
 | Heading 1, 2, 3 | `# `, `## `, `### ` (import: `####` and deeper as Heading 3; setext `===` Heading 1, `---` Heading 2) |
 | Quote | `> ` (quote paragraphs one after another: one quote with hard breaks; import: a `>` line alone ends a paragraph in it, a line without `>` goes on with it) |
 | Code | a fenced code block, a line a paragraph (empty ones too) |
+| list items | `- ` or `N. ` (its number), four spaces before it a level; items one after another are one list (import: `-`, `*`, `+`, `N.` or `N)`; an item deeper than the one before is a level in, else at the level whose indent it has; a blank line between items keeps the list going, as a loose list; the marker is not kept as text) |
 | bold, italic, underline | `**…**`, `*…*`, `<u>…</u>`, where they differ from the paragraph style's own (a heading's bold is not written) |
 | Mono inside a paragraph | `` `…` `` |
 | centre, right, justify | `<div align="center">` … `</div>` around the block |
@@ -303,8 +316,7 @@ would read them: `*`, `_`, `` ` ``, `[`, `]`, `\`, `~` everywhere; `#`, `>`, `-`
 name), and spaces at a paragraph's start are `&nbsp;`; empty paragraphs are
 not written (blocks are separated by blank lines instead).
 
-Import also takes lists (their markers kept as text, an item a
-paragraph), links (`[text](url)` becomes "text (url)", an image its text),
+Import also takes links (`[text](url)` becomes "text (url)", an image its text),
 `<br>`, the common entities, and UTF-8: Latin-1's characters (U+00A0-U+00FF)
 as they are; curly quotes, dashes, the ellipsis and € become ASCII, others
 `?`. It puts an empty paragraph between blocks (not after a heading).
@@ -321,9 +333,12 @@ Export (`src/rtf.c`, in the module `RTF.OVL`) is lossless for Writer's
 documents: a font table (`\f0` Sans `\fswiss`, `\f1` Serif `\froman`,
 `\f2` Mono `\fmodern`, `\f3` Head `\fswiss` at `\fs36`), `\b` `\i` `\ul`
 where they change, a stylesheet (`\s0` Normal, `\s1`-`\s3` heading 1-3
-with `\outlinelevel`, `\s4` Quote and `\s5` Code with an indent, `\li`),
-each paragraph as `\pard`, its style with those properties (readers take
-them from the paragraph), its alignment (`\ql` `\qc` `\qr` `\qj`) and
+with `\outlinelevel`, `\s4` Quote and `\s5` Code with an indent, `\li`,
+`\s6` List Bullet and `\s7` List Number), each paragraph as `\pard`, its
+style with those properties (readers take them from the paragraph; a list
+item also its level, `\ilvl`, an indent by it and a hanging first line,
+and its bullet or number as `{\listtext ...\tab}`, the text a reader
+without lists shows), its alignment (`\ql` `\qc` `\qr` `\qj`) and
 `\par`, a page break as `\par\page`; `\ { }` escaped,
 accented characters as `\'hh` (`\ansicpg1252`, which has Latin-1's).
 
@@ -335,7 +350,10 @@ size of 14 pt or more is Head; `\b`, `\i`, the underlines, `\plain`,
 `\pard`, alignment; a paragraph's kind from `\outlinelevelN` (heading N+1,
 from 3 on heading 3) or from its `\sN`, by the style's name in the
 `\stylesheet` ("heading N" as its level, "Title" Heading 1, a name with
-"quot" Quote, with "code", "preformatted" or "source" Code); `\par`, `\line` and `\row` end a paragraph, `\page`
+"quot" Quote, with "code", "preformatted" or "source" Code, with
+"bullet" or "number" a list); a list item from `{\listtext ...}` (as Word
+writes it, before the paragraph's `\pard`: a digit in it makes a numbered
+item, else bulleted; its text left out) and its level from `\ilvlN`; `\par`, `\line` and `\row` end a paragraph, `\page`
 ends a page; `\tab` and `\cell` are spaces; `\uN` (skipping `\ucN`
 characters after it) and `\'hh` (Windows-1252) are Latin-1's characters, or ASCII
 for the punctuation it does not have; `\binN` data is skipped. `\colortbl`, `\info`,
@@ -406,8 +424,15 @@ can be.
   `case`: the BASIC program went from 5614 to 4756 bytes, so the C half
   starts at `$3300`; the fonts' width tables went to far memory (above);
   and the layout's line buffer, the menu's text and a few work buffers
-  moved into `mod_area`'s drawing memory (`LIST_OFS` 4352). The C data now
-  ends at `$BC00`. (Its
+  moved into `mod_area`'s drawing memory (`LIST_OFS` 4288). Lists (#4)
+  took about 1 KB more. BASIC's parameterless procs became labels reached
+  with `GOSUB` (basic45 puts a `GOTO` over each proc, [M65Compiler
+  #605](https://github.com/CTalkobt/M65Compiler/issues/605)): 4522 bytes,
+  so the C half starts at `$3200`. And Markdown became two modules, import
+  (4944 bytes) and export (1871), so the largest module (it was Markdown's
+  6713 bytes with lists) no longer sets `MOD_SIZE`: the drawing's buffers
+  and `LIST.OVL` do (4288 + 1728), and it went from 6400 to 6016 bytes. The
+  C data now ends at `$BD00`, leaving 768 bytes for the CPU stack. (Its
   two `poke`s of `$D1` / `$F7` are written in decimal: `--minify` turns
   `poke $d1` into a variable,
   [M65Compiler #603](https://github.com/CTalkobt/M65Compiler/issues/603).)

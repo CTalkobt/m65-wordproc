@@ -8,7 +8,9 @@
  *   styles            \b \b0, \i \i0, \ul \ulnone, written where they change
  *   a paragraph       \pard, its kind (\sN of a stylesheet: Normal, heading
  *                     1-3 with \outlinelevel, Quote and Code with an indent,
- *                     \li, given in the paragraph too, as readers want), its
+ *                     \li, List Bullet and List Number; given in the
+ *                     paragraph too, as readers want; a list item also its
+ *                     \ilvl, indent and {\listtext marker\tab}), its
  *                     alignment (\ql \qc \qr \qj), its text, \par
  *   a page break      \par\page (the paragraph ends the page)
  *   \ { }             escaped with "\"; Latin-1 characters as \'hh
@@ -32,7 +34,10 @@
  *   \sN               the kind of the stylesheet's style N, by its name:
  *                     "heading N" (as \outlinelevel), "Title" heading 1,
  *                     one with "quot" a quote, with "code", "preformatted"
- *                     or "source" code; others normal
+ *                     or "source" code, "bullet" / "number" a list;
+ *                     others normal
+ *   {\listtext ...}   a list item (a digit in it: numbered), as Word
+ *                     writes it, before the \pard; \ilvlN its level
  *   \par \line \row   a paragraph's end; \sect too after text
  *   \page             a page break (ending the paragraph, or the one that
  *                     just ended)
@@ -57,12 +62,24 @@ static const char rtf_head[] =
     "{\\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0\\fswiss Sans;}{\\f1\\froman Serif;}"
     "{\\f2\\fmodern Mono;}{\\f3\\fswiss Head;}}\r\n"
     "{\\stylesheet{\\s0 Normal;}{\\s1\\outlinelevel0 heading 1;}{\\s2\\outlinelevel1 heading 2;}"
-    "{\\s3\\outlinelevel2 heading 3;}{\\s4\\li540 Quote;}{\\s5\\li360 Code;}}\r\n";
+    "{\\s3\\outlinelevel2 heading 3;}{\\s4\\li540 Quote;}{\\s5\\li360 Code;}"
+    "{\\s6\\li360\\fi-360 List Bullet;}{\\s7\\li360\\fi-360 List Number;}}\r\n";
 /* a paragraph kind's \sN and the rest of its properties */
 static const char *const kind_rtf[KIND_TAB] = { "\\s0", "\\s1\\outlinelevel0", "\\s2\\outlinelevel1",
-                                                "\\s3\\outlinelevel2", "\\s4\\li540", "\\s5\\li360", "\\s0", "\\s0" };
+                                                "\\s3\\outlinelevel2", "\\s4\\li540", "\\s5\\li360", "\\s6", "\\s7" };
 static const char *const q_word[4] = { "\\ql", "\\qc", "\\qr", "\\qj" };
 static const char hex[] = "0123456789abcdef";
+
+/* a number in decimal */
+static void out_dec(u16 v) {
+    char t[6];
+    u8 k = 0;
+    do {
+        t[k++] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v);
+    while (k) out((u8)t[--k]);
+}
 
 static u16 rtf_export(void) {
     u16 i;
@@ -73,9 +90,31 @@ static u16 rtf_export(void) {
     while ((ev = walk_next()) != EV_END) {
         if (ev == EV_PARA) {
             outs("\\pard");
-            outs(kind_rtf[w_attr & A_KIND]);
+            a = w_attr & A_KIND;
+            outs(kind_rtf[a]);
+            if (a >= K_BULLET) {
+                /* a list item: its level (\ilvl), indent, a hanging first
+                 * line, then its marker as text for readers (\listtext) */
+                d = (u8)((w_attr & A_LEVEL) >> A_LEVEL_SHIFT);
+                outs("\\ilvl");
+                out_dec(d);
+                outs("\\li");
+                out_dec((u16)(d + 1) * 360);
+                outs("\\fi-360");
+            }
             outs(q_word[(w_attr & A_ALIGN) >> A_ALIGN_SHIFT]);
             sp = 1;                     /* the control words' ending space */
+            if (a >= K_BULLET) {
+                outs("{\\listtext ");
+                if (a == K_BULLET) {
+                    outs("\\bullet");
+                } else {
+                    out_dec(item_num(w_pos));
+                    out('.');
+                }
+                outs("\\tab}");
+                sp = 0;
+            }
         } else if (ev == EV_RUN) {
             a = w_attr;
             if (a != now) {
@@ -115,7 +154,7 @@ static u16 rtf_export(void) {
 
 /* ==== import ==== */
 enum { S_TEXT, S_ESC, S_WORD, S_PARAM, S_HEX1, S_HEX2, S_DONE };
-enum { D_TEXT, D_SKIP, D_FONTS, D_STYLES };     /* what a group's text is */
+enum { D_TEXT, D_SKIP, D_FONTS, D_STYLES, D_LIST };     /* what a group's text is (D_LIST: \listtext) */
 #define NSTYLE 16
 #define DEPTH 24                        /* groups whose state is kept (deeper: not) */
 #define NFONT 24
@@ -127,6 +166,7 @@ static u16 binskip;                     /* \bin's bytes left */
 static u8 uskip;                        /* characters left to skip after \u */
 static u8 pempty;                       /* nothing since the last paragraph's end */
 static u8 align, pkind;                 /* the paragraph's alignment, kind */
+static u8 lkind, llevel;                /* its \listtext (bullet, or a number in it), \ilvl */
 
 /* the stylesheet: a style's number, the paragraph kind its name gives */
 static int16_t s_num[NSTYLE], s_cur;
@@ -164,9 +204,11 @@ static void uchar(u16 u) {
 static void put(u8 c) { uchar(c); }
 
 static void end_para(u8 c) {
-    b_attr = (u8)((align << A_ALIGN_SHIFT) | pkind);
+    u8 k = pkind ? pkind : lkind;
+    b_attr = (u8)((align << A_ALIGN_SHIFT) | k | (k >= K_BULLET ? llevel << A_LEVEL_SHIFT : 0));
     build_put(c);
     pempty = 1;
+    lkind = llevel = 0;
 }
 
 /* Windows-1252's $80-$9F that have an ASCII form: their Unicode */
@@ -180,6 +222,10 @@ static void text(u8 c, u8 hex) {
     u8 k;
     if (uskip) {
         uskip--;
+        return;
+    }
+    if (dest == D_LIST) {
+        if (is_digit(c)) lkind = K_NUMBER;
         return;
     }
     if (dest == D_STYLES) {
@@ -233,6 +279,8 @@ static void style_end(void) {
     else if (has("title") && !has("sub")) k = K_H1;
     else if (has("quot")) k = K_QUOTE;
     else if (has("code") || has("preformatted") || has("source")) k = K_CODE;
+    else if (has("bullet")) k = K_BULLET;
+    else if (has("number")) k = K_NUMBER;
     if (k && s_cur >= 0 && nstyle < NSTYLE) {
         s_num[nstyle] = s_cur;
         s_kind[nstyle++] = k;
@@ -294,11 +342,11 @@ static const char skips[] =
 /* the control words read (W_...: their place in the list) */
 static const char words[] =
     "par line row sect page tab cell pard plain ql qc qr qj b i ul ulnone uld ulw uldb "
-    "f fs u uc bin deff fonttbl froman fmodern s outlinelevel stylesheet "
+    "f fs u uc bin deff fonttbl froman fmodern s outlinelevel stylesheet listtext ilvl "
     "emdash endash lquote rquote ldblquote rdblquote bullet";
 enum { W_PAR = 1, W_LINE, W_ROW, W_SECT, W_PAGE, W_TAB, W_CELL, W_PARD, W_PLAIN, W_QL, W_QC, W_QR, W_QJ,
        W_B, W_I, W_UL, W_ULNONE, W_ULD, W_ULW, W_ULDB, W_F, W_FS, W_U, W_UC, W_BIN, W_DEFF, W_FONTTBL,
-       W_FROMAN, W_FMODERN, W_S, W_OUTLINELEVEL, W_STYLESHEET, W_EMDASH, W_ENDASH, W_LQUOTE, W_RQUOTE, W_LDBLQUOTE, W_RDBLQUOTE, W_BULLET };
+       W_FROMAN, W_FMODERN, W_S, W_OUTLINELEVEL, W_STYLESHEET, W_LISTTEXT, W_ILVL, W_EMDASH, W_ENDASH, W_LQUOTE, W_RQUOTE, W_LDBLQUOTE, W_RDBLQUOTE, W_BULLET };
 static const u16 named[] = { 0x2014, 0x2013, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022 };
 
 static void ctrl_word(void) {
@@ -307,7 +355,7 @@ static void ctrl_word(void) {
         binskip = has_param ? (u16)param : 0;
         return;
     }
-    if (dest == D_SKIP) return;
+    if (dest == D_SKIP || dest == D_LIST) return;
     if (dest == D_FONTS) {
         if (w == W_F) {
             f_cur = param;
@@ -350,6 +398,11 @@ static void ctrl_word(void) {
             if (s_num[k] == param) pkind = s_kind[k];
         break;
     case W_OUTLINELEVEL: pkind = level_kind(param); break;
+    case W_LISTTEXT:
+        dest = D_LIST;
+        lkind = K_BULLET;
+        break;
+    case W_ILVL: llevel = param > 3 ? 3 : (u8)param; break;
     case W_STYLESHEET:
         dest = D_STYLES;
         s_len = 0;
@@ -475,7 +528,7 @@ static void rtf_begin(void) {
     binskip = 0;
     uskip = depth = over = nfont = nstyle = s_len = 0;
     pempty = 1;
-    align = font = flags = deff_fam = pkind = 0;
+    align = font = flags = deff_fam = pkind = lkind = llevel = 0;
     deff = 0;
     fs = 24;
     uc = 1;

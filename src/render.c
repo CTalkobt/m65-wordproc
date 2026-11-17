@@ -175,11 +175,17 @@ static void hmix(u16 v) {
 /* what line l shows: its characters, attributes, placement, and the cursor
  * and selection in it (raw view: also the style before it and its
  * paragraph's alignment, which its tags show) */
+static u16 lnum;                /* a numbered item's number (line_hash, for draw_line) */
+
+/* the first line of a list item (L_FIRST: its paragraph's first) */
+#define list_first(L) (((L)->kind & (L_FIRST | A_KIND)) >= (L_FIRST | K_BULLET))
+
 static u32 line_hash(u16 l, const struct line *L) {
     u16 i = L->start, e = line_end(l);
     hs1 = 0x17;
     hs2 = 0x5A;
-    hmix((u16)(L->x | (L->kind << 12)));
+    hmix((u16)(L->x | (L->kind << 9)));
+    if (list_first(L) && (L->kind & A_KIND) == K_NUMBER) hmix(lnum = item_num(i));
     hmix((u16)(L->extra | (L->nsp << 8)));
     hmix((u16)(L->h | (L->asc << 8)));
     hmix((u16)(e - i));
@@ -445,6 +451,19 @@ static void mark_desk(u16 sy, u16 n) {
     while (n--) desk_row[sy++ >> 3] = 1;
 }
 
+/* sb[0..sn-1] drawn in Sans at band row top, ending at x (sh 0), or
+ * centred on it (sh 1) */
+static void sb_draw(u16 x, u8 sh, u8 top) {
+    u8 n;
+    u16 w = 0;
+    for (n = 0; n < sn; n++) w += char_w((u8)sb[n], 0);
+    x -= w >> sh;
+    for (n = 0; n < sn; n++) {
+        draw_glyph(&font_sans, (u8)sb[n], x, top, 0);
+        x += char_w((u8)sb[n], 0);
+    }
+}
+
 /* line l (*L) into the band (rows 0..h-1) */
 static void draw_line(u16 l, const struct line *L) {
     u16 i = L->start, e = line_end(l), x, lo = 0, hi = 0, cx = 0xFFFF;
@@ -457,10 +476,26 @@ static void draw_line(u16 l, const struct line *L) {
         lo = sel_lo();
         hi = sel_hi();
     }
-    if (L->kind >= K_QUOTE) {
-        /* a quote's bar, a code block's dotted line, in its indent */
-        u8 r, k = L->kind == K_CODE;
-        for (r = 0; r < h; r = (u8)(r + 1 + k)) band_xor(TEXT_X + 6, TEXT_X + 9 - 2 * k, r, (u8)(r + 1));
+    {
+        u8 r, k = L->kind & A_KIND;
+        if (k == K_QUOTE || k == K_CODE) {
+            /* a quote's bar, a code block's dotted line, in its indent */
+            k = k == K_CODE;
+            for (r = 0; r < h; r = (u8)(r + 1 + k)) band_xor(TEXT_X + 6, TEXT_X + 9 - 2 * k, r, (u8)(r + 1));
+        } else if (list_first(L)) {
+            /* a list item's marker, before its text: a square (hollow at
+             * levels 2 and 4), or its number */
+            x = (u16)(TEXT_X + para_indent(L->kind) - 6);
+            if (k == K_BULLET) {
+                band_xor(x - 5, x, (u8)(asc - 7), (u8)(asc - 2));
+                if (L->kind & (1 << A_LEVEL_SHIFT)) band_xor(x - 4, x - 1, (u8)(asc - 6), (u8)(asc - 3));
+            } else {
+                sn = 0;
+                put_num(lnum);
+                sb[sn++] = '.';
+                sb_draw(x, 0, (u8)(asc - font_sans.ascent));
+            }
+        }
     }
     x = (u16)(TEXT_X + L->x);
     for (; i < e; i++) {
@@ -485,19 +520,12 @@ static void draw_line(u16 l, const struct line *L) {
 #define FOOT_H 15
 #define FOOT_Y (PAGE_H - 34)
 static void draw_footer(u8 page) {
-    u8 n;
-    u16 w = 0, x;
     band_fill(FOOT_H, row_page);
     sn = 0;
     put_str("- ");
     put_num((u16)(page + 1));
     put_str(" -");
-    for (n = 0; n < sn; n++) w += char_w((u8)sb[n], 0);
-    x = (u16)(PAGE_X + (PAGE_W - w) / 2);
-    for (n = 0; n < sn; n++) {
-        draw_glyph(&font_sans, (u8)sb[n], x, 0, 0);
-        x += char_w((u8)sb[n], 0);
-    }
+    sb_draw(PAGE_X + PAGE_W / 2, 1, 0);
 }
 
 static void render_page(void) {
@@ -614,7 +642,8 @@ static u8 tag_colour(const char *t) {
     /* t: the tag's text after '[' */
     if (*t == '/') t++;
     if ((t[0] == 'B' || t[0] == 'I' || t[0] == 'U') && t[1] == ']') return C_BLUE;
-    if (t[0] == 'Q' || (t[0] == 'H' && t[1] < 'A') || (t[0] == 'C' && t[1] == 'o')) return C_GREEN;     /* a kind */
+    if (t[0] == 'Q' || t[0] == 'L' || t[0] == 'N' || (t[0] == 'H' && t[1] < 'A') || (t[0] == 'C' && t[1] == 'o'))
+        return C_GREEN;                 /* a kind */
     if (t[0] == 'C' || t[0] == 'R' || t[0] == 'J' || t[0] == 'P') return C_RED;
     return C_PURPLE;
 }

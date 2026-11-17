@@ -2,7 +2,7 @@
  * area, a walk over the document for export, a builder of the document for
  * import, and Unicode as the document's characters
  *
- * They are in the program, once: the converter modules (MARKDOWN.OVL,
+ * They are in the program, once: the converter modules (MDIMPORT.OVL,
  * RTF.OVL, ...) call them through mkmod.py's equates, as any program
  * function, and hold only their format's syntax. The text import and
  * export (doc.c) use them too.
@@ -70,6 +70,24 @@ u8 walk_next(void) {
     w_attr = a;
     w_to = w_at = i;
     return EV_RUN;
+}
+
+/* paragraph p's number in its list: 1 + the numbered items before it at
+ * its level (deeper ones passed over), back to anything else (here: the
+ * Markdown and RTF modules call it, and the drawing) */
+u16 item_num(u16 p) {
+    u8 lv = atr_at(para_end(p)) & A_LEVEL, b;
+    u16 n = 1;
+    while (p) {
+        b = atr_at(--p);                /* (the paragraph before: its end) */
+        if ((b & A_KIND) < K_BULLET || (b & A_LEVEL) < lv) break;
+        if ((b & A_LEVEL) == lv) {
+            if ((b & A_KIND) != K_NUMBER) break;
+            n++;
+        }
+        while (p && txt_at(p - 1) != CH_CR && txt_at(p - 1) != CH_FF) p--;
+    }
+    return n;
 }
 
 /* ==== import: characters appended to the document ==== */

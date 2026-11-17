@@ -38,6 +38,9 @@ u16 para_end(u16 i) {
 /* the alignment of the paragraph holding i (0 left .. 3 justify) */
 u8 para_al(u16 i) { return (u8)((atr_at(para_end(i)) & A_ALIGN) >> A_ALIGN_SHIFT); }
 
+/* the start of the paragraph holding i */
+static u16 para_start(u16 i);
+
 /* its kind (K_...) */
 u8 para_kind(u16 i) { return atr_at(para_end(i)) & A_KIND; }
 
@@ -123,6 +126,7 @@ static void delete_selection(void) {
 /* an ASCII character (or CR / FF) typed at the cursor */
 u8 doc_type(u8 c) {
     u8 a, k, brk = is_break(c), at_end;
+    if (brk && is_break(txt_at(cur)) && doc_list_level(0)) return 0;  /* RETURN in an empty list item: out a level */
     if (sel_on) {
         typing_attr = atr_at(sel_lo()) & A_STYLE;
         delete_selection();
@@ -147,6 +151,7 @@ u8 doc_type(u8 c) {
 }
 
 void doc_backspace(void) {
+    if (doc_list_level(0)) return;      /* at a list item's start: out a level */
     if (sel_on) {
         delete_selection();
     } else if (cur > 0) {
@@ -207,6 +212,28 @@ void doc_cycle_align(void) {
     layout_edit(ps, e, 0);
 }
 
+/* TAB, DEL, RETURN at a list item's start (the cursor, no selection): a
+ * level in, or out (at level 0: a normal paragraph); 0: not there */
+u8 doc_list_level(u8 in) {
+    u16 e;
+    u8 a;
+    if (sel_on || cur != para_start(cur)) return 0;
+    e = para_end(cur);
+    a = atr_at(e);
+    if ((a & A_KIND) < K_BULLET) return 0;
+    if (in) {
+        if ((a & A_LEVEL) != A_LEVEL) a += 1 << A_LEVEL_SHIFT;
+    } else if (a & A_LEVEL) {
+        a -= 1 << A_LEVEL_SHIFT;
+    } else {
+        a &= A_ALIGN;
+    }
+    atr_put(e, a);
+    dirty = 1;
+    layout_edit(cur, e, 0);
+    return 1;
+}
+
 /* Style k (a paragraph kind) applied: a paragraph the selection holds
  * whole (all its text; with no selection, the cursor's) becomes of kind k,
  * its characters in k's font and style where they were in its old kind's
@@ -233,7 +260,7 @@ void doc_style(u8 k) {
                 if (f == of) f = kf;
                 atr_put(i, (u8)(f | (a & keep) | kfl));
             }
-            atr_put(e, (u8)((atr_at(e) & ~A_KIND) | k));
+            atr_put(e, (u8)((atr_at(e) & (k >= K_BULLET ? ~A_KIND : A_ALIGN)) | k));    /* (a list keeps its level) */
         } else {
             for (i = lo > p ? lo : p; i < e && i < hi; i++) atr_put(i, ka);
         }

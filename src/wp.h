@@ -67,9 +67,11 @@ typedef uint32_t u32;
 #define A_STYLE 0x1F            /* what a character carries */
 /* a paragraph's CR / FF carries the paragraph's properties instead: */
 #define A_KIND  0x07            /* its kind (style): K_... */
+#define A_LEVEL 0x18            /* a list item's level, 0-3 (others: 0) */
+#define A_LEVEL_SHIFT 3
 #define A_ALIGN 0x60            /* 0 left, 1 centre, 2 right, 3 justify */
 #define A_ALIGN_SHIFT 5
-#define A_PARA (A_KIND | A_ALIGN)
+#define A_PARA (A_KIND | A_LEVEL | A_ALIGN)
 #define NFONTS 4
 #define F_SANS 0
 #define F_SERIF 1
@@ -80,9 +82,11 @@ typedef uint32_t u32;
  * carry (Markdown #, >, ```; RTF \outlinelevel, \s), and how it is laid
  * out: a quote and a code block have an indent (a quote a bar in it, a code
  * block a dotted line). Applied as a style (doc_style) its characters take
- * kind_attr's font and style. */
-enum { K_NORMAL, K_H1, K_H2, K_H3, K_QUOTE, K_CODE, NKINDS };
-#define KIND_TAB 8                      /* (the tables: kinds 6 and 7, spare, as normal) */
+ * kind_attr's font and style. A list item (bulleted or numbered) has a
+ * level too, and is indented by it; its bullet or number is drawn, not
+ * text: a number counts the items before it at its level (item_num). */
+enum { K_NORMAL, K_H1, K_H2, K_H3, K_QUOTE, K_CODE, K_BULLET, K_NUMBER, NKINDS };
+#define KIND_TAB NKINDS
 extern const u8 kind_attr[KIND_TAB];    /* (layout.c) the characters' style */
 extern const char *const kind_names[KIND_TAB];
 
@@ -153,7 +157,8 @@ struct line {
     u8 h, asc;                  /* height, baseline from the top */
     u16 x;                      /* first character's x from the text's left */
     u8 extra, nsp;              /* justify: pixels spread over nsp spaces */
-    u8 page, kind;              /* (page view) its paragraph's kind */
+    u8 page, kind;              /* (page view) its paragraph's kind and level (A_KIND | A_LEVEL), L_FIRST */
+#define L_FIRST 0x80            /* (in kind) the paragraph's first line */
 };
 
 /* ---- platform (m65.c / tests/host.c) ---- */
@@ -259,10 +264,10 @@ void doc_built(void);           /* after build_end (b_done): doc_loaded(1) (mod_
 /* ---- modules (.OVL files, loaded by BASIC into mod_area: render.c) ----
  * A module is built apart (Makefile: linked at mod_area against the
  * program's map) and is at most MOD_SIZE bytes, code, data and variables. */
-#define MOD_SIZE 6400
+#define MOD_SIZE 6016            /* (LIST_OFS + LIST.OVL: the most a resident module needs) */
 #define MOD_MORE 0x80                   /* (in a command: more calls follow, the module stays) */
-#define MOD_MD_EXPORT 0                 /* MARKDOWN.OVL: md_export */
-#define MOD_MD_IMPORT 1                 /* MARKDOWN.OVL: md_import */
+#define MOD_MD_EXPORT 0                 /* MDEXPORT.OVL: md_export */
+#define MOD_MD_IMPORT 1                 /* MDIMPORT.OVL: md_import */
 #define MOD_RTF_EXPORT 2                /* RTF.OVL: the document as RTF at SCRATCH_LIN */
 #define MOD_RTF_BEGIN (MOD_MORE | 3)    /* RTF.OVL: an import starts */
 #define MOD_RTF_CHUNK (MOD_MORE | 4)    /* RTF.OVL: the next 1 KB of the file, at SCRATCH_LIN */
@@ -270,7 +275,7 @@ void doc_built(void);           /* after build_end (b_done): doc_loaded(1) (mod_
 extern u8 mod_cmd;                      /* what the module is to do */
 extern u16 mod_ret;                     /* its result */
 u16 mod_run(u8 cmd);                    /* run the module loaded; 0xFFFF: none */
-void md_main(void);                     /* MARKDOWN.OVL's entry (md.c) */
+void md_main(void);                     /* MDEXPORT.OVL's and MDIMPORT.OVL's entry (md.c) */
 void rtf_main(void);                    /* RTF.OVL's entry (rtf.c) */
 /* LIST.OVL (list.c), list mode: resident, it draws its markers over each
  * line drawn while list_on (render.c calls list_main with hk_l, hk_L: the
@@ -278,7 +283,7 @@ void rtf_main(void);                    /* RTF.OVL's entry (rtf.c) */
  * bytes, past the drawing's buffers (mod_area.r: at most LIST_OFS bytes),
  * so it costs no memory of its own; a module run in mod_area (Markdown)
  * overwrites it, so list_ok is then 0 until BASIC has loaded it again. */
-#define LIST_OFS 4352           /* (wp.bas's too) */
+#define LIST_OFS 4288           /* (wp.bas's too) */
 #define LIST_SIZE (MOD_SIZE - LIST_OFS)
 extern u8 list_ok, list_on;             /* LIST.OVL loaded (and from this build); asked for */
 extern u16 hk_l;                        /* the line drawn (raw view: >= nlines, a row past the end) */
@@ -289,6 +294,9 @@ u16 para_end(u16 i);            /* the CR / FF ending the paragraph of i */
 u8 para_al(u16 i);              /* its alignment (0 left, 1 centre, 2 right, 3 justify) */
 u8 para_kind(u16 i);            /* its kind (K_...) */
 u8 cur_kind(void);              /* the kind of the cursor's paragraph (the selection's first) */
+u16 item_num(u16 p);            /* paragraph p's number in its list (a numbered item) */
+u8 doc_list_level(u8 in);       /* the list item at the cursor (at its start) a level in (1) or out (0: at level 0, a normal paragraph); 0: none there */
+u8 para_indent(u8 kl);          /* (layout.c) a paragraph's indent: its kind and level (A_KIND | A_LEVEL) */
 void doc_style(u8 k);           /* kind k applied: to the paragraphs selected whole (or the cursor's), as character style to the rest of the selection */
 u8 attr_at_cursor(void);
 u16 sel_lo(void);

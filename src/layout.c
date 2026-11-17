@@ -22,11 +22,14 @@ static const char *const align_tags[4] = { "", "[Center]", "[Right]", "[Just]" }
 
 /* the paragraph kinds (wp.h): their characters' style, names, raw view tags */
 const u8 kind_attr[KIND_TAB] = { F_SANS, F_HEAD | A_BOLD, F_HEAD, F_SERIF | A_BOLD, F_SERIF | A_ITAL, F_MONO };
-const char *const kind_names[KIND_TAB] = { "Normal", "Heading 1", "Heading 2", "Heading 3", "Quote", "Code", "Normal",
-                                           "Normal" };
-static const char *const kind_tags[KIND_TAB] = { "", "[H1]", "[H2]", "[H3]", "[Quote]", "[Code]", "", "" };
+const char *const kind_names[KIND_TAB] = { "Normal", "Heading 1", "Heading 2", "Heading 3", "Quote", "Code", "Bullet",
+                                           "Numbered" };
+static const char *const kind_tags[KIND_TAB] = { "", "[H1]", "[H2]", "[H3]", "[Quote]", "[Code]", "[List]", "[Num]" };
 /* the indent of a quote, a code block */
-static const u8 kind_indent[KIND_TAB] = { 0, 0, 0, 0, 24, 16 };
+static const u8 kind_indent[KIND_TAB] = { 0, 0, 0, 0, 24, 16, 24, 24 };
+
+/* a paragraph's indent: its kind's, and a list item's 24 more a level */
+u8 para_indent(u8 kl) { return (u8)(kind_indent[kl & A_KIND] + ((kl & A_LEVEL) >> A_LEVEL_SHIFT) * 24); }
 
 static u8 is_break(u8 c) { return c == CH_CR || c == CH_FF; }
 
@@ -61,6 +64,10 @@ u8 raw_tag(u16 i, char *out) {
     if (i == 0 || is_break(txt_at(i - 1))) {
         u8 pa = atr_at(para_end(i));
         n = tag_put(out, n, kind_tags[pa & A_KIND]);
+        if (pa & A_LEVEL) {             /* (a list item's level: [List2] ...) */
+            out[n - 1] = (char)('1' + ((pa & A_LEVEL) >> A_LEVEL_SHIFT));
+            out[n++] = ']';
+        }
         n = tag_put(out, n, align_tags[(pa & A_ALIGN) >> A_ALIGN_SHIFT]);
     }
     if (c == CH_FF) return tag_put(out, n, "[Page]");
@@ -184,7 +191,7 @@ static void state_at(u16 l, struct lstate *st) {
     st->yin = (u16)(L.y - (PAGE_GAP + st->page * PAGE_STRIDE + MARGIN_TOP));
     st->para = (u8)(p == 0 || is_break(txt_at(p - 1)));
     st->al = para_al(p);
-    st->kind = L.kind;
+    st->kind = L.kind & (A_KIND | A_LEVEL);
 }
 
 /* the next line from st into *L, st moved past it; 0 at the document's end */
@@ -206,11 +213,12 @@ static u8 produce(struct lstate *st, struct line *L) {
         return 1;
     }
     if (st->para) {
-        st->al = para_al(pos);
-        st->kind = para_kind(pos);
+        k = atr_at(para_end(pos));
+        st->al = (u8)((k & A_ALIGN) >> A_ALIGN_SHIFT);
+        st->kind = k & (A_KIND | A_LEVEL);
     }
     k = st->kind;
-    ind = kind_indent[k];
+    ind = para_indent(k);
     tmax = TEXT_W - ind;
     end = break_line(pos, tmax, &hard);
     /* the line's metrics: its width without the spaces at its end, its
@@ -223,7 +231,7 @@ static u8 produce(struct lstate *st, struct line *L) {
         u8 c = txt_at(i), a = atr_at(i);
         if (is_break(c)) {
             if (i > pos) continue;
-            a = kind_attr[k];               /* (an empty paragraph: its kind's height) */
+            a = kind_attr[k & A_KIND];      /* (an empty paragraph: its kind's height) */
         }
         f = fonts[a & A_FONT];
         if (f->ascent > asc) asc = f->ascent;
@@ -262,7 +270,7 @@ static u8 produce(struct lstate *st, struct line *L) {
     L->h = (u8)(asc + desc);
     L->asc = asc;
     L->page = st->page;
-    L->kind = k;
+    L->kind = (u8)(k | (st->para ? L_FIRST : 0));
     st->yin += asc + desc;
     if (hard && txt_at(end - 1) == CH_FF) {
         st->page++;

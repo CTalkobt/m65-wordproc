@@ -1,4 +1,5 @@
-/* md.c — Markdown export and import (UTF-8 text, LF line ends)
+/* md.c — Markdown export and import (UTF-8 text, LF line ends): the
+ * modules MDEXPORT.OVL and MDIMPORT.OVL, built from it apart (MD_PART)
  *
  * Export (md_export: the document to SCRATCH_LIN):
  *   a paragraph             a line; paragraphs that follow each other with
@@ -9,7 +10,9 @@
  *   paragraph kinds         heading 1-3: "#", "##", "###"; quote: "> "
  *                           (quote paragraphs that follow each other: one
  *                           quote, with hard breaks); code: a fenced code
- *                           block (``` ... ```), a line a paragraph
+ *                           block (``` ... ```), a line a paragraph;
+ *                           list items: "- " or "N. " (the item's
+ *                           number), four spaces before it a level
  *   bold, italic            **...**, *...* (where they differ from the
  *                           paragraph kind's own style: a heading's bold is
  *                           not written)
@@ -24,7 +27,8 @@
  *
  * Import (md_import: SCRATCH_LIN, as FREAD# left it, as the document):
  * the above (headings past ### as heading 3), setext headings (= heading
- * 1, - heading 2), lists (their markers kept as text), links ([text](url) -> "text (url)", images: their text), HTML
+ * 1, - heading 2), list items (the level by the marker's indent against
+ * the items before it; an item's marker not kept), links ([text](url) -> "text (url)", images: their text), HTML
  * tags left out, the common entities, and UTF-8 characters (Latin-1's as
  * they are, curly quotes, dashes, ... as ASCII, others "?": build_uni). Blocks are separated by an empty paragraph (not after a
  * heading). Emphasis is paired within a paragraph; an unpaired * or _ is
@@ -44,6 +48,12 @@ static u8 is_letter(u8 c) { return (u8)((c | 0x20) - 'a') < 26; }
 static u8 is_alnum(u8 c) { return is_letter(c) || (u8)(c - '0') < 10; }
 static u8 is_punct(u8 c) { return c > ' ' && c < 127 && !is_alnum(c); }
 
+/* (MD_PART: 1 builds MDEXPORT.OVL, 2 MDIMPORT.OVL; the host has both) */
+#ifndef MD_PART
+#define MD_PART 0
+#endif
+
+#if MD_PART != 2
 static u8 base;                 /* the paragraph kind's own style (kind_attr) */
 
 /* the Markdown style of character i: its underline / bold / italic (those
@@ -146,7 +156,10 @@ static void out_para(u16 ps, u16 pe, u8 code) {
 #define P_NONE 0xFF             /* (prev: no block yet; a page break) */
 #define P_BREAK 0xFE
 
+#endif
+
 static const char *const align_attr[4] = { "", "center", "right", "justify" };
+#if MD_PART != 2
 static u8 prev, pal;            /* the last block's kind; its alignment (a div open) */
 
 /* the last block closed (its fence, its div) and a blank line after it */
@@ -177,13 +190,13 @@ u16 md_export(void) {
         pe = w_to;
         kind = w_attr & A_KIND;
         al = (u8)((w_attr & A_ALIGN) >> A_ALIGN_SHIFT);
-        if (kind == K_CODE) al = 0;
+        if (kind >= K_CODE) al = 0;
         /* (an empty paragraph: a gap, but an empty line in a code block) */
         if (pe == ps && (kind != K_CODE || prev != K_CODE || gap)) {
             gap = 1;
             continue;
         }
-        if (!gap && kind == prev && kind == K_CODE) {
+        if (!gap && ((kind == prev && kind == K_CODE) || (kind >= K_BULLET && (u8)(prev - K_BULLET) < 2))) {
             out('\n');
         } else if (!gap && kind == prev && (kind == K_NORMAL || kind == K_QUOTE) && al == pal) {
             outs("\\\n");
@@ -202,6 +215,24 @@ u16 md_export(void) {
             pal = al;
         }
         if (kind == K_QUOTE) outs("> ");
+        if (kind >= K_BULLET) {
+            /* a list item: its level's indent, its marker */
+            for (k = (u8)((w_attr & A_LEVEL) >> A_LEVEL_SHIFT); k; k--) outs("    ");
+            if (kind == K_BULLET) {
+                out('-');
+            } else {
+                char t[5];
+                u16 v = item_num(ps);
+                k = 0;
+                do {
+                    t[k++] = (char)('0' + v % 10);
+                    v /= 10;
+                } while (v);
+                while (k) out((u8)t[--k]);
+                out('.');
+            }
+            out(' ');
+        }
         base = kind_attr[kind];
         out_para(ps, pe, kind == K_CODE);
         prev = kind;
@@ -211,8 +242,12 @@ u16 md_export(void) {
     return o_end();
 }
 
+#endif
+
 /* ==== import ==== */
-static u8 pk, base_attr;        /* the paragraph's kind, its style (kind_attr) */
+#if MD_PART != 1
+static u8 pk, base_attr;        /* the paragraph's kind (and level), its style (kind_attr) */
+static u8 item, lv, lv_sp[4];   /* in a list; the last item's level; each level's indent */
 static u8 flags;                /* bold / italic / underline open */
 static u8 code;                 /* in a code span or block */
 static u8 para_open, after_head, align, hard;
@@ -282,7 +317,7 @@ static void end_para(void) {
  * after a heading or a page break) */
 static void block_start(void) {
     if (b_n && !after_head) raw(CH_CR, 0);
-    after_head = 0;
+    after_head = item = 0;
 }
 
 /* a paragraph of kind k starts */
@@ -290,7 +325,7 @@ static void para_start(u8 k) {
     para_open = 1;
     pstart = b_n;
     pk = k;
-    base_attr = kind_attr[k];
+    base_attr = kind_attr[k & A_KIND];
 }
 
 /* a closing c (not after a space) from i to the paragraph's end (a blank line) */
@@ -466,10 +501,10 @@ static void inline_md(u16 i, u16 e) {
  * the document; its length */
 u16 md_import(void) {
     u16 i = 0, ls, le, e, j, t;
-    u8 c, fence = 0, n, item = 0, q;
+    u8 c, fence = 0, n, q, sp;
     mem_put(SCRATCH_LIN + SCRATCH_MAX - 1, 0);  /* (an end, even for a file that fills it) */
     build_start();
-    para_open = after_head = align = hard = flags = code = pk = base_attr = 0;
+    para_open = after_head = align = hard = flags = code = pk = base_attr = item = 0;
     while (in(i)) {
         /* the line ls..le-1 (without its CR / LF) */
         for (ls = i; (c = in(i)) != 0 && c != '\n' && c != '\r'; i++) ;
@@ -477,6 +512,7 @@ u16 md_import(void) {
         if (in(i) == '\r') i++;
         if (in(i) == '\n') i++;
         j = skip(ls, ' ');
+        sp = (u8)(j - ls);
         c = in(j);
         if (fence) {
             if (is_fence(j)) {
@@ -498,9 +534,8 @@ u16 md_import(void) {
             continue;
         }
         if (j == le) {
-            /* a blank line */
+            /* a blank line (between list items: the list goes on) */
             end_para();
-            item = 0;
             continue;
         }
         if (is_fence(j)) {
@@ -561,7 +596,8 @@ u16 md_import(void) {
         if (q && (j >= le || pk != K_QUOTE)) end_para();
         if (j >= le) continue;
         c = in(j);
-        /* list items: a paragraph each, their marker kept */
+        /* list items: a paragraph each, its level by its indent: deeper
+         * than the last item's, a level in; else the level it is at */
         n = 0;
         if ((c == '-' || c == '*' || c == '+') && in(j + 1) == ' ') {
             n = 2;
@@ -571,10 +607,19 @@ u16 md_import(void) {
         }
         if (n) {
             end_para();
-            if (!item) block_start();
+            if (!item) {
+                block_start();
+                lv = 0;
+                lv_sp[0] = sp;
+            } else if (sp > lv_sp[lv]) {
+                if (lv < 3) lv++;
+                lv_sp[lv] = sp;
+            } else {
+                while (lv && sp < lv_sp[lv]) lv--;
+            }
             item = 1;
-            para_start(q ? K_QUOTE : K_NORMAL);
-            for (; n; n--) put(in(j++));
+            para_start((u8)((c <= '9' && c >= '0' ? K_NUMBER : K_BULLET) | (lv << A_LEVEL_SHIFT)));
+            j = skip((u16)(j + n), ' ');
         } else if (!para_open) {
             /* a new paragraph */
             block_start();
@@ -601,7 +646,15 @@ u16 md_import(void) {
     return build_end();
 }
 
-/* MARKDOWN.OVL's entry (mod_run): export or import */
+#endif
+
+/* MDEXPORT.OVL's and MDIMPORT.OVL's entry (mod_run): export or import */
 void md_main(void) {
+#if MD_PART == 1
+    if (mod_cmd == MOD_MD_EXPORT) mod_ret = md_export();
+#elif MD_PART == 2
+    if (mod_cmd == MOD_MD_IMPORT) mod_ret = md_import();
+#else
     mod_ret = mod_cmd == MOD_MD_EXPORT ? md_export() : md_import();
+#endif
 }

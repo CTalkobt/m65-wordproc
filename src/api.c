@@ -6,7 +6,7 @@
  *   wp_cmd(c)        a command (CMD_...: styles, view, selection, clipboard, ...)
  *   wp_get(w)        a value for BASIC (RREG lo, hi): GET_... (files: the
  *                    image, plain text or Markdown at SCRATCH_LIN; Markdown
- *                    by the module MARKDOWN.OVL, RTF by RTF.OVL: 65535
+ *                    by the modules MDIMPORT.OVL / MDEXPORT.OVL, RTF by RTF.OVL: 65535
  *                    when it is not loaded)
  *   wp_setmsg        msg (poked by BASIC as PETSCII) shown in the bottom bar
  *   wp_setname       fname (PETSCII) as the document's name
@@ -242,7 +242,8 @@ void wp_key(u8 k) {
         doc_delete_fwd();
         relayout = 1;
         break;
-    case 9:                     /* TAB: four spaces */
+    case 9:                     /* TAB: four spaces (at a list item's start: a level in) */
+        if (doc_list_level(1)) break;
         for (c = 0; c < 4; c++) doc_type(' ');
         relayout = 1;
         break;
