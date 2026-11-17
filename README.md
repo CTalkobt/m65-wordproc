@@ -425,9 +425,9 @@ can be.
   starts at `$3300`; the fonts' width tables went to far memory (above);
   and the layout's line buffer, the menu's text and a few work buffers
   moved into `mod_area`'s drawing memory (`LIST_OFS` 4288). Lists (#4)
-  took about 1 KB more. BASIC's parameterless procs became labels reached
-  with `GOSUB` (basic45 puts a `GOTO` over each proc, [M65Compiler
-  #605](https://github.com/CTalkobt/M65Compiler/issues/605)): 4522 bytes,
+  took about 1 KB more. BASIC's procs no longer cost a `GOTO` each (basic45
+  put one over every proc until [M65Compiler
+  #605](https://github.com/CTalkobt/M65Compiler/issues/605)): 4523 bytes,
   so the C half starts at `$3200`. And Markdown became two modules, import
   (4944 bytes) and export (1871), so the largest module (it was Markdown's
   6713 bytes with lists) no longer sets `MOD_SIZE`: the drawing's buffers

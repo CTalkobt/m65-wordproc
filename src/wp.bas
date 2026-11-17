@@ -81,7 +81,7 @@ wpinit:
   sys {wp_init}
   if wl = 2 then sys {wp_get}, GET_UNPACK
   fi$ = p"untitled"
-  gosub loadlist
+  call loadlist
 
 mainloop:
   trap errh
@@ -104,31 +104,27 @@ waitkey:
   sys {wp_key}, k
   goto mainloop
 
-' (A subroutine without parameters is a label and RETURN, reached with
-' GOSUB, rather than a proc: basic45 puts a GOTO over each proc, even
-' where nothing can fall into it, M65Compiler #605. Each ends in RETURN,
-' so none falls into the next.)
-copysel:
+proc copysel
   sys {wp_cmd}, CMD_COPY
   call say(p"Copied.")
-  return
+endproc
 
-redraw:
+proc redraw
   sys {wp_redraw}
-  return
+endproc
 
-escape:
+proc escape
   sys {wp_get}, GET_SEL : rreg se
-  if se then sys {wp_cmd}, CMD_UNMARK : else gosub menu
-  return
+  if se then sys {wp_cmd}, CMD_UNMARK : else call menu
+endproc
 
-listmode:
+proc listmode
   if lv then sys {wp_cmd}, CMD_LIST
-  return
+endproc
 
 ' ---- the menu (ESC): a panel of three rows at the bottom, the commands
 ' grouped (List only when LIST.OVL is loaded) ----
-menu:
+proc menu
   b$ = ""
   if lv then
     bank 0 : lq = peek({list_on}) : bank 128
@@ -142,13 +138,13 @@ menu:
   getkey m$
   sys {wp_panel}, 0
   on instr(p"nlsiedhrtq", chr$(asc(m$) and 127)) gosub newdoc, loaddoc, savedoc, importtext, exporttext, showdir, loadhelp, redraw, listmode, quit
-  return
+endproc
 
 ' ---- the style drop-down (CTRL+D) under the top bar's style field: the
 ' cursor keys move it, RETURN applies the style lit (to the paragraphs
 ' selected whole, or the cursor's; as a character style to the rest of the
 ' selection), N 1 2 3 Q C B # at once, ESC leaves it ----
-stylemenu:
+proc stylemenu
   sys {wp_get}, GET_KIND : rreg sv
   do
     sys {wp_drop}, sv
@@ -160,7 +156,7 @@ stylemenu:
   loop until m = 13 or m = 27
   sys {wp_drop}, 255
   if m = 13 then sys {wp_cmd}, CMD_STYLE + sv
-  return
+endproc
 
 ' s$ (PETSCII, at most 78 characters) poked at sa in bank 0, then a 0
 proc setstr(s$, sa)
@@ -179,10 +175,10 @@ proc say(m$)
 endproc
 
 ' the document's name in the top bar
-setname:
+proc setname
   call setstr(fi$, {fname})
   sys {wp_setname}
-  return
+endproc
 
 ' a line typed into a$ (starting as it is); ok = 1 when RETURN ended it
 proc ask(q$)
@@ -209,22 +205,22 @@ proc confirm(q$)
 endproc
 
 ' unsaved changes: yes when they may be lost
-discard:
+proc discard
   yes = -1
   sys {wp_get}, GET_DIRTY : rreg dt
   if dt then call confirm(p"Discard the unsaved changes?")
-  return
+endproc
 
 ' ---- the commands ----
-newdoc:
-  gosub discard
+proc newdoc
+  call discard
   if yes then
     sys {wp_cmd}, CMD_NEW
-    fi$ = p"untitled" : gosub setname
+    fi$ = p"untitled" : call setname
   endif
-  return
+endproc
 
-savedoc:
+proc savedoc
   a$ = fi$
   if a$ = p"untitled" then a$ = ""
   call ask(p"Save as: ")
@@ -238,14 +234,14 @@ savedoc:
     if ds then
       call say(p"Not saved: " + ds$)
     else
-      fi$ = a$ : sys {wp_cmd}, CMD_CLEAN : gosub setname
+      fi$ = a$ : sys {wp_cmd}, CMD_CLEAN : call setname
       call say(p"Saved " + a$ + " (" + mid$(str$(n), 2) + p" bytes).")
     endif
   endif
-  return
+endproc
 
-loaddoc:
-  gosub discard
+proc loaddoc
+  call discard
   if yes then
     a$ = ""
     call ask(p"Load: ")
@@ -257,25 +253,25 @@ loaddoc:
       if r then
         call say(a$ + p" is not a Writer document (try I)mport).")
       else
-        fi$ = a$ : gosub setname
+        fi$ = a$ : call setname
         call say(p"Loaded " + a$ + ".")
       endif
     endif
   endif
-  return
+endproc
 
 ' a sequential PETSCII file as the text (no styles)
-importtext:
-  gosub discard
+proc importtext
+  call discard
   if yes then
     a$ = ""
     call ask(p"Import (name.md: Markdown, name.rtf: RTF): ")
     if ok and a$ <> "" then
       call say(p"Importing " + a$ + "...")
-      gosub ftype
+      call ftype
       ml = 1 : lo = 0 : hi = 0
       if fk = 2 then
-        gosub rtfin
+        call rtfin
       else
         sys {wp_get}, GET_PREP
         dopen#2, (a$)
@@ -288,24 +284,24 @@ importtext:
         loop until st <> 0 or p >= 30
         dclose#2
         ' (Markdown: by MDIMPORT.OVL, loaded last: drawing overwrites it)
-        if fk then gosub loadmod
+        if fk then call loadmod
         if ml then sys {wp_get}, GET_IMPORT + fk * (GET_MDIMPORT - GET_IMPORT) : rreg lo, hi
       endif
       sys {wp_video}, 1
-      if fk then gosub loadlist
-      gosub modsaid
+      if fk then call loadlist
+      call modsaid
       if ok then
-        fi$ = p"untitled" : gosub setname
+        fi$ = p"untitled" : call setname
         call say(p"Imported " + mid$(str$(lo + 256 * hi), 2) + p" characters.")
       endif
     endif
   endif
-  return
+endproc
 
 ' RTF: by RTF.OVL, loaded first, the file streamed to it 1 KB at a time (it
 ' can be larger than the scratch area); nothing is drawn until the end
-rtfin:
-  gosub loadmod
+proc rtfin
+  call loadmod
   if ml then
     sys {wp_get}, GET_RTFBEGIN : rreg lo, hi
     if lo <> 255 or hi <> 255 then
@@ -319,25 +315,25 @@ rtfin:
       sys {wp_get}, GET_RTFEND : rreg lo, hi
     endif
   endif
-  return
+endproc
 
-exporttext:
+proc exporttext
   a$ = ""
   call ask(p"Export as (name.md: Markdown, name.rtf: RTF): ")
   if ok and a$ <> "" then
-    gosub ftype
+    call ftype
     ' (Markdown's export is a module of its own)
     if fk = 1 then mf$ = "mdexport.ovl" : mu$ = p"MDEXPORT.OVL"
     ml = 1 : lo = 0 : hi = 0
     if fk then
-      gosub loadmod
+      call loadmod
       if ml then sys {wp_get}, GET_MDEXPORT + (fk - 1) * (GET_RTFEXPORT - GET_MDEXPORT) : rreg lo, hi
-      gosub loadlist
+      call loadlist
     else
       sys {wp_get}, GET_EXPORT : rreg lo, hi
     endif
     n = lo + 256 * hi
-    gosub modsaid
+    call modsaid
     if ok and n = 0 then call say(p"Too long for " + mn$ + p" (more than 30 KB).") : ok = 0
     if ok then
       scratch (a$)
@@ -348,7 +344,7 @@ exporttext:
       call say(p"Exported " + mid$(str$(n), 2) + p" bytes to " + a$ + ".")
     endif
   endif
-  return
+endproc
 
 ' ---- modules: .OVL files on the disk, each loaded when it is needed into
 ' the C half's module region (mod_area, where the drawing keeps its
@@ -358,43 +354,43 @@ exporttext:
 ' list mode: LIST.OVL, resident, loaded at the start (and again after a
 ' module run in mod_area has overwritten it) when it is on the disk; lv: 1
 ' when loaded and from this build (the menu offers it only then)
-loadlist:
+proc loadlist
   trap nolist
   bload "list.ovl", b0, p({mod_area} + LIST_OFS)
 listback:
   trap errh
   sys {wp_get}, GET_LISTOK : rreg lv
-  return
+endproc
 
 ' ml: 1 when the module mf$ loaded
-loadmod:
+proc loadmod
   ml = 0
   trap nomd
   bload (mf$), b0, p({mod_area})
   ml = 1
 mdback:
   trap errh
-  return
+endproc
 
 ' after a module's run: ok 0 when it said why there was none (ml, and
 ' lo / hi 255: the module from another build of Writer)
-modsaid:
+proc modsaid
   ok = 1
   if ml = 0 then call say(mn$ + p" needs " + mu$ + p" on the disk.") : ok = 0
   if lo = 255 and hi = 255 then call say(mu$ + p" is from another version of Writer.") : ok = 0
-  return
+endproc
 
 ' fk: what a$ is by its end (either case): 0 text, 1 .md (Markdown), 2 .rtf
 ' (RTF); mf$: its module's file, mu$ its name shown, mn$ the format's
-ftype:
+proc ftype
   fk = 0
   b$ = right$(a$, 3)
   if b$ = p".md" or b$ = p".MD" then fk = 1 : mf$ = "mdimport.ovl" : mu$ = p"MDIMPORT.OVL" : mn$ = p"Markdown"
   b$ = right$(a$, 4)
   if b$ = p".rtf" or b$ = p".RTF" then fk = 2 : mf$ = "rtf.ovl" : mu$ = p"RTF.OVL" : mn$ = p"RTF"
-  return
+endproc
 
-showdir:
+proc showdir
   sys {wp_video}, 0
   print "{clear}{lower}";
   dir
@@ -402,10 +398,10 @@ showdir:
   print p"Press a key.";
   getkey c$
   sys {wp_video}, 1
-  return
+endproc
 
-quit:
-  gosub discard
+proc quit
+  call discard
   if yes then
     sys {wp_video}, 0
     sys {wp_stopvec}, 0 : poke 247, peek(247) and 223
@@ -414,11 +410,11 @@ quit:
     end
   endif
   call say("")
-  return
+endproc
 
 ' ---- the help: WRITER.HELP, a Writer document on the disk ----
-loadhelp:
-  gosub discard
+proc loadhelp
+  call discard
   if yes then
     call say(p"Loading the help...")
     hl = 0
@@ -430,13 +426,13 @@ helpback:
     sys {wp_video}, 1
     if hl then
       sys {wp_get}, GET_UNPACK
-      fi$ = p"untitled" : gosub setname
+      fi$ = p"untitled" : call setname
       call say(p"The help. ESC N starts a new document.")
     else
       call say(p"No help: WRITER.HELP is not on the disk.")
     endif
   endif
-  return
+endproc
 
 ' no LIST.OVL
 nolist:
