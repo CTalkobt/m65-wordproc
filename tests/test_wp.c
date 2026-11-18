@@ -9,7 +9,8 @@
 #include "wp.h"
 
 void wp_init(void);
-void wp_key(u8 k);
+u8 wp_key(u8 k);
+u16 wp_find(u8 op);
 void wp_cmd(u8 c);
 u16 wp_get(u8 w);
 void wp_panel(u8 n);
@@ -145,7 +146,7 @@ static void rtf_round(const char *what) {
 }
 
 static void md_in(const char *s) {
-    memset(MEM + SCRATCH_LIN, 0, 30720);
+    memset(MEM + SCRATCH_LIN, 0, SCRATCH_MAX);
     memcpy(MEM + SCRATCH_LIN, s, strlen(s));
     mod_run(MOD_MD_IMPORT);
 }
@@ -218,6 +219,196 @@ static void check_doc(void) {
     CHECK(doc_len >= 1 && doc_len <= DOC_MAX);
     CHECK(TXT[doc_len - 1] == CH_CR);
     CHECK(cur < doc_len);
+}
+
+/* msg (ASCII) set as BASIC pokes it (PETSCII), then wp_find(op) */
+static u16 find_str(const char *t, u8 op) {
+    u8 i;
+    for (i = 0; t[i]; i++) {
+        u8 c = (u8)t[i];
+        if (c >= 'a' && c <= 'z') c = (u8)(c - 32);
+        else if (c >= 'A' && c <= 'Z') c = (u8)(c + 128);
+        msg[i] = (char)c;
+    }
+    msg[i] = 0;
+    return wp_find(op);
+}
+
+static u8 ctrl(u8 k, u8 shift) {
+    u8 r;
+    host_mods = (u8)(KM_CTRL | (shift ? 1 : 0));
+    r = wp_key(k);
+    host_mods = 0;
+    return r;
+}
+
+static int text_is(const char *t) {
+    char b[200];
+    text_of(b, sizeof b);
+    return strlen(t) + 1 == doc_len && !memcmp(b, t, doc_len - 1);
+}
+
+/* undo (CTRL+Z), find and replace, the keys BASIC is given back */
+static void test_edit(void) {
+    static u8 t0[DOC_MAX], a0[DOC_MAX], t1[DOC_MAX], a1[DOC_MAX], t2[DOC_MAX], a2[DOC_MAX];
+    u16 n0, n1, n2, i;
+    u8 a;
+    wp_cmd(13);
+    /* typing undone, and done again */
+    type("hello world");
+    ctrl(0x1A, 0);
+    CHECK(text_is("") && cur == 0);
+    ctrl(0x1A, 0);
+    CHECK(text_is("hello world"));
+    /* a cursor move ends an edit: only the typing after it undone */
+    wp_key(147);                /* (CLR: the start; again: the end) */
+    wp_key(147);
+    wp_key(157);
+    type("XY");
+    CHECK(text_is("hello worlXYd"));
+    ctrl(0x1A, 0);
+    CHECK(text_is("hello world") && cur == 10);
+    /* DEL after a move: what it deleted back */
+    wp_key(147);
+    wp_key(147);
+    wp_key(20);
+    wp_key(20);
+    wp_key(20);
+    CHECK(text_is("hello wo"));
+    ctrl(0x1A, 0);
+    CHECK(text_is("hello world"));
+    /* a style: undone */
+    n0 = doc_sig(t0, a0);
+    wp_cmd(18);                 /* all */
+    ctrl(2, 0);                 /* CTRL+B */
+    CHECK((ATR[0] & A_BOLD) != 0);
+    ctrl(0x1A, 0);
+    n1 = doc_sig(t1, a1);
+    CHECK(n0 == n1 && !memcmp(t0, t1, n0) && !memcmp(a0, a1, n0));
+    /* cut and paste */
+    wp_cmd(18);
+    wp_cmd(11);
+    CHECK(text_is(""));
+    ctrl(0x1A, 0);
+    CHECK(text_is("hello world"));
+    /* nothing to undo after a new document */
+    wp_cmd(13);
+    ctrl(0x1A, 0);
+    CHECK(!strcmp(msg, "Nothing to undo."));
+
+    /* CTRL keys: B / I / U the typing style; F / H / W BASIC's; F10, F8, ESC
+     * BASIC's without CTRL (F10's code is CTRL+U's); TAB without CTRL */
+    a = typing_attr;
+    ctrl(2, 0);
+    ctrl(9, 0);
+    ctrl(0x15, 0);
+    CHECK(typing_attr == (a ^ (A_BOLD | A_ITAL | A_UNDER)));
+    ctrl(2, 0);
+    ctrl(9, 0);
+    ctrl(0x15, 0);
+    CHECK(ctrl(6, 0) == 6 && ctrl(8, 0) == 7 && ctrl(0x17, 0) == 8);
+    CHECK(wp_key(0x15) == 2 && wp_key(0x8C) == 1 && wp_key(0x84) == 1 && wp_key(0x1B) == 5 && wp_key(4) == 3);
+    wp_key(9);
+    CHECK(text_is("    "));
+    wp_cmd(13);
+
+    /* find: either case, round the end, back */
+    type("one two one Two");
+    CHECK(find_str("two", FIND_SETF) == 0);
+    CHECK(wp_find(FIND_FWD) == 1 && sel_lo() == 4 && cur == 7);
+    CHECK(wp_find(FIND_FWD) == 1 && sel_lo() == 12);
+    CHECK(ctrl(6, 1) == 0 && sel_lo() == 4);            /* SHIFT+CTRL+F: round the end */
+    CHECK(ctrl(2, 1) == 0 && sel_lo() == 12);           /* SHIFT+CTRL+B */
+    find_str("three", FIND_SETF);
+    CHECK(wp_find(FIND_FWD) == 0 && !strcmp(msg, "Not found."));
+    /* replace: Y, N, then A */
+    type("x");                  /* (the selection, "Two", typed over) */
+    CHECK(text_is("one two one x"));
+    wp_cmd(13);
+    type("a cat, a Cat, a cat, a cat");
+    wp_key(147);
+    find_str("cat", FIND_SETF);
+    CHECK(wp_find(FIND_FWD) == 1 && sel_lo() == 2);
+    find_str("dog", FIND_SETR);
+    CHECK(!strcmp(msg, "Replace? Y)es N)o A)ll"));
+    CHECK(wp_find(FIND_REPL) == 1 && sel_lo() == 9);    /* Y */
+    CHECK(text_is("a dog, a Cat, a cat, a cat"));
+    CHECK(wp_find(FIND_FWD) == 1 && sel_lo() == 16);    /* N */
+    CHECK(wp_find(FIND_ALL) == 0 && !strcmp(msg, "Replaced 3."));
+    CHECK(text_is("a dog, a dog, a dog, a dog"));
+    ctrl(0x1A, 0);              /* all of A undone */
+    CHECK(text_is("a dog, a Cat, a cat, a cat"));
+    find_str("cat", FIND_SETF);
+    wp_find(FIND_FWD);
+    find_str("", FIND_SETR);    /* (an empty replacement deletes) */
+    wp_find(FIND_REPL);
+    CHECK(text_is("a dog, a , a cat, a cat") && sel_lo() == 13);
+    CHECK(wp_find(FIND_STOP) == 0 && msg[0] == 0 && !r_on);
+    check_incremental();
+
+    /* undo, at random: a run of keys (no cursor move: one edit) or a
+     * command, undone (the document as before it), done again (as after) */
+    wp_cmd(13);
+    type("Undo me. The first paragraph\nA second, longer one, wider than a line is: it wraps on the page.\n");
+    srand(getenv("SEED") ? (unsigned)atoi(getenv("SEED")) + 6 : 7);
+    for (i = 0; i < 400 && fails < 20; i++) {
+        int r = rand() % 4, k;
+        wp_cmd(9);
+        for (k = rand() % 6; k > 0; k--) wp_key(rand() % 2 ? 29 : 145);
+        if (rand() % 3 == 0) {
+            wp_cmd(8);
+            for (k = rand() % 12; k > 0; k--) wp_key(rand() % 3 ? 29 : 17);
+        }
+        u_have = 0;             /* (an op that changes nothing: undo then undoes nothing) */
+        n0 = doc_sig(t0, a0);
+        opn = 0;
+        logop(sel_on ? sel_lo() : cur);
+        logop(sel_on ? sel_hi() : -1);
+        if (r < 2) {
+            for (k = 1 + rand() % 6; k > 0; k--) {
+                static const u8 keys[] = {0x41, 0x20, 0xC5, 13, 20, 148, 0x42, 20};
+                u8 kk = keys[rand() % sizeof keys];
+                logop(kk);
+                wp_key(kk);
+            }
+        } else {
+            static const u8 cmds[] = {1, 2, 3, 4, 5, 6, 11, 12, 32, 33, 35, 36, 37, 38, 39};
+            u8 c = cmds[rand() % sizeof cmds];
+            if (c == 11) wp_cmd(10);
+            logop(-c);
+            wp_cmd(c);
+        }
+        n1 = doc_sig(t1, a1);
+        wp_cmd(22);
+        n2 = doc_sig(t2, a2);
+        if (n0 != n2 || memcmp(t0, t2, n0) || memcmp(a0, a2, n0)) {
+            int q;
+            printf("FAIL: undo %d: not the document as before (%u, now %u characters); from, to, ops:", i, n0, n2);
+            for (q = 0; q < opn && q < 8; q++) printf(" %d", oplog[q]);
+            printf("\n");
+            fails++;
+        }
+        wp_cmd(22);
+        n2 = doc_sig(t2, a2);
+        if (n1 != n2 || memcmp(t1, t2, n1) || memcmp(a1, a2, n1)) {
+            printf("FAIL: redo %d: not the document as after (%u, now %u characters)\n", i, n1, n2);
+            fails++;
+        }
+        check_doc();
+        if (i % 7 == 0) check_incremental();
+        if (doc_len > 2000) {
+            wp_cmd(13);
+            type("Again.\nAnd more.\n");
+        }
+    }
+    /* a cut longer than undo can keep: nothing to undo */
+    wp_cmd(13);
+    for (i = 0; i < 80; i++) type("Fifty characters of text to fill the document up..");
+    wp_cmd(18);
+    wp_cmd(11);
+    ctrl(0x1A, 0);
+    CHECK(!strcmp(msg, "Nothing to undo.") && doc_len == 1);
+    wp_cmd(13);
 }
 
 int main(void) {
@@ -452,6 +643,13 @@ int main(void) {
     n = wp_get(3);
     CHECK(n == doc_len);
     CHECK(MEM[SCRATCH_LIN + 1] == 0x44);     /* 'd' in PETSCII */
+
+    /* the import's clearing stops at the clipboard */
+    MEM[CLIP_LIN] = 0x5A;
+    MEM[CLIP_LIN - 1] = 0x5A;
+    CHECK(wp_get(6) == 0);                      /* GET_IMPORT_PREP */
+    CHECK(MEM[CLIP_LIN] == 0x5A && MEM[CLIP_LIN - 1] == 0);
+    CHECK(SCRATCH_LIN + SCRATCH_MAX == CLIP_LIN);
 
     /* import: PETSCII, CRs past the end trimmed */
     {
@@ -907,6 +1105,8 @@ int main(void) {
     }
     check_layout();
     screen_ppm("build/fuzz2.ppm");
+
+    test_edit();
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

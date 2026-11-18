@@ -1,0 +1,48 @@
+; modcall.s45 — edit_run's call into EDIT.OVL, copied into mod_area
+;
+; void mod_entry(void): a jump to the module's entry (after its 4-byte
+; header). A call through a C function pointer would be, to ln45's call
+; graph, a call to every function whose address is used (the BASIC entry
+; points among them), from deep inside the editing: every function active
+; together with every other, the base page shared by none.
+;
+; So the jump, then (never run) a JSR to each program function EDIT.OVL
+; calls (tools/mkmod.py lists them: build/edit.equ.s45; not the run time's
+; asm helpers, which keep nothing in memory): ln45's call graph
+; then has mod_entry calling them, as the module does, and it keeps their
+; static storage and base-page blocks apart from those of the functions
+; that lead here (edit_run's callers), which are live while the module
+; runs. (Without them a long replace-all had make_room and the rest
+; overwrite edit_run's own variables.) The module's header also saves the
+; base page of the functions that lead here (mkmod.py --from _edit_run).
+
+; no calls through pointers here (ln45's call graph)
+.weak cc45.icallinfo
+cc45.icallinfo = 1
+
+.global _mod_entry
+.extern _mod_area
+.extern _atr_at, _atr_put, _attr_at_cursor, _del_raw, _layout_edit, _room, _mem_copy, _mem_fill, _mem_get, _mem_write, _open_gap, _para_end, _para_start, _sel_hi, _sel_lo, _txt_at
+
+.segment "code"
+
+proc _mod_entry
+    jmp _mod_area + 4
+    jsr _atr_at
+    jsr _atr_put
+    jsr _attr_at_cursor
+    jsr _del_raw
+    jsr _layout_edit
+    jsr _room
+    jsr _mem_copy
+    jsr _mem_fill
+    jsr _mem_get
+    jsr _mem_write
+    jsr _open_gap
+    jsr _para_end
+    jsr _para_start
+    jsr _sel_hi
+    jsr _sel_lo
+    jsr _txt_at
+    .func_flags zp_call
+    endproc

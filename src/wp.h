@@ -44,6 +44,7 @@ typedef uint32_t u32;
 #define ATTR_LIN    0x53B00UL
 #define SCRATCH_LIN 0x57600UL
 #define CLIP_LIN    0x5EC00UL
+#define SCRATCH_MAX 30208u      /* the scratch area's size: SCRATCH_LIN to CLIP_LIN */
 #define COLOR_OFS   0x1000u     /* our cells' colours in colour RAM ($FF81000-$FF82F3F) */
 /* the Latin-1 glyphs and the compose table: colour RAM's last 20 KB, which
  * every MEGA65 has and nothing else uses (the host: bank 3 of MEM) */
@@ -52,6 +53,24 @@ typedef uint32_t u32;
 #else
 #define HI_LIN      0x30000UL
 #endif
+
+/* The rest of colour RAM, after writer.fnt's second part (12306 bytes
+ * from HI_LIN; colour RAM ends at HI_LIN + $5000): the find and replace
+ * strings (FIND_MAX characters each), the drawing's caches while EDIT.OVL
+ * runs (CACHE_LIN), EDIT.OVL (EDIT_LIN, EDIT_SIZE bytes: edit.c).
+ * Undo's buffer (UNDO_MAX characters: text, then attributes) is the
+ * scratch area's last part, past where open_gap's copies go (the
+ * document's length) and the middle undo replaces waits (PARK_LIN): a file
+ * image or an export that reaches it (UNDO_OFS) leaves nothing to undo. */
+#define FIND_MAX  40
+#define FIND_LIN  (HI_LIN + 0x3020)
+#define REPL_LIN  (FIND_LIN + FIND_MAX + 1)
+#define CACHE_LIN (HI_LIN + 0x3080)
+#define EDIT_LIN  (HI_LIN + 0x3680)
+#define UNDO_MAX  3700u
+#define PARK_LIN  (SCRATCH_LIN + 15104)
+#define UNDO_OFS  (SCRATCH_MAX - 2 * UNDO_MAX)
+#define UNDO_LIN  (SCRATCH_LIN + UNDO_OFS)
 
 #define DOC_MAX   15000u        /* characters, the final CR included */
 #define CLIP_MAX  2560u
@@ -212,12 +231,44 @@ void doc_delete(u16 from, u16 to);
 u8 doc_type(u8 c);              /* ASCII at the cursor (replacing a selection) */
 void doc_backspace(void);
 void doc_delete_fwd(void);
-void doc_toggle(u8 bit);
-void doc_cycle_font(void);
-void doc_cycle_align(void);
 void doc_copy(void);
 void doc_cut(void);
 void doc_paste(void);
+u16 para_start(u16 i);          /* the start of the paragraph holding i */
+void open_gap(u16 at, u16 n);   /* the text from at moved up n (doc_len not changed) */
+u8 make_room(u16 at, u16 n);    /* room for n characters at at (noted for undo); 1: none */
+void room(u16 at, u16 n);       /* the same, not noted, nor checked */
+void del_raw(u16 from, u16 to); /* from..to-1 removed, not noted (from < to < doc_len) */
+
+/* ---- undo, find and replace: EDIT.OVL (edit.c), run by edit_run (doc.c) ---- */
+#define FIND_STOP 0             /* (mod_cmd) replacing ends (BASIC: a key not Y / N / A) */
+#define FIND_REPL 1             /* the match selected replaced, then the next (Y) */
+#define FIND_FWD 2              /* the next match selected (N; SHIFT+CTRL+F) */
+#define FIND_ALL 3              /* all replaced (A): how many, said */
+#define FIND_BACK 4             /* the match before (SHIFT+CTRL+B) */
+#define FIND_SETF 5             /* msg (ASCII) as the find string */
+#define FIND_SETR 6             /* msg as the replacement: replacing starts */
+#define ED_NOTE 7               /* ed_a..ed_b-1 about to change (undo_note) */
+#define ED_UNDO 8               /* the last edit undone (again: done); 1: none */
+#define ED_TOGGLE 9             /* doc_toggle(ed_a) ... */
+#define ED_FONT 10
+#define ED_ALIGN 11
+#define ED_LEVEL 12
+#define ED_STYLE 13
+extern u16 u_pos, u_tail, u_n, ed_a, ed_b;
+extern u8 u_have, u_open, f_len, r_len, r_on, ed_ok, ed_busy;
+u16 edit_run(u8 cmd);           /* EDIT.OVL's mod_cmd; its mod_ret (0xFFFF: not loaded) */
+void edit_keep(void);           /* EDIT.OVL, BLOADed to mod_area, kept in colour RAM */
+void undo_note(u16 from, u16 to);
+u16 ed(u8 cmd, u16 a);          /* edit_run(cmd) with ed_a = a */
+/* the styles, a list item's level: EDIT.OVL's */
+#define doc_toggle(bit) ed(ED_TOGGLE, bit)              /* bold / italic / underline (A_...) */
+#define doc_cycle_font() ed(ED_FONT, 0)
+#define doc_cycle_align() ed(ED_ALIGN, 0)
+#define doc_list_level(in) (ed(ED_LEVEL, in) == 1)     /* TAB / DEL, RETURN at a list item's start; 1: done */
+#define doc_style(k) ed(ED_STYLE, k)                    /* paragraph style k (K_...) */
+void edit_main(void);           /* EDIT.OVL's entry (edit.c) */
+void mod_entry(void);           /* (modcall.s45: a jump to the module in mod_area) */
 u16 doc_pack(void);             /* the file image at SCRATCH_LIN; its size */
 u8 doc_unpack(void);            /* 0: loaded */
 u16 doc_export(void);           /* the PETSCII text at SCRATCH_LIN; its size */
@@ -227,7 +278,6 @@ u16 md_export(void);            /* Markdown at SCRATCH_LIN; its size (0: too lon
 u16 md_import(void);            /* Markdown at SCRATCH_LIN as the document; its length */
 
 /* ---- what the converters share (conv.c; issue #3) ---- */
-#define SCRATCH_MAX 30720u      /* the scratch area's size */
 u8 txt_at(u16 i);               /* TXT[i], ATR[i]: smaller code than the far access */
 u8 atr_at(u16 i);
 void txt_put(u16 i, u8 c);      /* TXT[i] = c, ATR[i] = a */
@@ -274,6 +324,7 @@ void doc_built(void);           /* after build_end (b_done): doc_loaded(1) (mod_
 #define MOD_RTF_END 5                   /* RTF.OVL: the import's end: the document's length */
 extern u8 mod_cmd;                      /* what the module is to do */
 extern u16 mod_ret;                     /* its result */
+u8 mod_ok(const u8 *m);                 /* a module's header there, of this build */
 u16 mod_run(u8 cmd);                    /* run the module loaded; 0xFFFF: none */
 void md_main(void);                     /* MDEXPORT.OVL's and MDIMPORT.OVL's entry (md.c) */
 void rtf_main(void);                    /* RTF.OVL's entry (rtf.c) */
@@ -295,9 +346,7 @@ u8 para_al(u16 i);              /* its alignment (0 left, 1 centre, 2 right, 3 j
 u8 para_kind(u16 i);            /* its kind (K_...) */
 u8 cur_kind(void);              /* the kind of the cursor's paragraph (the selection's first) */
 u16 item_num(u16 p);            /* paragraph p's number in its list (a numbered item) */
-u8 doc_list_level(u8 in);       /* the list item at the cursor (at its start) a level in (1) or out (0: at level 0, a normal paragraph); 0: none there */
 u8 para_indent(u8 kl);          /* (layout.c) a paragraph's indent: its kind and level (A_KIND | A_LEVEL) */
-void doc_style(u8 k);           /* kind k applied: to the paragraphs selected whole (or the cursor's), as character style to the rest of the selection */
 u8 attr_at_cursor(void);
 u16 sel_lo(void);
 u16 sel_hi(void);
@@ -347,23 +396,30 @@ struct seg {
  * once: Markdown, ...) is loaded there by BASIC, run by mod_run, and the
  * screen then drawn again. */
 #define TMP_LINES 32
+/* mod_area's first part, its buffers in use only while drawing (a struct
+ * line is 12 bytes); EDIT.OVL's room, up to LIST.OVL */
+#define MOD_SCRATCH (PANEL_ROWS * 81 + TMP_LINES * 12 + BAND_H * COLS + COLS + 2 + 48 + COLS + 48 + COLS + 1)
+#define EDIT_SIZE LIST_OFS
 union mod_area {
     struct {
+        /* (in use only while the screen is drawn or laid out: EDIT.OVL
+         * runs here, EDIT_SIZE bytes) */
         char menu_text[PANEL_ROWS][81]; /* (first: BASIC pokes it at mod_area) */
         struct line lay_tmp[TMP_LINES]; /* layout_update's new lines */
         u8 band[BAND_H * COLS];
         char bar_t[COLS + 2];          /* a bar's new text */
         char tag_buf[48];              /* raw_tag's tags, when not wanted */
+        u8 cellcol[COLS];              /* raw view: the row's cells' colours */
+        u8 gbuf[48];                   /* a glyph's rows, copied from bank 4 */
+        char sb[COLS + 1];             /* a bar's text */
+        /* (kept from one frame to the next) */
         struct seg segs[2][MAXSEG];    /* this frame's and the last one's, in screen order */
         char bar_text[4][COLS + 2];    /* what each bar shows ("" : unknown) */
         u8 row_desk[COLS];             /* the desk between pages */
         u8 row_page[COLS];             /* a page's blank row: desk at the sides */
         u8 row_blank[COLS];
         u8 rowcol[ROWS];               /* each cell row's colour scheme (0xFF: unknown) */
-        u8 cellcol[COLS];              /* raw view: the row's cells' colours */
         u8 desk_row[ROWS];
-        u8 gbuf[48];                   /* a glyph's rows, copied from bank 4 */
-        char sb[COLS + 1];             /* a bar's text */
     } r;
     u8 m[MOD_SIZE];
 };

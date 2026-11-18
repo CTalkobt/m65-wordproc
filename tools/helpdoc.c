@@ -86,6 +86,7 @@ static const struct run help[] = {
     { K_H2, "\r" },
     { 0, "The selection, or what you type next:\r" },
     { MONO, "F3 bold    F5 italic    F7 underline\r"
+            "(or CTRL+B, CTRL+I, CTRL+U)\r"
             "F2 font: Sans, Serif, Mono, Head\r"
             "F4 paragraph: left, centre, right, justify\r"
             "F6 page break           F1 page / raw view\r"
@@ -102,6 +103,16 @@ static const struct run help[] = {
             "ESC        end the selection\r"
             "F10 copy   F11 cut   F12 paste\r" },
     { 0, "Typing replaces the selection.\r" },
+    { 0, "\r" },
+    { H2, "Undo, find and replace" },
+    { K_H2, "\r" },
+    { MONO, "CTRL+Z     undo the last edit (again: redo)\r"
+            "CTRL+F     find\r"
+            "SHIFT+CTRL+F / B   the next / the one before\r"
+            "CTRL+H     replace: Y)es N)o A)ll at each\r"
+            "CTRL+W     save, under the document's name\r" },
+    { 0, "Find matches letters in either case and goes round from the end to the start. "
+         "These need EDIT.OVL on the disk.\r" },
     { 0, "\r" },
     { H2, "Accents: Compose" },
     { K_H2, "\r" },

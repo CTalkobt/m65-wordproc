@@ -31,15 +31,21 @@ TARGET = $(BUILD)/writer.prg
 MAP    = $(BUILD)/writer.map
 DISK   = $(BUILD)/writer.d81
 
-CSRC    = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/list.c src/m65.c src/fonts.c
-PORTABLE = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/list.c src/fonts.c
+CSRC    = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/list.c src/edit.c src/edit_undo.c src/m65.c src/fonts.c
+PORTABLE = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/list.c src/edit.c src/edit_undo.c src/fonts.c
 HEADERS = src/wp.h
 
 # The C half is compiled here (basic45 --link takes the objects): -O2 for
 # the drawing (the most work on every key), -O1 for the rest, layout
 # included, which cc45 makes much smaller (md.c: 8.2 KB at -O2, 6.3 KB at
 # -O1): bank 0 is full.
-CC45FLAGS = -I$(CC45_ROOT)/lib/include -Isrc -I$(BUILD)
+# -fno-tail-call-optimization: the call graph in ln45's map (and its
+# recursion, thunk and clobber checks) is made from JSRs only, so a tail
+# call (JSR + RTS made a JMP) is missing from it (M65Compiler #615).
+# tools/mkmod.py reads that graph to find what is waiting at a call into a
+# module (EDIT.OVL: ed's tail call to edit_run). ln45's sharing of static
+# storage does count JMPs.
+CC45FLAGS = -fno-tail-call-optimization -I$(CC45_ROOT)/lib/include -Isrc -I$(BUILD)
 # --minify: the BASIC program without comments and indentation, its lines
 # joined and its long names shortened (737 bytes less, so the C half starts
 # a page lower; needs M65Compiler #601, master since 6762f672)
@@ -49,18 +55,22 @@ SMALL   = api conv doc layout
 # (conv.c is called by the modules, whose base-page blocks start at $80:
 # its functions keep their variables out of the base page)
 NOZP    = conv
-OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45)
+OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45) $(BUILD)/obj/modcall.o45
 CCQUIET = 2>&1 | grep -v 'note:\|^ *[0-9]* |\|^ *|' || true
 
 $(BUILD)/obj/%.o45: src/%.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
 	$(CC45) $(if $(filter $*,$(SMALL)),-O1,-O2) $(if $(filter $*,$(NOZP)),-fno-zp-locals) $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
 
+$(BUILD)/obj/modcall.o45: src/modcall.s45
+	@mkdir -p $(BUILD)/obj
+	$(CC45_ROOT)/bin/ca45 -c $< -o $@
+
 # Modules (.OVL files, loaded by BASIC when used and only when on the disk):
 # linked by tools/mkmod.py to run at the program's mod_area, against its
 # map (basic45 --map: M65Compiler #595, in master since 6a7dd256); the build's ID (of the sources and the tools) ties each to the
 # program it was linked with (render.c's mod_run refuses another's).
-MODS    = $(BUILD)/mdimport.ovl $(BUILD)/mdexport.ovl $(BUILD)/rtf.ovl $(BUILD)/list.ovl
+MODS    = $(BUILD)/mdimport.ovl $(BUILD)/mdexport.ovl $(BUILD)/rtf.ovl $(BUILD)/list.ovl $(BUILD)/edit.ovl
 BUILD_ID := $(shell cat src/*.c src/*.h src/wp.bas tools/mkmod.py $(CC45) $(CC45_ROOT)/bin/ln45 2>/dev/null | cksum | awk '{print $$1 % 65536}')
 
 $(BUILD)/buildid.h: FORCE
@@ -98,6 +108,21 @@ $(BUILD)/list.ovl: $(TARGET) $(BUILD)/obj/list_mod.o45 tools/mkmod.py
 	    --from _draw_line__render,_render_raw__render \
 	    $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/list_mod.o45
 
+# EDIT.OVL: undo, find and replace; BLOADed at the start to mod_area, kept
+# in colour RAM, and copied into mod_area's first EDIT_SIZE bytes (the
+# drawing's buffers) for each call: doc.c's edit_run
+$(BUILD)/obj/edit_mod.o45: src/edit.c $(HEADERS)
+	@mkdir -p $(BUILD)/obj
+	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+
+$(BUILD)/obj/edit_undo_mod.o45: src/edit_undo.c $(HEADERS)
+	@mkdir -p $(BUILD)/obj
+	$(CC45) -O1 -fno-zp-locals $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+
+$(BUILD)/edit.ovl: $(TARGET) $(BUILD)/obj/edit_mod.o45 $(BUILD)/obj/edit_undo_mod.o45 tools/mkmod.py
+	python3 tools/mkmod.py --size EDIT_SIZE --entry _edit_main --from _edit_run \
+	    $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/edit_mod.o45 $(BUILD)/obj/edit_undo_mod.o45
+
 .PHONY: all run shot test fonts clean FORCE
 .DEFAULT_GOAL := all
 
@@ -117,6 +142,7 @@ $(DISK): $(TARGET) src/writer.fnt $(BUILD)/help.prg $(MODS)
 	$(DISK45) add $@ $(BUILD)/mdexport.ovl "MDEXPORT.OVL"
 	$(DISK45) add $@ $(BUILD)/rtf.ovl "RTF.OVL"
 	$(DISK45) add $@ $(BUILD)/list.ovl "LIST.OVL"
+	$(DISK45) add $@ $(BUILD)/edit.ovl "EDIT.OVL"
 
 # the document shown at the start, made on the host by the C half itself
 $(BUILD)/mkhelp: tools/mkhelp.c tools/helpdoc.c tests/host.c $(PORTABLE) $(HEADERS)

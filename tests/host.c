@@ -57,7 +57,7 @@ void video_on(void) {
     }
     fgetc(f);
     fgetc(f);
-    if (fread(MEM + SCRATCH_LIN, 1, 30720, f) == 0) perror("src/writer.fnt");
+    if (fread(MEM + SCRATCH_LIN, 1, SCRATCH_MAX, f) == 0) perror("src/writer.fnt");
     fclose(f);
     font_install();
     loaded = 1;

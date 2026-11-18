@@ -13,6 +13,10 @@ u8 goal_valid;
 
 u16 clip_len;
 
+/* undo's record and the find strings' lengths (edit.c) */
+u16 u_pos, u_tail, u_n;
+u8 u_have, u_open, f_len, r_len, r_on;
+
 void doc_new(void) {
     txt_put(0, CH_CR);
     atr_put(0, 0);
@@ -23,6 +27,7 @@ void doc_new(void) {
     dirty = 0;
     view_y = 0;
     goal_valid = 0;
+    u_have = 0;
     layout_all();
 }
 
@@ -38,8 +43,6 @@ u16 para_end(u16 i) {
 /* the alignment of the paragraph holding i (0 left .. 3 justify) */
 u8 para_al(u16 i) { return (u8)((atr_at(para_end(i)) & A_ALIGN) >> A_ALIGN_SHIFT); }
 
-/* the start of the paragraph holding i */
-static u16 para_start(u16 i);
 
 /* its kind (K_...) */
 u8 para_kind(u16 i) { return atr_at(para_end(i)) & A_KIND; }
@@ -49,7 +52,7 @@ u8 cur_kind(void) { return para_kind(sel_on ? sel_lo() : cur); }
 static u8 is_break(u8 c) { return c == CH_CR || c == CH_FF; }
 
 /* the start of the paragraph holding i */
-static u16 para_start(u16 i) {
+u16 para_start(u16 i) {
     while (i > 0 && !is_break(txt_at(i - 1))) i--;
     return i;
 }
@@ -65,7 +68,7 @@ u8 attr_at_cursor(void) {
 /* room for n characters at `at`: the text and attributes after it moved
  * up, through the scratch area (the DMA copies upwards only when the
  * ranges do not overlap) */
-static void open_gap(u16 at, u16 n) {
+void open_gap(u16 at, u16 n) {
     u16 tail = doc_len - at;
     u32 o = 0;
     u8 k;
@@ -75,12 +78,82 @@ static void open_gap(u16 at, u16 n) {
     }
 }
 
+/* ---- undo, find, styles: EDIT.OVL (edit.c), a module kept in colour RAM
+ * (EDIT_LIN) and copied for each call (edit_run) into mod_area, up to
+ * LIST.OVL: its first MOD_SCRATCH bytes are buffers the drawing uses only
+ * while it draws, the rest its caches, kept meanwhile in colour RAM
+ * (CACHE_LIN). Its state is here (it keeps none of its own). ed_busy: it is
+ * running (its edits' own undo_notes are then left out: it notes them). */
+#ifdef __cc45__
+u8 ed_ok;
+#else
+u8 ed_ok = 1;                   /* (the host: edit.c linked in) */
+#endif
+u8 ed_busy;
+u16 ed_a, ed_b;
+
+u16 edit_run(u8 cmd) {
+    mod_ret = 0xFFFF;
+    if (!ed_ok || ed_busy) return mod_ret;
+    ed_busy = 1;
+    mod_cmd = cmd;
+#ifdef __cc45__
+    mem_copy(CACHE_LIN, (u32)(u16)(mod_area.m + MOD_SCRATCH), EDIT_SIZE - MOD_SCRATCH);
+    mem_copy((u32)(u16)mod_area.m, EDIT_LIN, EDIT_SIZE);
+    mod_entry();
+    mod_area.m[0] = 0;          /* (the drawing overwrites it: not kept again) */
+    mem_copy((u32)(u16)(mod_area.m + MOD_SCRATCH), CACHE_LIN, EDIT_SIZE - MOD_SCRATCH);
+#else
+    edit_main();
+#endif
+    ed_busy = 0;
+    return mod_ret;
+}
+
+u16 ed(u8 cmd, u16 a) {
+    ed_a = a;
+    return edit_run(cmd);
+}
+
+/* the document's from..to-1 about to change (to: before the change) */
+void undo_note(u16 from, u16 to) {
+    ed_b = to;
+    ed(ED_NOTE, from);
+}
+
+/* EDIT.OVL just loaded at mod_area by BASIC: kept (GET_LISTOK) */
+void edit_keep(void) {
+#ifdef __cc45__
+    if (!mod_ok(mod_area.m)) return;
+    mem_copy(EDIT_LIN, (u32)(u16)mod_area.m, EDIT_SIZE);
+    mod_area.m[0] = 0;
+    ed_ok = 1;
+    render_invalidate();
+#endif
+}
+
+
+/* room for n characters at `at` (the edit noted for undo), the document
+ * that much longer; 1: none */
+u8 make_room(u16 at, u16 n) {
+    if (doc_len + n > DOC_MAX) return 1;
+    undo_note(at, at);
+    room(at, n);
+    return 0;
+}
+
+/* (and without noting it: EDIT.OVL's, which notes its own) */
+void room(u16 at, u16 n) {
+    open_gap(at, n);
+    doc_len += n;
+    dirty = 1;
+}
+
 /* n characters (s, attributes a) inserted at `at`; 1 when there is no room */
 u8 doc_insert(u16 at, const u8 *s, const u8 *a, u16 n) {
     u16 i, lo = at;
     if (n == 0) return 0;
-    if (doc_len + n > DOC_MAX) return 1;
-    open_gap(at, n);
+    if (make_room(at, n)) return 1;
     mem_write(TEXT_LIN + at, s, n);
     mem_write(ATTR_LIN + at, a, n);
     for (i = 0; i < n; i++)
@@ -88,17 +161,22 @@ u8 doc_insert(u16 at, const u8 *s, const u8 *a, u16 n) {
     /* a paragraph end inserted: the lines before it, in its paragraph,
      * take its alignment */
     if (lo == 0xFFFF) lo = para_start(at);
-    doc_len += n;
-    dirty = 1;
     layout_edit(lo, at, (int16_t)n);
     return 0;
 }
 
 /* characters from..to-1 removed (never the final CR) */
 void doc_delete(u16 from, u16 to) {
-    u16 n, i, lo = from;
     if (to > doc_len - 1) to = doc_len - 1;
     if (from >= to) return;
+    undo_note(from, to + 1);    /* (and the end after it, which may change) */
+    del_raw(from, to);
+}
+
+/* from..to-1 removed (from < to <= doc_len - 1), not noted for undo
+ * (EDIT.OVL's: it notes its own) */
+void del_raw(u16 from, u16 to) {
+    u16 n, i, lo = from;
     /* a paragraph end deleted: the paragraph before it takes the next one's
      * kind and alignment, unless nothing of that one is left (the end after
      * the deletion: an empty paragraph joined), when it keeps its own */
@@ -135,6 +213,7 @@ u8 doc_type(u8 c) {
     at_end = is_break(txt_at(cur));
     if (brk) {
         if (nlines >= MAX_LINES - 8) return 1;  /* the line table is (almost) full */
+        undo_note(cur, cur + 1);        /* (the end after it may change) */
         /* the new paragraph end keeps the paragraph's kind and alignment */
         a = atr_at(para_end(cur)) & A_PARA;
     }
@@ -170,108 +249,6 @@ void doc_delete_fwd(void) {
     goal_valid = 0;
 }
 
-/* the selection's attributes: (a & keep) | set; then the typing style
- * is its first character's */
-static void restyle(u8 keep, u8 set) {
-    u16 lo = sel_lo(), hi = sel_hi(), i;
-    for (i = lo; i < hi; i++)
-        if (!is_break(txt_at(i))) atr_put(i, (u8)((atr_at(i) & keep) | set));
-    typing_attr = atr_at(lo) & A_STYLE;
-    dirty = 1;
-    layout_edit(lo, hi, 0);
-}
-
-/* bold / italic / underline: over the selection (all on unless the first
- * character has it already), else for what is typed next */
-void doc_toggle(u8 bit) {
-    if (!sel_on) typing_attr ^= bit;
-    else if (atr_at(sel_lo()) & bit) restyle((u8)~bit, 0);
-    else restyle(0xFF, bit);
-}
-
-/* the next font: over the selection (after its first character's), else
- * for what is typed next */
-void doc_cycle_font(void) {
-    u8 a = sel_on ? atr_at(sel_lo()) : typing_attr, f = (u8)(((a & A_FONT) + 1) % NFONTS);
-    if (sel_on) restyle((u8)~A_FONT, f);
-    else typing_attr = (u8)((typing_attr & ~A_FONT) | f);
-}
-
-/* the alignment of the paragraph(s) at the cursor / selection: left,
- * centre, right, justify, left ... */
-void doc_cycle_align(void) {
-    u16 lo = sel_on ? sel_lo() : cur, hi = sel_on ? sel_hi() : cur;
-    u16 e = para_end(lo), ps = para_start(lo);
-    u8 al = (u8)((((atr_at(e) & A_ALIGN) >> A_ALIGN_SHIFT) + 1) & 3);
-    for (;;) {
-        atr_put(e, (u8)((atr_at(e) & ~A_ALIGN) | (al << A_ALIGN_SHIFT)));
-        if (e >= hi || e >= doc_len - 1) break;
-        e = para_end(e + 1);
-    }
-    dirty = 1;
-    layout_edit(ps, e, 0);
-}
-
-/* TAB, DEL, RETURN at a list item's start (the cursor, no selection): a
- * level in, or out (at level 0: a normal paragraph); 0: not there */
-u8 doc_list_level(u8 in) {
-    u16 e;
-    u8 a;
-    if (sel_on || cur != para_start(cur)) return 0;
-    e = para_end(cur);
-    a = atr_at(e);
-    if ((a & A_KIND) < K_BULLET) return 0;
-    if (in) {
-        if ((a & A_LEVEL) != A_LEVEL) a += 1 << A_LEVEL_SHIFT;
-    } else if (a & A_LEVEL) {
-        a -= 1 << A_LEVEL_SHIFT;
-    } else {
-        a &= A_ALIGN;
-    }
-    atr_put(e, a);
-    dirty = 1;
-    layout_edit(cur, e, 0);
-    return 1;
-}
-
-/* Style k (a paragraph kind) applied: a paragraph the selection holds
- * whole (all its text; with no selection, the cursor's) becomes of kind k,
- * its characters in k's font and style where they were in its old kind's
- * (others keep their font; bold, italic, underline added to the old kind's
- * stay); the selection's part of any other paragraph takes k's font and
- * style as they are (Normal: plain). */
-void doc_style(u8 k) {
-    u16 lo = cur, hi = cur, p, e, i, ps;
-    u8 a, f, of, keep, ka = kind_attr[k], kf = ka & A_FONT, kfl = ka & ~A_FONT;
-    if (sel_on) {
-        lo = sel_lo();
-        hi = sel_hi();
-    }
-    p = ps = para_start(lo);
-    for (;;) {
-        e = para_end(p);
-        if (!sel_on || (lo <= p && hi >= e)) {
-            a = kind_attr[atr_at(e) & A_KIND];
-            of = a & A_FONT;
-            keep = (u8)(~a & (A_BOLD | A_ITAL | A_UNDER));
-            for (i = p; i < e; i++) {
-                a = atr_at(i);
-                f = a & A_FONT;
-                if (f == of) f = kf;
-                atr_put(i, (u8)(f | (a & keep) | kfl));
-            }
-            atr_put(e, (u8)((atr_at(e) & (k >= K_BULLET ? ~A_KIND : A_ALIGN)) | k));    /* (a list keeps its level) */
-        } else {
-            for (i = lo > p ? lo : p; i < e && i < hi; i++) atr_put(i, ka);
-        }
-        if (!sel_on || e + 1 >= hi || e >= doc_len - 1) break;
-        p = (u16)(e + 1);
-    }
-    typing_attr = attr_at_cursor();
-    dirty = 1;
-    layout_edit(ps, e, 0);
-}
-
 /* ---- the clipboard (bank 4: text, then attributes) ---- */
 void doc_copy(void) {
     u16 lo, n;
@@ -295,14 +272,11 @@ void doc_paste(void) {
     u16 n = clip_len;
     if (!n) return;
     if (sel_on) delete_selection();
-    if (doc_len + n > DOC_MAX) return;
-    open_gap(cur, n);
+    if (make_room(cur, n)) return;
     mem_copy(TEXT_LIN + cur, CLIP_LIN, n);
     mem_copy(ATTR_LIN + cur, CLIP_LIN + CLIP_MAX, n);
     layout_edit(para_start(cur), cur, (int16_t)n);
-    doc_len += n;
     cur += n;
-    dirty = 1;
     goal_valid = 0;
 }
 
@@ -354,6 +328,7 @@ void doc_loaded(u8 d) {
     view_y = 0;
     goal_valid = 0;
     dirty = d;
+    u_have = 0;
     typing_attr = attr_at_cursor();
     layout_all();
 }

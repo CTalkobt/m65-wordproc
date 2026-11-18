@@ -69,6 +69,25 @@ def program_map(mapfile, prg):
     return syms, blocks(mp), calls(mp), open(prg, "rb").read()
 
 
+def sac(mapfile):
+    """function: the bytes of its static storage in the SAC overlay (its
+    __ar and __param_ symbols, each to the next symbol)"""
+    mp = open(mapfile).read()
+    m = re.search(r"SAC overlay \$([0-9A-F]+) - \$([0-9A-F]+)", mp)
+    if not m:
+        return {}
+    lo, hi = int(m.group(1), 16), int(m.group(2), 16)
+    syms = sorted((int(a, 16), n) for a, n in re.findall(r"^\s+\$([0-9A-F]+)\s+(\S+)", mp, re.M)
+                  if lo <= int(a, 16) <= hi)
+    own = {}
+    for i, (a, n) in enumerate(syms):
+        f = re.match(r"(_.+?)__(ar|param_\w+)$", n)
+        if f:
+            nxt = next((b for b, _ in syms[i + 1:] if b > a), hi + 1)
+            own.setdefault(f.group(1), set()).update(range(a, nxt))
+    return own
+
+
 def word_at(image, a):
     """the program's 16-bit value at address a (image: a .prg)"""
     o = a - (image[0] | image[1] << 8) + 2
@@ -192,6 +211,21 @@ def main():
     for f in sites:
         for g in callers(pcalls, f):
             saved |= pblocks.get(g, set())
+    # Their static storage (the SAC overlay) is not saved: none of it may be
+    # shared with the program functions the module calls (down), which run
+    # while they wait. ln45 keeps apart only what its call graph says is
+    # active together; a call into the module is not in it (a jump to
+    # mod_area, or a call through a pointer): src/modcall.s45's JSRs add the
+    # edges for EDIT.OVL's.
+    own = sac(mapfile)
+    for f in sites:
+        for g in callers(pcalls, f):
+            for d in down - {g}:
+                x = own.get(g, set()) & own.get(d, set())
+                if x:
+                    die("the program's %s (live while the module runs, from %s) shares static storage "
+                        "($%04X) with %s, which the module calls: add a JSR to %s in src/modcall.s45's "
+                        "stub for this call" % (g, f, min(x), d, d))
     lo, hi = (min(saved), max(saved)) if saved else (0, -1)
     nsave = hi + 1 - lo
     if nsave > 128:

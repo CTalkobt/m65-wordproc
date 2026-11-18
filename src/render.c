@@ -74,7 +74,7 @@ void render_invalidate(void) {
 }
 
 /* a module's header: "WM" and the build's id (then a JMP to its entry) */
-static u8 mod_ok(const u8 *m) {
+u8 mod_ok(const u8 *m) {
 #ifdef __cc45__
     return m[0] == 'W' && m[1] == 'M' && m[2] == (u8)BUILD_ID && m[3] == (u8)(BUILD_ID >> 8);
 #else

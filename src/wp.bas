@@ -52,6 +52,10 @@
 #define GET_FONTS 15
 #define GET_KIND 16
 
+#define FIND_FWD 2
+#define FIND_SETF 5
+#define FIND_SETR 6
+
 ' LIST.OVL's place: mod_area + LIST_OFS (wp.h)
 #define LIST_OFS 4288
 
@@ -80,7 +84,7 @@ wpinit:
   trap
   sys {wp_init}
   if wl = 2 then sys {wp_get}, GET_UNPACK
-  fi$ = p"untitled"
+  fi$ = p"untitled" : am = 16
   call loadlist
 
 mainloop:
@@ -90,18 +94,13 @@ waitkey:
   ' keys from the keyboard (GET does not give them, or not as such)
   sys {wp_idle}
   get k$ : if k$ = "" then waitkey
-  k = asc(k$)
-  ' a command key: its command (wp_cmd), by a table (as select's cases
-  ' cost some 60 bytes each): F1 view, F3 / F5 / F7 bold / italic /
-  ' underline, F2 font, F4 align, F6 page break, F9 mark, F11 cut, F12
-  ' paste, F13 / F14 page up / down (CMD_... in the second string)
-  i = instr("{$85}{$86}{$87}{$88}{$89}{$8a}{$8b}{$10}{$16}{$17}{$19}{$1a}", k$)
-  if i then sys {wp_cmd}, asc(mid$("{$07}{$01}{$02}{$03}{$04}{$05}{$06}{$08}{$0b}{$0c}{$10}{$11}", i, 1)) : goto mainloop
-  ' F8 / HELP the help, F10 copy, CTRL+D the style drop-down, CTRL+L the
-  ' screen drawn again, ESC the menu (or the selection's end)
-  i = instr("{$8c}{$84}{$15}{$04}{$0c}{$1b}", k$)
-  if i then on i gosub loadhelp, loadhelp, copysel, stylemenu, redraw, escape : goto mainloop
-  sys {wp_key}, k
+  ' the key to the C half, which does what it can (the F-keys' and CTRL's
+  ' commands among it) and leaves the rest here (ka, ACT_... in api.c): F8 /
+  ' HELP the help, F10 copy, CTRL+D the style drop-down, CTRL+L the screen
+  ' drawn again, ESC the menu (or the selection's end), CTRL+F find, CTRL+H
+  ' replace, CTRL+W save
+  sys {wp_key}, asc(k$) : rreg ka
+  on ka gosub loadhelp, copysel, stylemenu, redraw, escape, dofind, doreplace, savedoc
   goto mainloop
 
 proc copysel
@@ -180,7 +179,9 @@ proc setname
   sys {wp_setname}
 endproc
 
-' a line typed into a$ (starting as it is); ok = 1 when RETURN ended it
+' a line typed into a$ (starting as it is), at most am characters (16: a
+' file name, without spaces, quotes, commas or colons); ok = 1 when RETURN
+' ended it
 proc ask(q$)
   ok = 0
 .again:
@@ -190,9 +191,10 @@ proc ask(q$)
   if c = 13 then ok = 1 : goto .done
   if c = 27 then goto .done
   if c = 20 and len(a$) > 0 then a$ = left$(a$, len(a$) - 1)
-  if len(a$) < 16 and ((c > 32 and c < 128 and c <> 34 and c <> 44 and c <> 58) or (c >= 193 and c <= 218)) then a$ = a$ + c$
+  if len(a$) < am and ((c > 31 and c < 128 and (am > 16 or (c > 32 and c <> 34 and c <> 44 and c <> 58))) or (c >= 193 and c <= 218)) then a$ = a$ + c$
   goto .again
 .done:
+  am = 16
   call say("")
 endproc
 
@@ -220,10 +222,11 @@ proc newdoc
   endif
 endproc
 
+' (CTRL+W, ka 8: under the document's name, asking only when it has none)
 proc savedoc
   a$ = fi$
   if a$ = p"untitled" then a$ = ""
-  call ask(p"Save as: ")
+  if ka = 8 and a$ <> "" then ok = 1 : else call ask(p"Save as: ")
   if ok and a$ <> "" then
     call say(p"Saving " + a$ + "...")
     sys {wp_get}, GET_PACK : rreg lo, hi
@@ -236,6 +239,36 @@ proc savedoc
     else
       fi$ = a$ : sys {wp_cmd}, CMD_CLEAN : call setname
       call say(p"Saved " + a$ + " (" + mid$(str$(n), 2) + p" bytes).")
+    endif
+  endif
+endproc
+
+' ---- find (CTRL+F) and replace (CTRL+H): the strings to the C half (as
+' msg); f: 1 when a match is selected ----
+proc dofind
+  f = 0
+  a$ = fs$ : am = 40
+  call ask(p"Find: ")
+  if ok and a$ <> "" then fs$ = a$ : call setstr(a$, {msg}) : sys {wp_find}, FIND_SETF : sys {wp_find}, FIND_FWD : rreg f
+endproc
+
+' each match: Y replaced (then the next), N the next, A all in the
+' document; another key stops. The C half asks (the bottom bar) while a
+' match is selected, and says what it found; Y N A are FIND_REPL,
+' FIND_FWD, FIND_ALL (another key: 0, FIND_STOP)
+proc doreplace
+  call dofind
+  if f then
+    a$ = rs$ : am = 40
+    call ask(p"Replace with: ")
+    if ok then
+      rs$ = a$ : call setstr(a$, {msg}) : sys {wp_find}, FIND_SETR
+      do while f
+        getkey m$
+        ' (INSTR apart: it uses $02-$04, where SYS has put its address)
+        i = instr(p"yna", chr$(asc(m$) and 127))
+        sys {wp_find}, i : rreg f
+      loop
     endif
   endif
 endproc
@@ -275,13 +308,14 @@ proc importtext
       else
         sys {wp_get}, GET_PREP
         dopen#2, (a$)
-        ' 1 KB at a time until the end of the file (past it the drive gives
-        ' CRs, which the import trims) or the scratch area's end (30 KB)
+        ' 512 bytes at a time until the end of the file (past it the drive
+        ' gives CRs, which the import trims) or the scratch area's end (59
+        ' of them: 30208 bytes; the clipboard is next)
         p = 0
         do
-          fread#2, $57600 + p * 1024, 1024
+          fread#2, $57600 + p * 512, 512
           p = p + 1
-        loop until st <> 0 or p >= 30
+        loop until st <> 0 or p >= 59
         dclose#2
         ' (Markdown: by MDIMPORT.OVL, loaded last: drawing overwrites it)
         if fk then call loadmod
@@ -358,6 +392,11 @@ proc loadlist
   trap nolist
   bload "list.ovl", b0, p({mod_area} + LIST_OFS)
 listback:
+  ' (and once, EDIT.OVL: undo, find and replace, which the C half keeps in
+  ' colour RAM)
+  trap noedit
+  if ed = 0 then ed = 1 : bload "edit.ovl", b0, p({mod_area})
+listback2:
   trap errh
   sys {wp_get}, GET_LISTOK : rreg lv
 endproc
@@ -437,6 +476,10 @@ endproc
 ' no LIST.OVL
 nolist:
   resume listback
+
+' no EDIT.OVL
+noedit:
+  resume listback2
 
 ' no module file (mf$)
 nomd:

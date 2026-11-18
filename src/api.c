@@ -1,9 +1,11 @@
 /* api.c — the functions the BASIC program calls (SYS {name}, a, x, y)
  *
  *   wp_init          the graphics screen on; the first time, the demo document
- *   wp_key(k)        an editing key (its PETSCII code from GET): text, RETURN,
- *                    DEL, INST, the cursor keys, HOME, CLR, TAB
+ *   wp_key(k)        a key (its PETSCII code from GET): text, RETURN, DEL,
+ *                    INST, the cursor keys, HOME, CLR, TAB, the F-keys' and
+ *                    CTRL's commands; those BASIC does: its ACT_... (else 0)
  *   wp_cmd(c)        a command (CMD_...: styles, view, selection, clipboard, ...)
+ *   wp_find(op)      find and replace: FIND_... (the strings poked into msg)
  *   wp_get(w)        a value for BASIC (RREG lo, hi): GET_... (files: the
  *                    image, plain text or Markdown at SCRATCH_LIN; Markdown
  *                    by the modules MDIMPORT.OVL / MDEXPORT.OVL, RTF by RTF.OVL: 65535
@@ -37,6 +39,7 @@
 #define CMD_ALL 18
 #define CMD_CLEAN 20
 #define CMD_LIST 21
+#define CMD_UNDO 22
 #define CMD_STYLE 32             /* + a kind (K_...): doc_style */
 
 #define GET_DIRTY 0
@@ -56,6 +59,16 @@
 #define GET_RTFEND 14
 #define GET_FONTS 15
 #define GET_KIND 16              /* the kind of the cursor's (the selection's first) paragraph */
+
+/* what wp_key leaves to BASIC (its ON ... GOSUB) */
+#define ACT_HELP 1                 /* F8, HELP */
+#define ACT_COPY 2                 /* F10 */
+#define ACT_STYLE 3                /* CTRL+D: the style drop-down */
+#define ACT_REDRAW 4               /* CTRL+L */
+#define ACT_ESC 5                  /* ESC: the menu */
+#define ACT_FIND 6                 /* CTRL+F */
+#define ACT_REPLACE 7              /* CTRL+H */
+#define ACT_SAVE 8                 /* CTRL+W: save, asking only for a new name */
 
 static u8 started;
 u8 mod_cmd;
@@ -89,6 +102,7 @@ void wp_init(void) {
 }
 
 static void after_move(void) {
+    u_open = 0;                 /* (an edit after a move: undone on its own) */
     if (!sel_on) typing_attr = attr_at_cursor();
 }
 
@@ -148,6 +162,8 @@ static void say(const char *m) {
     msg[i] = 0;
 }
 
+static const char ed_need[] = "No EDIT.OVL.";
+
 static void typed(u8 c) {
     if (doc_type(c)) say("The document is full.");
 }
@@ -175,8 +191,41 @@ void font_install(void) {
     mem_copy(HI_LIN, SCRATCH_LIN + font_lo_size, font_hi_size);
 }
 
-void wp_key(u8 k) {
-    u8 c, relayout = 0, mv = 1;
+void wp_cmd(u8 c);
+u16 wp_find(u8 op);
+
+/* Keys that are commands, and what each is: a command (CMD_...), or one BASIC
+ * does (K_BAS | ACT_..., from 1); K_CTRL: only with CTRL held, which gives
+ * codes some F-keys give too (so first). CTRL+B / I / U / Z bold, italic,
+ * underline, undo; CTRL+F / H / W find, replace, save; F1 view, F3 / F5 /
+ * F7 bold / italic / underline, F2 font, F4 align, F6 page break, F9 mark,
+ * F11 cut, F12 paste, F13 / F14 page up / down; F8, HELP the help, F10
+ * copy, CTRL+D the style drop-down, CTRL+L redraw, ESC the menu.
+ * (SHIFT+CTRL+F / B: the next match, the one before.) */
+#define K_CTRL 0x40
+#define K_BAS 0x80
+static const u8 keys[] = {
+    2, K_CTRL | CMD_BOLD, 9, K_CTRL | CMD_ITALIC, 0x15, K_CTRL | CMD_UNDER, 0x1A, K_CTRL | CMD_UNDO,
+    6, K_CTRL | K_BAS | ACT_FIND, 8, K_CTRL | K_BAS | ACT_REPLACE, 0x17, K_CTRL | K_BAS | ACT_SAVE,
+    0x85, CMD_VIEW, 0x86, CMD_BOLD, 0x87, CMD_ITALIC, 0x88, CMD_UNDER, 0x89, CMD_FONT, 0x8A, CMD_ALIGN,
+    0x8B, CMD_PAGEBREAK, 0x10, CMD_MARK, 0x16, CMD_CUT, 0x17, CMD_PASTE, 0x19, CMD_PGUP, 0x1A, CMD_PGDN,
+    0x8C, K_BAS | ACT_HELP, 0x84, K_BAS | ACT_HELP, 0x15, K_BAS | ACT_COPY, 0x04, K_BAS | ACT_STYLE,
+    0x0C, K_BAS | ACT_REDRAW, 0x1B, K_BAS | ACT_ESC,
+};
+
+u8 wp_key(u8 k) {
+    u8 c, relayout = 0, mv = 1, m = kbd_mods(), v;
+    if ((m & KM_CTRL) && (m & KM_SHIFT) && (k == 6 || k == 2)) {
+        wp_find(k == 2 ? FIND_BACK : FIND_FWD);
+        return 0;
+    }
+    for (c = 0; c < sizeof keys; c += 2) {
+        v = keys[c + 1];
+        if (k != keys[c] || ((v & K_CTRL) && !(m & KM_CTRL))) continue;
+        if (v & K_BAS) return v & 0x0F;
+        wp_cmd(v & 0x3F);
+        return 0;
+    }
     msg[0] = 0;
     if (compose || k == K_COMPOSE) {
         c = petscii_to_ascii(k);
@@ -193,11 +242,11 @@ void wp_key(u8 k) {
         }
         if (compose) say("Compose");
         refresh(1);
-        return;
+        return 0;
     }
     if (is_crsr(k)) {
         if (!ctrl_key) {
-            if (kbd_mods() & KM_CTRL) return;
+            if (m & KM_CTRL) return 0;
         } else if (!sel_on) {
             sel_on = 1;
             sel_anchor = cur;
@@ -249,7 +298,7 @@ void wp_key(u8 k) {
         break;
     default:
         c = petscii_to_ascii(k);
-        if (!c) return;
+        if (!c) return 0;
         typed(c);
         relayout = 1;
         mv = 0;
@@ -257,12 +306,14 @@ void wp_key(u8 k) {
     }
     if (mv && !relayout) after_move();
     refresh(relayout);
+    return 0;
 }
 
 void wp_cmd(u8 c) {
     u8 relayout = 1;
     u16 l;
     msg[0] = 0;
+    u_open = 0;                 /* (each command an edit of its own) */
     switch (c) {
     case CMD_BOLD: doc_toggle(A_BOLD); break;
     case CMD_ITALIC: doc_toggle(A_ITAL); break;
@@ -329,6 +380,10 @@ void wp_cmd(u8 c) {
         dirty = 0;
         relayout = 0;
         break;
+    case CMD_UNDO:
+        l = edit_run(ED_UNDO);
+        if (l) say(l == 1 ? "Nothing to undo." : ed_need);
+        break;
     case CMD_LIST:              /* list mode (LIST.OVL) on / off */
         if (list_ok) list_on ^= 1;
         render_invalidate();
@@ -342,26 +397,38 @@ void wp_cmd(u8 c) {
     refresh(relayout);
 }
 
+/* a file's image or an export in the scratch area n bytes long (0: all of
+ * it): past UNDO_OFS, undo's buffer is gone */
+static u16 scratched(u16 n) {
+    if (!n || n > UNDO_OFS) u_have = 0;
+    return n;
+}
+
 u16 wp_get(u8 w) {
     switch (w) {
     case GET_DIRTY: return dirty;
     case GET_LEN: return doc_len;
-    case GET_PACK: return doc_pack();
-    case GET_EXPORT: return doc_export();
-    case GET_UNPACK: {
-        u8 r = doc_unpack();
+    case GET_PACK: return scratched(doc_pack());
+    case GET_EXPORT: return scratched(doc_export());
+    case GET_UNPACK: {          /* (the file BLOADed over undo's buffer) */
+        u8 r;
+        u_have = 0;
+        r = doc_unpack();
         refresh(1);
         return r;
     }
     case GET_SEL: return sel_on;
     case GET_IMPORT_PREP:
-        mem_fill(SCRATCH_LIN, 30720u, 0);       /* (all the scratch area: Markdown is longer) */
+        u_have = 0;
+        mem_fill(SCRATCH_LIN, SCRATCH_MAX, 0);       /* (all the scratch area: Markdown is longer) */
         return 0;
-    case GET_MDEXPORT: return mod_run(MOD_MD_EXPORT);
-    case GET_RTFEXPORT: return mod_run(MOD_RTF_EXPORT);
+    case GET_MDEXPORT: return scratched(mod_run(MOD_MD_EXPORT));
+    case GET_RTFEXPORT: return scratched(mod_run(MOD_RTF_EXPORT));
     case GET_RTFBEGIN: return mod_run(MOD_RTF_BEGIN);
     case GET_RTFCHUNK: return mod_run(MOD_RTF_CHUNK);
-    case GET_LISTOK: return list_check();
+    case GET_LISTOK:            /* (and EDIT.OVL, loaded at mod_area) */
+        edit_keep();
+        return list_check();
     case GET_FONTS: font_install(); return 0;
     case GET_KIND: return cur_kind();
     case GET_IMPORT:
@@ -382,6 +449,21 @@ static void to_ascii(char *s, u8 max) {
         s[i] = (char)(c ? c : '?');
     }
     s[i] = 0;
+}
+
+/* find and replace: op FIND_... (SETF / SETR: msg as the string); 1 when
+ * a match is selected (EDIT.OVL says what it found, in msg) */
+u16 wp_find(u8 op) {
+    u16 r;
+    if (op >= FIND_SETF) to_ascii(msg, FIND_MAX);
+    else u_open = 0;
+    r = edit_run(op);
+    if (r == 0xFFFF) {
+        say(ed_need);
+        r = 0;
+    }
+    refresh(1);
+    return r;
 }
 
 void wp_setmsg(void) {

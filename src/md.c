@@ -321,7 +321,7 @@ static void block_start(void) {
 }
 
 /* a paragraph of kind k starts */
-static void para_start(u8 k) {
+static void md_para(u8 k) {
     para_open = 1;
     pstart = b_n;
     pk = k;
@@ -522,7 +522,7 @@ u16 md_import(void) {
             }
             if (fence == 1) block_start();
             fence = 2;
-            para_start(K_CODE);
+            md_para(K_CODE);
             code = 1;
             for (e = ls; e < le; e++) {
                 c = in(e);
@@ -582,7 +582,7 @@ u16 md_import(void) {
                 for (e = le; e > j && in(e - 1) == ' '; e--) ;
                 for (t = e; t > j && in(t - 1) == '#'; t--) ;
                 if (t < e && (t == j || in(t - 1) == ' ')) e = t;
-                para_start((u8)(n > 3 ? K_H3 : n));
+                md_para((u8)(n > 3 ? K_H3 : n));
                 inline_md(skip((u16)(j + n), ' '), e);
                 end_para();
                 after_head = 1;
@@ -618,12 +618,12 @@ u16 md_import(void) {
                 while (lv && sp < lv_sp[lv]) lv--;
             }
             item = 1;
-            para_start((u8)((c <= '9' && c >= '0' ? K_NUMBER : K_BULLET) | (lv << A_LEVEL_SHIFT)));
+            md_para((u8)((c <= '9' && c >= '0' ? K_NUMBER : K_BULLET) | (lv << A_LEVEL_SHIFT)));
             j = skip((u16)(j + n), ' ');
         } else if (!para_open) {
             /* a new paragraph */
             block_start();
-            para_start(q ? K_QUOTE : K_NORMAL);
+            md_para(q ? K_QUOTE : K_NORMAL);
         } else if (hard) {
             /* after a hard break: a paragraph with no empty one before it */
             line_break();

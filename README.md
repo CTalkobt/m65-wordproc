@@ -32,8 +32,10 @@ help: a Writer document shown when the program starts and again with F8 / HELP;
 without it the program starts with an empty document), `MDIMPORT.OVL` and
 `MDEXPORT.OVL` (Markdown import and export, modules: without them the rest
 works, and a `.md` name gets "Markdown needs MDIMPORT.OVL on the disk"),
-`RTF.OVL` (RTF import and export, the same for `.rtf`) and `LIST.OVL`
-(list mode, a module: without it the menu does not offer it).
+`RTF.OVL` (RTF import and export, the same for `.rtf`), `LIST.OVL`
+(list mode, a module: without it the menu does not offer it) and
+`EDIT.OVL` (undo, find and replace, and the styles: without it those do
+nothing, or say "No EDIT.OVL.").
 
 `tools/xemu_run.py` runs it headless in xemu, types keys into the KERNAL's
 keyboard buffer and saves a screenshot, e.g.
@@ -49,13 +51,18 @@ keyboard buffer and saves a screenshot, e.g.
 | cursor keys | move; HOME line start/end; CLR document start/end |
 | F13 / F14 | page up / down |
 | F1 | page layout / raw view |
-| F3 / F5 / F7 | bold / italic / underline |
+| F3 / F5 / F7, or CTRL+B / CTRL+I / CTRL+U | bold / italic / underline |
 | F2 | font: Sans, Serif, Mono, Head |
 | F4 | paragraph alignment: left, centre, right, justify |
 | F6 | page break |
 | F9 | start / end a selection (move the cursor to extend it) |
 | CTRL + cursor keys | start a selection at the cursor, or extend the one there is |
 | F10 / F11 / F12 | copy / cut / paste |
+| CTRL+Z | undo the last edit; again: redo it (below) |
+| CTRL+F | find (below) |
+| SHIFT+CTRL+F / SHIFT+CTRL+B | find the next / the one before |
+| CTRL+H | find and replace (below) |
+| CTRL+W | save, under the document's name (asking only when it has none) |
 | F8 or HELP | the help (`WRITER.HELP`) as the document (after asking about unsaved changes) |
 | ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text; Markdown for a name ending in `.md`, RTF for `.rtf`), Directory; Redraw, List on / off (with `LIST.OVL`), Help, Quit (ESC also ends a selection) |
 | CTRL+D | the style drop-down (below) |
@@ -96,6 +103,25 @@ ESC leaves it).
   next item, and RETURN on an empty item takes it out a level, so twice
   ends the list. A list changed to the other kind keeps its levels.
 
+**Undo** (CTRL+Z) takes back the last edit: what was typed (with its DELs)
+since the cursor last moved, or one command (a style, a cut, a paste, a
+replace-all). CTRL+Z again does it again, so it also redoes. It keeps the
+text the edit replaced, up to 3700 characters: a longer cut, say, can't
+be undone ("Nothing to undo."). A new document, a load or an import
+leaves nothing to undo, and so does a save, export or load whose file is
+larger than about 22 KB (it needs the scratch area where undo keeps its
+copy).
+
+**Find** (CTRL+F) asks for the text (up to 40 characters; letters match
+either case, the accented ones only as they are), and selects the next
+place it is, from the cursor, going round from the document's end to its
+start. SHIFT+CTRL+F finds the next, SHIFT+CTRL+B the one before.
+**Replace** (CTRL+H) asks for the text and what to put instead, then for
+each place found asks "Replace? Y)es N)o A)ll": Y replaces it (in the
+style of its first character) and finds the next, N finds the next, A
+replaces it and every other in the document (then says how many), another
+key stops. An empty replacement deletes what is found.
+
 **List mode** (ESC T; [#2](https://github.com/CTalkobt/m65-wordproc/issues/2)),
 as vi's `:set list`, shows the text's invisible structure in either view,
 without moving any of it: a dot for each space, ¶ at each paragraph's end
@@ -132,6 +158,8 @@ letter with its accent), in `WRITER.FNT`.
 | `src/md.c` | C | Markdown export and import (below): the modules `MDEXPORT.OVL` and `MDIMPORT.OVL` (`MD_PART` 1, 2) |
 | `src/rtf.c` | C | RTF export and (streamed) import: the module `RTF.OVL` |
 | `src/list.c` | C | list mode's markers: the module `LIST.OVL` |
+| `src/edit.c`, `src/edit_undo.c` | C | undo, find and replace, the styles: the module `EDIT.OVL` |
+| `src/modcall.s45` | asm | the jump into `EDIT.OVL` (and, for ln45's call graph, what it calls) |
 | `src/api.c` | C | the functions BASIC calls with `SYS {name}, a` (and reads with `RREG`) |
 | `tools/helpdoc.c`, `tools/mkhelp.c` | C (host) | the help document, written as a Writer file by the C half itself |
 | `tools/mkmod.py` | Python | links a module against the program (below) |
@@ -167,6 +195,21 @@ the room for it. Two kinds:
   line it draws, after the line's text and before its cursor, with the
   line in `hk_l` / `hk_L`; it XORs its markers into the band. A feature
   that changes what keys do (undo) still belongs in the program.
+- **Kept, copied in for each call**: undo, find and replace, and the
+  styles (`EDIT.OVL`, from `src/edit.c` and `src/edit_undo.c`; 4.2 KB).
+  BASIC `BLOAD`s it into `mod_area` at the start (with `LIST.OVL`), and
+  the C half keeps a copy in colour RAM (`edit_keep`). Each call
+  (`edit_run`: every edit notes for undo what it will change, so every
+  key that edits makes one) copies it into `mod_area`, up to `LIST.OVL`,
+  by DMA and runs it: about 6 KB of DMA, well under a millisecond. Its
+  first 2805 bytes there are buffers the drawing uses only while it draws
+  (the band, the layout's new lines, the menu's text, ...: `MOD_SCRATCH`);
+  the rest, the drawing's caches, go to colour RAM meanwhile and come
+  back after, so nothing is drawn again for it. It keeps nothing of its
+  own (it is copied anew each time): its state is `doc.c`'s. The editing
+  it does (deleting and inserting for a replace) uses the program's
+  functions that note nothing (`del_raw`, `room`): it notes its own
+  changes, and must not call back into itself.
 
 - **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6016 bytes in
   bank 0), which is also where the drawing keeps its buffers and caches
@@ -274,9 +317,9 @@ the C64's. Each cell has its own colour (text, desk, tags, bars).
 | `$4D000` | 12 KB | the line table (1024 lines) |
 | `$50000` | 15000 | document text |
 | `$53B00` | 15000 | document attributes |
-| `$57600` | 30 KB | scratch: insertion bounce buffer, file image, text and Markdown files |
+| `$57600` | 29.5 KB | scratch (to the clipboard): insertion bounce buffer, file image, text and Markdown files; its last 7400 bytes (`$5CF18`) undo's copy of what the last edit replaced |
 | `$5EC00` | 5 KB | clipboard |
-| `$FF83000` | 20 KB | colour RAM past the screen's cells (`$FF81000`-`$FF82F3F`): `WRITER.FNT`'s second part, Sans, Serif and Mono (12 KB) |
+| `$FF83000` | 20 KB | colour RAM past the screen's cells (`$FF81000`-`$FF82F3F`): `WRITER.FNT`'s second part, Sans, Serif and Mono (12 KB); then (`$FF86020`) the find and replace strings, the drawing's caches while `EDIT.OVL` runs, and `EDIT.OVL` (`$FF86680`) |
 
 ### Files
 
@@ -386,7 +429,8 @@ can be.
 
 - 15000 characters (about 2500 words) and 1024 laid-out lines a document;
   a 2560-character clipboard; imported text up to 14 KB, Markdown 30 KB.
-- No undo, no printing (yet).
+- One level of undo (the last edit, up to 3700 characters of what it
+  replaced); no printing (yet).
 
 ## MEGA65 details worth knowing
 
@@ -394,6 +438,18 @@ can be.
   the Editor's lock bit (bit 5 of `$F7`) is set. `KEY OFF` sets it, but first
   waits for a pending macro (`$D1`) to drain, which never happens in a running
   program; the program sets the bit itself.
+- **CTRL + letters** come from `GET` as codes 1-26, some of them the
+  F-keys' too: CTRL+U is F10's `$15`, CTRL+W F12's `$17`, CTRL+Z F14's
+  `$1A`, CTRL+I TAB's 9, CTRL+H 8. So the C half (`wp_key`, its `keys`
+  table) takes those as CTRL's only while CTRL is held (`$D611`), and
+  SHIFT+CTRL+F / B come through as CTRL+F / B with SHIFT held.
+- **`SYS addr, INSTR(...)`** (a ROM bug): SYS puts its address in the
+  KERNAL's far-call registers `_bank`, `_pchi`, `_pclo` (`$02`-`$04`)
+  first, and then evaluates the register arguments. INSTR keeps its
+  `positn`, `match` and `regexp` in those same bytes (`b65.src`), so SYS
+  then jumps to wherever INSTR left them (the screen garbled, the keys
+  ignored). Work the INSTR out into a variable first. Other functions that
+  use `$02`-`$04` would do the same as a SYS argument.
 - **CTRL + cursor keys**: the keyboard's PETSCII table has no code for CTRL
   with cursor right or down, so the KERNAL never queues them; CTRL with left
   or up (the MEGA65's own keys, which the hardware sends as SHIFT + right /
@@ -432,7 +488,16 @@ can be.
   (4944 bytes) and export (1871), so the largest module (it was Markdown's
   6713 bytes with lists) no longer sets `MOD_SIZE`: the drawing's buffers
   and `LIST.OVL` do (4288 + 1728), and it went from 6400 to 6016 bytes. The
-  C data now ends at `$BD00`, leaving 768 bytes for the CPU stack. (Its
+  C data then ended at `$BD00`, leaving 768 bytes for the CPU stack. Undo,
+  find and replace (#4) went into a module (`EDIT.OVL`, above) with the
+  styles' code (1.2 KB of the program): what is left in the program (the
+  key table, `edit_run`, the notes in each edit) and the build without
+  tail calls (below) took 330 bytes, so the C data ends at `$BE00`, and
+  the stack has 512 bytes. That is plenty: cc45 keeps the variables in
+  static storage, not on the stack, and filled with a pattern then run
+  through typing, find and replace, undo, the style drop-down, a Markdown
+  export and list mode in xemu, the stack never went deeper than 32
+  bytes. (The BASIC program's
   two `poke`s of `$D1` / `$F7` are written in decimal: `--minify` turns
   `poke $d1` into a variable,
   [M65Compiler #603](https://github.com/CTalkobt/M65Compiler/issues/603).)
@@ -445,6 +510,21 @@ can be.
   rather than field by field: with cc45 each far `LINES[l].field` costs
   about 60 bytes of code
   ([M65Compiler #585](https://github.com/CTalkobt/M65Compiler/issues/585)).
+- **ln45 and tail calls**: ln45 places functions' static variables and
+  base-page blocks so that two functions share bytes only when neither
+  reaches the other through calls; for that it counts JSRs and JMPs. But
+  the call graph in its map, and its recursion, thunk and clobber checks,
+  count JSRs only, so a tail call (ca45 makes a JSR followed by RTS a JMP)
+  is missing there: a recursion through one links without the "recursive"
+  error ([M65Compiler #615](https://github.com/CTalkobt/M65Compiler/issues/615)).
+  `tools/mkmod.py` reads the map's graph to find the functions waiting at a
+  call into a module (`ed`'s `jmp edit_run`), so the Makefile compiles with
+  `-fno-tail-call-optimization` (it costs nothing here: the code came out
+  a few bytes smaller). A call ln45 cannot see at all, into a module, is
+  worse: nothing keeps the module's callees apart from the functions
+  waiting for it. `src/modcall.s45`'s JSRs tell ln45 what `EDIT.OVL`
+  calls, and mkmod.py checks every module: no function waiting while it
+  runs may share static storage with one it calls.
 - **cc45 and array members**: before M65Compiler master `a7191e09`, cc45
   kept only the low byte of an array member's address when an integer was
   added to it (`s.a + n`: the pointer landed in page 0;
