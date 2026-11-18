@@ -59,8 +59,8 @@
 ' LIST.OVL's place: mod_area + LIST_OFS (wp.h)
 #define LIST_OFS 4288
 
-' the file image's place: bank 5, $7600 (SCRATCH_LIN in wp.h)
-#define IMG 30208
+' the file image's place: bank 5, $0000 (SCRATCH_LIN in wp.h)
+#define IMG 0
 
 start:
   print chr$(14);
@@ -68,7 +68,9 @@ start:
   ' codes 32-128 to bank 4 (FONT_LIN in wp.h) and the Latin-1 ones and the
   ' compose table to colour RAM (HI_LIN)
   bank 0 : fl = peek({fonts_loaded}) : bank 128
-  if fl <> 165 then print p"Loading fonts..." : bload "writer.fnt", b5, p(IMG) : sys {wp_get}, GET_FONTS : bank 0 : poke {fonts_loaded}, 165 : bank 128
+  if fl <> 165 then print p"Loading fonts..." : bload "writer.fnt", b5, p(IMG) : sys {wp_get}, GET_FONTS : rreg r : bank 0 : poke {fonts_loaded}, 165 : bank 128
+  ' (the text is in attic RAM: none, no Writer)
+  if r then print p"No attic RAM." : end
   ' F-keys give their codes, not their KEY macros: the Editor's lock bit
   ' (bit 5 of locks, $F7) as KEY OFF sets it, without KEY's wait for a
   ' pending macro ($D1) to drain, which never ends in a running program
@@ -309,13 +311,13 @@ proc importtext
         sys {wp_get}, GET_PREP
         dopen#2, (a$)
         ' 512 bytes at a time until the end of the file (past it the drive
-        ' gives CRs, which the import trims) or the scratch area's end (59
-        ' of them: 30208 bytes; the clipboard is next)
+        ' gives CRs, which the import trims) or the scratch area's end (118
+        ' of them: 60416 bytes; the clipboard is next)
         p = 0
         do
-          fread#2, $57600 + p * 512, 512
+          fread#2, $50000 + p * 512, 512
           p = p + 1
-        loop until st <> 0 or p >= 59
+        loop until st <> 0 or p >= 118
         dclose#2
         ' (Markdown: by MDIMPORT.OVL, loaded last: drawing overwrites it)
         if fk then call loadmod
@@ -341,7 +343,7 @@ proc rtfin
     if lo <> 255 or hi <> 255 then
       dopen#2, (a$)
       do
-        fread#2, $57600, 1024
+        fread#2, $50000, 1024
         s = st
         sys {wp_get}, GET_RTFCHUNK
       loop until s <> 0
@@ -368,11 +370,11 @@ proc exporttext
     endif
     n = lo + 256 * hi
     call modsaid
-    if ok and n = 0 then call say(p"Too long for " + mn$ + p" (more than 30 KB).") : ok = 0
+    if ok and n = 0 then call say(p"Too long for " + mn$ + p" (more than 59 KB).") : ok = 0
     if ok then
       scratch (a$)
       dopen#2, (a$), w
-      fwrite#2, $57600, n
+      fwrite#2, $50000, n
       dclose#2
       sys {wp_video}, 1
       call say(p"Exported " + mid$(str$(n), 2) + p" bytes to " + a$ + ".")

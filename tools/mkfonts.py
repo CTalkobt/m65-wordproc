@@ -243,7 +243,7 @@ def main():
         out.write("/* writer.fnt's two parts (font_install) */\n")
         out.write("const u16 font_lo_size = %d, font_hi_size = %d;\n" % (len(parts[0][2]), len(parts[1][2])))
     with open(fnt_path, "wb") as f:
-        f.write(bytes([0x00, 0x76]))        # a PRG's load address ($7600: SCRATCH_LIN in bank 5)
+        f.write(bytes([0x00, 0x00]))        # a PRG's load address ($0000: SCRATCH_LIN in bank 5)
         f.write(parts[0][2])
         f.write(parts[1][2])
     print("%s, %s: %d + %d bytes" % (out_path, fnt_path, len(parts[0][2]), len(parts[1][2])))

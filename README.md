@@ -12,6 +12,10 @@ Text is shown on a 640 × 400 bitmap in proportional fonts, so fonts, **bold**,
   formatting codes revealed as coloured tags (`[B]` … `[/B]`, `[Serif]`,
   `[Center]`, `[Page]`) and paragraph marks (¶). You can edit in either view.
 
+It needs a MEGA65 with attic RAM (the 8 MB HyperRAM at `$8000000`), where
+the document is kept; without it, it stops at the start with "No attic
+RAM." xemu emulates it.
+
 ## Building and running
 
 Needs the cc45 toolchain (M65Compiler: `basic45`, `cc45`, `disk45`), by
@@ -107,11 +111,11 @@ ESC leaves it).
 **Undo** (CTRL+Z) takes back the last edit: what was typed (with its DELs)
 since the cursor last moved, or one command (a style, a cut, a paste, a
 replace-all). CTRL+Z again does it again, so it also redoes. It keeps the
-text the edit replaced, up to 3700 characters: a longer cut, say, can't
+text the edit replaced, up to 10000 characters: a longer cut, say, can't
 be undone ("Nothing to undo."). A new document, a load or an import
-leaves nothing to undo, and so does a save, export or load whose file is
-larger than about 22 KB (it needs the scratch area where undo keeps its
-copy).
+leaves nothing to undo, and so does an export whose file is larger than
+about 39 KB (it needs the scratch area where undo keeps its copy; a saved
+document is at most 30 KB).
 
 **Find** (CTRL+F) asks for the text (up to 40 characters; letters match
 either case, the accented ones only as they are), and selects the next
@@ -151,7 +155,7 @@ letter with its accent), in `WRITER.FNT`.
 | Part | Language | Does |
 |------|----------|------|
 | `src/wp.bas` | BASIC 65 | the main loop (GET and what each key means; idle time handed to C), the menu, file-name prompts and confirmations, all disk work (`BLOAD` / `BSAVE` documents and fonts, `DOPEN` + `FREAD#` / `FWRITE#` text and Markdown import and export, `DIR`), loading the help document, error trapping |
-| `src/doc.c` | C | the document: two parallel arrays in bank 5 (text, an attribute byte per character), insert and delete by DMA, styles, alignment, clipboard, the file image |
+| `src/doc.c` | C | the document: two parallel arrays in attic RAM (text, an attribute byte per character), insert and delete by DMA, styles, alignment, clipboard, the file image |
 | `src/layout.c` | C | line breaking for both views, justification, pagination, raw-view tags, cursor ↔ position mapping; incremental and lazy (below) |
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
 | `src/m65.c` | C | the VIC-IV screen mode, DMA and colour RAM |
@@ -186,7 +190,7 @@ the room for it. Two kinds:
   row (a command with `MOD_MORE`: `mod_run` then leaves it and the drawing's
   caches alone, as they share its memory): RTF import is streamed that way,
   1 KB of the file a call, as files from other word processors are often
-  larger than the 30 KB scratch area.
+  larger than the 59 KB scratch area.
 - **Resident**, loaded at the start and called while drawing: list mode
   (`LIST.OVL`, from `src/list.c`). It lives in `mod_area`'s last
   `LIST_SIZE` bytes (`LIST_OFS`, past the drawing's buffers), so it too
@@ -298,7 +302,10 @@ the room for it. Two kinds:
 About 10 ms a key in a short document and 80 ms in one of 10,000
 characters (40 MHz, measured in xemu), and some 5-8 % more since the
 layout is compiled with `-O1` and the raw font is fetched by DMA (to make
-room for Markdown).
+room for Markdown). These are from before the document moved to attic
+RAM, which xemu does not slow down as the HyperRAM does: on a real MEGA65
+the layout's reads of the text (a 32-bit `lda [bp],z` each) and the DMA
+copies of insertions take longer.
 
 ### The screen
 
@@ -316,10 +323,10 @@ the C64's. Each cell has its own colour (text, desk, tags, bars).
 | `$48000` | 8000 | the screen (16-bit cells) |
 | `$4A000` | 12 KB | `WRITER.FNT`'s first part: Head's glyphs and records, the raw font, the compose table |
 | `$4D000` | 12 KB | the line table (1024 lines) |
-| `$50000` | 15000 | document text |
-| `$53B00` | 15000 | document attributes |
-| `$57600` | 29.5 KB | scratch (to the clipboard): insertion bounce buffer, file image, text and Markdown files; its last 7400 bytes (`$5CF18`) undo's copy of what the last edit replaced |
+| `$50000` | 59 KB | scratch (to the clipboard): insertion bounce buffer, file image, text and Markdown files; its last 20000 bytes (`$59DE0`) undo's copy of what the last edit replaced |
 | `$5EC00` | 5 KB | clipboard |
+| `$8000000` | 15000 | attic RAM: document text |
+| `$8010000` | 15000 | attic RAM: document attributes |
 | `$FF83000` | 20 KB | colour RAM past the screen's cells (`$FF81000`-`$FF82F3F`): `WRITER.FNT`'s second part, Sans, Serif and Mono (12 KB); then (`$FF86020`) the find and replace strings, the drawing's caches while `DEFAULT0.OVL` runs, and `DEFAULT0.OVL` (`$FF86680`) |
 
 ### Files
@@ -338,7 +345,7 @@ in `.md`, RTF for `.rtf`.
 ### Markdown
 
 Export (`src/md.c`, `md_export`, in the module `MDEXPORT.OVL`) writes
-UTF-8 with LF line ends; Import reads it back (up to 30 KB) and Markdown
+UTF-8 with LF line ends; Import reads it back (up to 59 KB) and Markdown
 from elsewhere.
 
 | Writer | Markdown |
@@ -429,8 +436,8 @@ can be.
 ## Limits
 
 - 15000 characters (about 2500 words) and 1024 laid-out lines a document;
-  a 2560-character clipboard; imported text up to 14 KB, Markdown 30 KB.
-- One level of undo (the last edit, up to 3700 characters of what it
+  a 2560-character clipboard; imported text up to 14 KB, Markdown 59 KB.
+- One level of undo (the last edit, up to 10000 characters of what it
   replaced); no printing (yet).
 
 ## MEGA65 details worth knowing

@@ -1,5 +1,5 @@
 /* mkhelp.c — writes WRITER.HELP, the help document (shown at the start), as the
- * BASIC program's BSAVE would: a PRG (load address $7600, SCRATCH_LIN's in
+ * BASIC program's BSAVE would: a PRG (load address $0000, SCRATCH_LIN's in
  * bank 5) holding doc_pack's image
  *
  *   build/mkhelp build/help.prg

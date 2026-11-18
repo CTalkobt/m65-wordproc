@@ -403,7 +403,7 @@ static void test_edit(void) {
     }
     /* a cut longer than undo can keep: nothing to undo */
     wp_cmd(13);
-    for (i = 0; i < 80; i++) type("Fifty characters of text to fill the document up..");
+    for (i = 0; i < 210; i++) type("Fifty characters of text to fill the document up..");
     wp_cmd(18);
     wp_cmd(11);
     ctrl(0x1A, 0);

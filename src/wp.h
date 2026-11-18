@@ -33,18 +33,25 @@ typedef uint32_t u32;
  * bank 4: $40000 the bitmap (4000 glyphs x 8 bytes), $48000 the screen
  *         (80 x 50 x 2), $4A000 writer.fnt's first part (font_install), $4D000
  *         the layout's line table
- * bank 5: $50000 the text, $53B00 the attributes, $57600 the scratch area
- *         (insertions' bounce buffer; the file image BSAVE writes), $5EC00
- *         the clipboard (text, then attributes) */
+ * bank 5: $50000 the scratch area (insertions' bounce buffer; the file
+ *         image BSAVE writes; undo's buffer at its end), $5EC00 the
+ *         clipboard (text, then attributes)
+ * attic RAM (the MEGA65's 8 MB HyperRAM at $8000000): the text, and 64 KB
+ *         on the attributes (the host: bank 3, past HI_LIN's 20 KB) */
 #define BITMAP_LIN  0x40000UL
 #define SCREEN_LIN  0x48000UL
 #define FONT_LIN    0x4A000UL
 #define LINES_LIN   0x4D000UL
-#define TEXT_LIN    0x50000UL
-#define ATTR_LIN    0x53B00UL
-#define SCRATCH_LIN 0x57600UL
+#ifdef __cc45__
+#define TEXT_LIN    0x8000000UL
+#define ATTR_LIN    0x8010000UL
+#else
+#define TEXT_LIN    0x36000UL
+#define ATTR_LIN    0x3A000UL
+#endif
+#define SCRATCH_LIN 0x50000UL
 #define CLIP_LIN    0x5EC00UL
-#define SCRATCH_MAX 30208u      /* the scratch area's size: SCRATCH_LIN to CLIP_LIN */
+#define SCRATCH_MAX 60416u      /* the scratch area's size: SCRATCH_LIN to CLIP_LIN */
 #define COLOR_OFS   0x1000u     /* our cells' colours in colour RAM ($FF81000-$FF82F3F) */
 /* the Latin-1 glyphs and the compose table: colour RAM's last 20 KB, which
  * every MEGA65 has and nothing else uses (the host: bank 3 of MEM) */
@@ -67,8 +74,8 @@ typedef uint32_t u32;
 #define REPL_LIN  (FIND_LIN + FIND_MAX + 1)
 #define CACHE_LIN (HI_LIN + 0x3080)
 #define EDIT_LIN  (HI_LIN + 0x3680)
-#define UNDO_MAX  3700u
-#define PARK_LIN  (SCRATCH_LIN + 15104)
+#define UNDO_MAX  10000u
+#define PARK_LIN  (SCRATCH_LIN + 15104)  /* (past DOC_MAX; its 2 * UNDO_MAX before UNDO_LIN) */
 #define UNDO_OFS  (SCRATCH_MAX - 2 * UNDO_MAX)
 #define UNDO_LIN  (SCRATCH_LIN + UNDO_OFS)
 

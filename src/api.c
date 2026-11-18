@@ -429,7 +429,10 @@ u16 wp_get(u8 w) {
     case GET_LISTOK:            /* (and DEFAULT0.OVL, loaded at mod_area) */
         edit_keep();
         return list_check();
-    case GET_FONTS: font_install(); return 0;
+    case GET_FONTS:             /* (and whether there is attic RAM, the text's: 0 yes) */
+        font_install();
+        mem_put(TEXT_LIN, 0x5A);
+        return mem_get(TEXT_LIN) ^ 0x5A;
     case GET_KIND: return cur_kind();
     case GET_IMPORT:
     case GET_MDIMPORT:
