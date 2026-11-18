@@ -43,7 +43,7 @@ HEADERS = src/wp.h
 # recursion, thunk and clobber checks) is made from JSRs only, so a tail
 # call (JSR + RTS made a JMP) is missing from it (M65Compiler #615).
 # tools/mkmod.py reads that graph to find what is waiting at a call into a
-# module (EDIT.OVL: ed's tail call to edit_run). ln45's sharing of static
+# module (DEFAULT0.OVL: ed's tail call to edit_run). ln45's sharing of static
 # storage does count JMPs.
 CC45FLAGS = -fno-tail-call-optimization -I$(CC45_ROOT)/lib/include -Isrc -I$(BUILD)
 # --minify: the BASIC program without comments and indentation, its lines
@@ -70,7 +70,7 @@ $(BUILD)/obj/modcall.o45: src/modcall.s45
 # linked by tools/mkmod.py to run at the program's mod_area, against its
 # map (basic45 --map: M65Compiler #595, in master since 6a7dd256); the build's ID (of the sources and the tools) ties each to the
 # program it was linked with (render.c's mod_run refuses another's).
-MODS    = $(BUILD)/mdimport.ovl $(BUILD)/mdexport.ovl $(BUILD)/rtf.ovl $(BUILD)/list.ovl $(BUILD)/edit.ovl
+MODS    = $(BUILD)/mdimport.ovl $(BUILD)/mdexport.ovl $(BUILD)/rtf.ovl $(BUILD)/list.ovl $(BUILD)/default0.ovl
 BUILD_ID := $(shell cat src/*.c src/*.h src/wp.bas tools/mkmod.py $(CC45) $(CC45_ROOT)/bin/ln45 2>/dev/null | cksum | awk '{print $$1 % 65536}')
 
 $(BUILD)/buildid.h: FORCE
@@ -108,7 +108,7 @@ $(BUILD)/list.ovl: $(TARGET) $(BUILD)/obj/list_mod.o45 tools/mkmod.py
 	    --from _draw_line__render,_render_raw__render \
 	    $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/list_mod.o45
 
-# EDIT.OVL: undo, find and replace; BLOADed at the start to mod_area, kept
+# DEFAULT0.OVL: undo, find and replace; BLOADed at the start to mod_area, kept
 # in colour RAM, and copied into mod_area's first EDIT_SIZE bytes (the
 # drawing's buffers) for each call: doc.c's edit_run
 $(BUILD)/obj/edit_mod.o45: src/edit.c $(HEADERS)
@@ -119,7 +119,7 @@ $(BUILD)/obj/edit_undo_mod.o45: src/edit_undo.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
 	$(CC45) -O1 -fno-zp-locals $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
 
-$(BUILD)/edit.ovl: $(TARGET) $(BUILD)/obj/edit_mod.o45 $(BUILD)/obj/edit_undo_mod.o45 tools/mkmod.py
+$(BUILD)/default0.ovl: $(TARGET) $(BUILD)/obj/edit_mod.o45 $(BUILD)/obj/edit_undo_mod.o45 tools/mkmod.py
 	python3 tools/mkmod.py --size EDIT_SIZE --entry _edit_main --from _edit_run \
 	    $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/edit_mod.o45 $(BUILD)/obj/edit_undo_mod.o45
 
@@ -142,7 +142,7 @@ $(DISK): $(TARGET) src/writer.fnt $(BUILD)/help.prg $(MODS)
 	$(DISK45) add $@ $(BUILD)/mdexport.ovl "MDEXPORT.OVL"
 	$(DISK45) add $@ $(BUILD)/rtf.ovl "RTF.OVL"
 	$(DISK45) add $@ $(BUILD)/list.ovl "LIST.OVL"
-	$(DISK45) add $@ $(BUILD)/edit.ovl "EDIT.OVL"
+	$(DISK45) add $@ $(BUILD)/default0.ovl "DEFAULT0.OVL"
 
 # the document shown at the start, made on the host by the C half itself
 $(BUILD)/mkhelp: tools/mkhelp.c tools/helpdoc.c tests/host.c $(PORTABLE) $(HEADERS)

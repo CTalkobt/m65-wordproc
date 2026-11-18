@@ -56,8 +56,8 @@ typedef uint32_t u32;
 
 /* The rest of colour RAM, after writer.fnt's second part (12306 bytes
  * from HI_LIN; colour RAM ends at HI_LIN + $5000): the find and replace
- * strings (FIND_MAX characters each), the drawing's caches while EDIT.OVL
- * runs (CACHE_LIN), EDIT.OVL (EDIT_LIN, EDIT_SIZE bytes: edit.c).
+ * strings (FIND_MAX characters each), the drawing's caches while DEFAULT0.OVL
+ * runs (CACHE_LIN), DEFAULT0.OVL (EDIT_LIN, EDIT_SIZE bytes: edit.c).
  * Undo's buffer (UNDO_MAX characters: text, then attributes) is the
  * scratch area's last part, past where open_gap's copies go (the
  * document's length) and the middle undo replaces waits (PARK_LIN): a file
@@ -240,7 +240,7 @@ u8 make_room(u16 at, u16 n);    /* room for n characters at at (noted for undo);
 void room(u16 at, u16 n);       /* the same, not noted, nor checked */
 void del_raw(u16 from, u16 to); /* from..to-1 removed, not noted (from < to < doc_len) */
 
-/* ---- undo, find and replace: EDIT.OVL (edit.c), run by edit_run (doc.c) ---- */
+/* ---- undo, find and replace: DEFAULT0.OVL (edit.c), run by edit_run (doc.c) ---- */
 #define FIND_STOP 0             /* (mod_cmd) replacing ends (BASIC: a key not Y / N / A) */
 #define FIND_REPL 1             /* the match selected replaced, then the next (Y) */
 #define FIND_FWD 2              /* the next match selected (N; SHIFT+CTRL+F) */
@@ -257,17 +257,17 @@ void del_raw(u16 from, u16 to); /* from..to-1 removed, not noted (from < to < do
 #define ED_STYLE 13
 extern u16 u_pos, u_tail, u_n, ed_a, ed_b;
 extern u8 u_have, u_open, f_len, r_len, r_on, ed_ok, ed_busy;
-u16 edit_run(u8 cmd);           /* EDIT.OVL's mod_cmd; its mod_ret (0xFFFF: not loaded) */
-void edit_keep(void);           /* EDIT.OVL, BLOADed to mod_area, kept in colour RAM */
+u16 edit_run(u8 cmd);           /* DEFAULT0.OVL's mod_cmd; its mod_ret (0xFFFF: not loaded) */
+void edit_keep(void);           /* DEFAULT0.OVL, BLOADed to mod_area, kept in colour RAM */
 void undo_note(u16 from, u16 to);
 u16 ed(u8 cmd, u16 a);          /* edit_run(cmd) with ed_a = a */
-/* the styles, a list item's level: EDIT.OVL's */
+/* the styles, a list item's level: DEFAULT0.OVL's */
 #define doc_toggle(bit) ed(ED_TOGGLE, bit)              /* bold / italic / underline (A_...) */
 #define doc_cycle_font() ed(ED_FONT, 0)
 #define doc_cycle_align() ed(ED_ALIGN, 0)
 #define doc_list_level(in) (ed(ED_LEVEL, in) == 1)     /* TAB / DEL, RETURN at a list item's start; 1: done */
 #define doc_style(k) ed(ED_STYLE, k)                    /* paragraph style k (K_...) */
-void edit_main(void);           /* EDIT.OVL's entry (edit.c) */
+void edit_main(void);           /* DEFAULT0.OVL's entry (edit.c) */
 void mod_entry(void);           /* (modcall.s45: a jump to the module in mod_area) */
 u16 doc_pack(void);             /* the file image at SCRATCH_LIN; its size */
 u8 doc_unpack(void);            /* 0: loaded */
@@ -397,12 +397,12 @@ struct seg {
  * screen then drawn again. */
 #define TMP_LINES 32
 /* mod_area's first part, its buffers in use only while drawing (a struct
- * line is 12 bytes); EDIT.OVL's room, up to LIST.OVL */
+ * line is 12 bytes); DEFAULT0.OVL's room, up to LIST.OVL */
 #define MOD_SCRATCH (PANEL_ROWS * 81 + TMP_LINES * 12 + BAND_H * COLS + COLS + 2 + 48 + COLS + 48 + COLS + 1)
 #define EDIT_SIZE LIST_OFS
 union mod_area {
     struct {
-        /* (in use only while the screen is drawn or laid out: EDIT.OVL
+        /* (in use only while the screen is drawn or laid out: DEFAULT0.OVL
          * runs here, EDIT_SIZE bytes) */
         char menu_text[PANEL_ROWS][81]; /* (first: BASIC pokes it at mod_area) */
         struct line lay_tmp[TMP_LINES]; /* layout_update's new lines */

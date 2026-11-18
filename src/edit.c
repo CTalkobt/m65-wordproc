@@ -1,4 +1,4 @@
-/* edit.c — EDIT.OVL: undo (CTRL+Z), find and replace (CTRL+F, CTRL+H,
+/* edit.c — DEFAULT0.OVL: undo (CTRL+Z), find and replace (CTRL+F, CTRL+H,
  * SHIFT+CTRL+F / B), styles
  *
  * A module kept in colour RAM and copied into mod_area for each call

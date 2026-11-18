@@ -112,7 +112,7 @@ static const struct run help[] = {
             "CTRL+H     replace: Y)es N)o A)ll at each\r"
             "CTRL+W     save, under the document's name\r" },
     { 0, "Find matches letters in either case and goes round from the end to the start. "
-         "These need EDIT.OVL on the disk.\r" },
+         "These need DEFAULT0.OVL on the disk.\r" },
     { 0, "\r" },
     { H2, "Accents: Compose" },
     { K_H2, "\r" },

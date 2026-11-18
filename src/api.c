@@ -162,7 +162,7 @@ static void say(const char *m) {
     msg[i] = 0;
 }
 
-static const char ed_need[] = "No EDIT.OVL.";
+static const char ed_need[] = "No DEFAULT0.OVL.";
 
 static void typed(u8 c) {
     if (doc_type(c)) say("The document is full.");
@@ -426,7 +426,7 @@ u16 wp_get(u8 w) {
     case GET_RTFEXPORT: return scratched(mod_run(MOD_RTF_EXPORT));
     case GET_RTFBEGIN: return mod_run(MOD_RTF_BEGIN);
     case GET_RTFCHUNK: return mod_run(MOD_RTF_CHUNK);
-    case GET_LISTOK:            /* (and EDIT.OVL, loaded at mod_area) */
+    case GET_LISTOK:            /* (and DEFAULT0.OVL, loaded at mod_area) */
         edit_keep();
         return list_check();
     case GET_FONTS: font_install(); return 0;
@@ -452,7 +452,7 @@ static void to_ascii(char *s, u8 max) {
 }
 
 /* find and replace: op FIND_... (SETF / SETR: msg as the string); 1 when
- * a match is selected (EDIT.OVL says what it found, in msg) */
+ * a match is selected (DEFAULT0.OVL says what it found, in msg) */
 u16 wp_find(u8 op) {
     u16 r;
     if (op >= FIND_SETF) to_ascii(msg, FIND_MAX);

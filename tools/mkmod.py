@@ -216,7 +216,7 @@ def main():
     # while they wait. ln45 keeps apart only what its call graph says is
     # active together; a call into the module is not in it (a jump to
     # mod_area, or a call through a pointer): src/modcall.s45's JSRs add the
-    # edges for EDIT.OVL's.
+    # edges for DEFAULT0.OVL's.
     own = sac(mapfile)
     for f in sites:
         for g in callers(pcalls, f):

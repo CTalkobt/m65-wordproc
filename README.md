@@ -34,8 +34,9 @@ without it the program starts with an empty document), `MDIMPORT.OVL` and
 works, and a `.md` name gets "Markdown needs MDIMPORT.OVL on the disk"),
 `RTF.OVL` (RTF import and export, the same for `.rtf`), `LIST.OVL`
 (list mode, a module: without it the menu does not offer it) and
-`EDIT.OVL` (undo, find and replace, and the styles: without it those do
-nothing, or say "No EDIT.OVL.").
+`DEFAULT0.OVL` (undo, find and replace, and the styles; a required module,
+named so that it is not taken for an optional one: without it those do
+nothing, or say "No DEFAULT0.OVL.").
 
 `tools/xemu_run.py` runs it headless in xemu, types keys into the KERNAL's
 keyboard buffer and saves a screenshot, e.g.
@@ -158,8 +159,8 @@ letter with its accent), in `WRITER.FNT`.
 | `src/md.c` | C | Markdown export and import (below): the modules `MDEXPORT.OVL` and `MDIMPORT.OVL` (`MD_PART` 1, 2) |
 | `src/rtf.c` | C | RTF export and (streamed) import: the module `RTF.OVL` |
 | `src/list.c` | C | list mode's markers: the module `LIST.OVL` |
-| `src/edit.c`, `src/edit_undo.c` | C | undo, find and replace, the styles: the module `EDIT.OVL` |
-| `src/modcall.s45` | asm | the jump into `EDIT.OVL` (and, for ln45's call graph, what it calls) |
+| `src/edit.c`, `src/edit_undo.c` | C | undo, find and replace, the styles: the module `DEFAULT0.OVL` |
+| `src/modcall.s45` | asm | the jump into `DEFAULT0.OVL` (and, for ln45's call graph, what it calls) |
 | `src/api.c` | C | the functions BASIC calls with `SYS {name}, a` (and reads with `RREG`) |
 | `tools/helpdoc.c`, `tools/mkhelp.c` | C (host) | the help document, written as a Writer file by the C half itself |
 | `tools/mkmod.py` | Python | links a module against the program (below) |
@@ -196,7 +197,7 @@ the room for it. Two kinds:
   line in `hk_l` / `hk_L`; it XORs its markers into the band. A feature
   that changes what keys do (undo) still belongs in the program.
 - **Kept, copied in for each call**: undo, find and replace, and the
-  styles (`EDIT.OVL`, from `src/edit.c` and `src/edit_undo.c`; 4.2 KB).
+  styles (`DEFAULT0.OVL`, from `src/edit.c` and `src/edit_undo.c`; 4.2 KB).
   BASIC `BLOAD`s it into `mod_area` at the start (with `LIST.OVL`), and
   the C half keeps a copy in colour RAM (`edit_keep`). Each call
   (`edit_run`: every edit notes for undo what it will change, so every
@@ -319,7 +320,7 @@ the C64's. Each cell has its own colour (text, desk, tags, bars).
 | `$53B00` | 15000 | document attributes |
 | `$57600` | 29.5 KB | scratch (to the clipboard): insertion bounce buffer, file image, text and Markdown files; its last 7400 bytes (`$5CF18`) undo's copy of what the last edit replaced |
 | `$5EC00` | 5 KB | clipboard |
-| `$FF83000` | 20 KB | colour RAM past the screen's cells (`$FF81000`-`$FF82F3F`): `WRITER.FNT`'s second part, Sans, Serif and Mono (12 KB); then (`$FF86020`) the find and replace strings, the drawing's caches while `EDIT.OVL` runs, and `EDIT.OVL` (`$FF86680`) |
+| `$FF83000` | 20 KB | colour RAM past the screen's cells (`$FF81000`-`$FF82F3F`): `WRITER.FNT`'s second part, Sans, Serif and Mono (12 KB); then (`$FF86020`) the find and replace strings, the drawing's caches while `DEFAULT0.OVL` runs, and `DEFAULT0.OVL` (`$FF86680`) |
 
 ### Files
 
@@ -489,7 +490,7 @@ can be.
   6713 bytes with lists) no longer sets `MOD_SIZE`: the drawing's buffers
   and `LIST.OVL` do (4288 + 1728), and it went from 6400 to 6016 bytes. The
   C data then ended at `$BD00`, leaving 768 bytes for the CPU stack. Undo,
-  find and replace (#4) went into a module (`EDIT.OVL`, above) with the
+  find and replace (#4) went into a module (`DEFAULT0.OVL`, above) with the
   styles' code (1.2 KB of the program): what is left in the program (the
   key table, `edit_run`, the notes in each edit) and the build without
   tail calls (below) took 330 bytes, so the C data ends at `$BE00`, and
@@ -522,7 +523,7 @@ can be.
   `-fno-tail-call-optimization` (it costs nothing here: the code came out
   a few bytes smaller). A call ln45 cannot see at all, into a module, is
   worse: nothing keeps the module's callees apart from the functions
-  waiting for it. `src/modcall.s45`'s JSRs tell ln45 what `EDIT.OVL`
+  waiting for it. `src/modcall.s45`'s JSRs tell ln45 what `DEFAULT0.OVL`
   calls, and mkmod.py checks every module: no function waiting while it
   runs may share static storage with one it calls.
 - **cc45 and array members**: before M65Compiler master `a7191e09`, cc45

@@ -1,4 +1,4 @@
-; modcall.s45 — edit_run's call into EDIT.OVL, copied into mod_area
+; modcall.s45 — edit_run's call into DEFAULT0.OVL, copied into mod_area
 ;
 ; void mod_entry(void): a jump to the module's entry (after its 4-byte
 ; header). A call through a C function pointer would be, to ln45's call
@@ -6,7 +6,7 @@
 ; points among them), from deep inside the editing: every function active
 ; together with every other, the base page shared by none.
 ;
-; So the jump, then (never run) a JSR to each program function EDIT.OVL
+; So the jump, then (never run) a JSR to each program function DEFAULT0.OVL
 ; calls (tools/mkmod.py lists them: build/edit.equ.s45; not the run time's
 ; asm helpers, which keep nothing in memory): ln45's call graph
 ; then has mod_entry calling them, as the module does, and it keeps their

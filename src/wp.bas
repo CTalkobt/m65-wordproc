@@ -392,10 +392,10 @@ proc loadlist
   trap nolist
   bload "list.ovl", b0, p({mod_area} + LIST_OFS)
 listback:
-  ' (and once, EDIT.OVL: undo, find and replace, which the C half keeps in
+  ' (and once, DEFAULT0.OVL: undo, find and replace, which the C half keeps in
   ' colour RAM)
   trap noedit
-  if ed = 0 then ed = 1 : bload "edit.ovl", b0, p({mod_area})
+  if ed = 0 then ed = 1 : bload "default0.ovl", b0, p({mod_area})
 listback2:
   trap errh
   sys {wp_get}, GET_LISTOK : rreg lv
@@ -477,7 +477,7 @@ endproc
 nolist:
   resume listback
 
-' no EDIT.OVL
+' no DEFAULT0.OVL
 noedit:
   resume listback2
 

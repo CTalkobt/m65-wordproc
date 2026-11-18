@@ -78,7 +78,7 @@ void open_gap(u16 at, u16 n) {
     }
 }
 
-/* ---- undo, find, styles: EDIT.OVL (edit.c), a module kept in colour RAM
+/* ---- undo, find, styles: DEFAULT0.OVL (edit.c), a module kept in colour RAM
  * (EDIT_LIN) and copied for each call (edit_run) into mod_area, up to
  * LIST.OVL: its first MOD_SCRATCH bytes are buffers the drawing uses only
  * while it draws, the rest its caches, kept meanwhile in colour RAM
@@ -121,7 +121,7 @@ void undo_note(u16 from, u16 to) {
     ed(ED_NOTE, from);
 }
 
-/* EDIT.OVL just loaded at mod_area by BASIC: kept (GET_LISTOK) */
+/* DEFAULT0.OVL just loaded at mod_area by BASIC: kept (GET_LISTOK) */
 void edit_keep(void) {
 #ifdef __cc45__
     if (!mod_ok(mod_area.m)) return;
@@ -142,7 +142,7 @@ u8 make_room(u16 at, u16 n) {
     return 0;
 }
 
-/* (and without noting it: EDIT.OVL's, which notes its own) */
+/* (and without noting it: DEFAULT0.OVL's, which notes its own) */
 void room(u16 at, u16 n) {
     open_gap(at, n);
     doc_len += n;
@@ -174,7 +174,7 @@ void doc_delete(u16 from, u16 to) {
 }
 
 /* from..to-1 removed (from < to <= doc_len - 1), not noted for undo
- * (EDIT.OVL's: it notes its own) */
+ * (DEFAULT0.OVL's: it notes its own) */
 void del_raw(u16 from, u16 to) {
     u16 n, i, lo = from;
     /* a paragraph end deleted: the paragraph before it takes the next one's

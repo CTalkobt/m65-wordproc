@@ -1,4 +1,4 @@
-/* edit_undo.c — EDIT.OVL's undo: the record of the last edit kept
+/* edit_undo.c — DEFAULT0.OVL's undo: the record of the last edit kept
  * (undo_rec, as each change notes its part) and swapped back (undo_swap);
  * edit.c says how. Compiled with -fno-zp-locals: its functions' variables
  * are not in the base page, where they would share bytes with mem_copy's
