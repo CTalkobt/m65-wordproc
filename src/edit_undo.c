@@ -8,7 +8,6 @@
 /* n characters, text and attributes, copied: from s to d, each the address
  * of a text whose attributes follow at the document's offset (ATTR_LIN -
  * TEXT_LIN) or, the f bits (1: d, 2: s) set, the undo buffer's (UNDO_MAX) */
-#define AO (ATTR_LIN - TEXT_LIN)
 static void copy2(u32 d, u32 s, u16 n, u8 f) {
     mem_copy(d, s, n);
     mem_copy(d + (f & 1 ? UNDO_MAX : AO), s + (f & 2 ? UNDO_MAX : AO), n);
@@ -29,14 +28,14 @@ void undo_rec(u16 from, u16 to) {
         if (u_n + k > UNDO_MAX) goto big;
         copy2(SCRATCH_LIN, UNDO_LIN, u_n, 3);
         copy2(UNDO_LIN + k, SCRATCH_LIN, u_n, 3);
-        copy2(UNDO_LIN, TEXT_LIN + from, k, 1);
+        doc_out(UNDO_OFS, UNDO_MAX, from, k);
         u_n += k;
         u_pos = from;
     }
     if (to > e) {
         k = to - e;
         if (u_n + k > UNDO_MAX) goto big;
-        copy2(UNDO_LIN + u_n, TEXT_LIN + e, k, 1);
+        doc_out(UNDO_OFS + u_n, UNDO_MAX, e, k);
         u_n += k;
         u_tail = doc_len - to;
     }
@@ -51,6 +50,7 @@ u8 undo_swap(void) {
     u8 keep = m <= UNDO_MAX;
     u_open = 0;
     if (!u_have) return 1;
+    gap_close();            /* (the store's text moved here, as it is) */
     /* the middle now, kept for a redo (past where open_gap's copies go)
      * when the undo buffer can hold it */
     if (keep) copy2(PARK_LIN, TEXT_LIN + u_pos, m, 1);

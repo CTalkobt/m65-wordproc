@@ -1,0 +1,98 @@
+; gap.s45 — the document's characters and attributes, read and written
+; round the gap (doc.c): txt_at, atr_at, txt_put, atr_put (conv.c has them
+; in C for the host). Character i is the store's i, or i + g_len from the
+; gap (g_at) on; the store is TEXT_LIN ($8000000, attic RAM) and ATTR_LIN
+; ($8010000), read with the 45GS02's 32-bit indirect [zp],z.
+;
+; u8 txt_at(u16 i), u8 atr_at(u16 i): i at $10/$11, the byte in A
+; void txt_put(u16 i, u8 c), void atr_put(u16 i, u8 a): i at $10/$11, c at $12
+; (move2 is gapmove.s45: ln45 takes an assembly file's labels as one
+; function, and these must not seem to call mem_copy)
+
+; no calls through pointers here (ln45's call graph)
+.weak cc45.icallinfo
+cc45.icallinfo = 1
+
+.global _txt_at, _atr_at, _txt_put, _atr_put
+.extern _g_at, _g_len
+
+.segment "code"
+
+; $10-$13: the address of i's byte in the store's bank $0800 + A (0 the
+; text, 1 the attributes); Z 0. X kept.
+proc __gap_ptr
+    sta $12
+    lda #$08
+    sta $13
+    lda $10
+    cmp _g_at
+    lda $11
+    sbc _g_at+1
+    bcc @before
+    clc
+    lda $10
+    adc _g_len
+    sta $10
+    lda $11
+    adc _g_len+1
+    sta $11
+@before:
+    ldz #0
+    rts
+endproc
+
+proc _txt_at
+    .zp_uses $10, $11
+    .zp_clobbers $10, $11, $12, $13
+    .zp_release $10, $11, $12, $13
+    .reg_clobbers A, Z
+    .flag_clobbers C, N, Z, V
+    lda #0
+    jsr __gap_ptr
+    lda [$10],z
+    rts
+    .func_flags zp_call
+endproc
+
+proc _atr_at
+    .zp_uses $10, $11
+    .zp_clobbers $10, $11, $12, $13
+    .zp_release $10, $11, $12, $13
+    .reg_clobbers A, Z
+    .flag_clobbers C, N, Z, V
+    lda #1
+    jsr __gap_ptr
+    lda [$10],z
+    rts
+    .func_flags zp_call
+endproc
+
+proc _txt_put
+    .zp_uses $10, $11, $12
+    .zp_clobbers $10, $11, $12, $13
+    .zp_release $10, $11, $12, $13
+    .reg_clobbers A, X, Z
+    .flag_clobbers C, N, Z, V
+    ldx $12
+    lda #0
+    jsr __gap_ptr
+    txa
+    sta [$10],z
+    rts
+    .func_flags zp_call
+endproc
+
+proc _atr_put
+    .zp_uses $10, $11, $12
+    .zp_clobbers $10, $11, $12, $13
+    .zp_release $10, $11, $12, $13
+    .reg_clobbers A, X, Z
+    .flag_clobbers C, N, Z, V
+    ldx $12
+    lda #1
+    jsr __gap_ptr
+    txa
+    sta [$10],z
+    rts
+    .func_flags zp_call
+endproc

@@ -4,7 +4,7 @@
 #include <string.h>
 #include "wp.h"
 
-u8 MEM[0x60000];
+u8 MEM[0xA0000];
 static u8 colram[COLS * ROWS * 2];
 const u8 *host_colram(void) { return colram; }
 

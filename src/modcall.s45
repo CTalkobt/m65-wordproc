@@ -22,7 +22,7 @@ cc45.icallinfo = 1
 
 .global _mod_entry
 .extern _mod_area
-.extern _atr_at, _atr_put, _attr_at_cursor, _del_raw, _layout_edit, _room, _mem_copy, _mem_fill, _mem_get, _mem_write, _open_gap, _para_end, _para_start, _sel_hi, _sel_lo, _txt_at
+.extern _atr_at, _atr_put, _attr_at_cursor, _del_raw, _doc_out, _gap_close, _layout_edit, _room, _mem_copy, _mem_fill, _mem_get, _mem_write, _open_gap, _para_end, _para_start, _sel_hi, _sel_lo, _txt_at
 
 .segment "code"
 
@@ -32,6 +32,8 @@ proc _mod_entry
     jsr _atr_put
     jsr _attr_at_cursor
     jsr _del_raw
+    jsr _doc_out
+    jsr _gap_close
     jsr _layout_edit
     jsr _room
     jsr _mem_copy

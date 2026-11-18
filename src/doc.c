@@ -18,6 +18,7 @@ u16 u_pos, u_tail, u_n;
 u8 u_have, u_open, f_len, r_len, r_on;
 
 void doc_new(void) {
+    g_len = 0;
     txt_put(0, CH_CR);
     atr_put(0, 0);
     doc_len = 1;
@@ -65,17 +66,69 @@ u8 attr_at_cursor(void) {
     return atr_at(cur) & A_STYLE;
 }
 
-/* room for n characters at `at`: the text and attributes after it moved
- * up, through the scratch area (the DMA copies upwards only when the
- * ranges do not overlap) */
-void open_gap(u16 at, u16 n) {
-    u16 tail = doc_len - at;
-    u32 o = 0;
+/* ---- the gap: room kept in the store (attic RAM) at the last edit, so
+ * that typing there does not move the rest of the document along. Before
+ * the document's character g_at the store holds g_len unused bytes: the
+ * characters from g_at on are g_len further on (txt_at, atr_at, txt_put,
+ * atr_put, doc_out map them; g_len 0: no gap). An insertion fills it from
+ * its start; a deletion widens it; an edit elsewhere moves it there (the
+ * characters between moved across: as far as the edits are apart). Only
+ * when it is used up does the rest of the document move: GAP_SPAN more.
+ * Anything that moves the store's text itself (undo, open_gap) closes it
+ * first (gap_close: the gap moved to the end, where it is no gap). ---- */
+u16 g_at, g_len;
+
+/* n characters, text and attributes, moved from the store's s to its d
+ * (up: through the scratch area, as the DMA copies upwards only when the
+ * ranges do not overlap); on the MEGA65 gapmove.s45 */
+#ifndef __cc45__
+void move2(u16 d, u16 s, u16 n) {
+    u32 t = TEXT_LIN, b;
     u8 k;
-    for (k = 0; k < 2; k++, o = ATTR_LIN - TEXT_LIN) {
-        mem_copy(SCRATCH_LIN, TEXT_LIN + o + at, tail);
-        mem_copy(TEXT_LIN + o + at + n, SCRATCH_LIN, tail);
+    for (k = 0; k < 2; k++, t += AO) {
+        b = t + s;
+        if (d > s) {
+            mem_copy(SCRATCH_LIN, b, n);
+            b = SCRATCH_LIN;
+        }
+        mem_copy(t + d, b, n);
     }
+}
+
+/* the gap moved to before character p (gapmove.s45 on the MEGA65) */
+void gap_to(u16 p) {
+    u16 s = p, d = p + g_len, n = g_at - p;     /* (before it: up across it) */
+    if (p > g_at) {
+        s = g_at + g_len;
+        d = g_at;
+        n = p - g_at;
+    }
+    if (g_len) move2(d, s, n);
+    g_at = p;
+}
+#endif
+
+void gap_close(void) {
+    gap_to(doc_len);
+    g_len = 0;
+}
+
+/* n characters from i on: text to bank 5's d (SCRATCH_LIN + d: the scratch
+ * area, the clipboard), attributes to d + o (a byte at a time, round the
+ * gap: smaller than DMA copies, and only a copy, a save or undo's note) */
+void doc_out(u16 d, u16 o, u16 i, u16 n) {
+    u8 FAR *p = FARP(SCRATCH_LIN + d);
+    for (; n; n--, i++, p++) {
+        p[0] = txt_at(i);
+        p[o] = atr_at(i);
+    }
+}
+
+/* room for n characters at `at` in the store, without the gap (closed
+ * first): the text and attributes after it moved up */
+void open_gap(u16 at, u16 n) {
+    gap_close();
+    move2(at + n, at, doc_len - at);
 }
 
 /* ---- undo, find, styles: DEFAULT0.OVL (edit.c), a module kept in colour RAM
@@ -142,9 +195,17 @@ u8 make_room(u16 at, u16 n) {
     return 0;
 }
 
-/* (and without noting it: DEFAULT0.OVL's, which notes its own) */
+/* (and without noting it: DEFAULT0.OVL's, which notes its own): the gap
+ * moved to at (and when it is too small, GAP_SPAN more opened there), its
+ * first n bytes the room */
 void room(u16 at, u16 n) {
-    open_gap(at, n);
+    gap_to(at);
+    if (g_len < n) {
+        move2(at + GAP_SPAN + n, at + g_len, doc_len - at);
+        g_len = GAP_SPAN + n;
+    }
+    g_at += n;
+    g_len -= n;
     doc_len += n;
     dirty = 1;
 }
@@ -186,12 +247,18 @@ void del_raw(u16 from, u16 to) {
             if (is_break(txt_at(to))) atr_put(to, atr_at(i));
             break;
         }
-    n = doc_len - to;
-    mem_copy(TEXT_LIN + from, TEXT_LIN + to, n);
-    mem_copy(ATTR_LIN + from, ATTR_LIN + to, n);
-    doc_len -= to - from;
+    /* the gap widened over them (moved to whichever end is nearer it) */
+    if (g_at > from) {
+        gap_to(to);
+        g_at = from;
+    } else {
+        gap_to(from);
+    }
+    n = to - from;
+    g_len += n;
+    doc_len -= n;
     dirty = 1;
-    layout_edit(lo, to, (int16_t)-(int16_t)(to - from));
+    layout_edit(lo, to, (int16_t)-(int16_t)n);
 }
 
 static void delete_selection(void) {
@@ -256,8 +323,7 @@ void doc_copy(void) {
     lo = sel_lo();
     n = sel_hi() - lo;
     if (n > CLIP_MAX) n = CLIP_MAX;
-    mem_copy(CLIP_LIN, TEXT_LIN + lo, n);
-    mem_copy(CLIP_LIN + CLIP_MAX, ATTR_LIN + lo, n);
+    doc_out((u16)(CLIP_LIN - SCRATCH_LIN), CLIP_MAX, lo, n);
     clip_len = n;
 }
 
@@ -292,8 +358,7 @@ u16 doc_pack(void) {
     mem_put(SCRATCH_LIN + 2, WP_VERSION);
     mem_put(SCRATCH_LIN + 3, (u8)doc_len);
     mem_put(SCRATCH_LIN + 4, (u8)(doc_len >> 8));
-    mem_copy(SCRATCH_LIN + 5, TEXT_LIN, doc_len);
-    mem_copy(SCRATCH_LIN + 5 + doc_len, ATTR_LIN, doc_len);
+    doc_out(5, doc_len, 0, doc_len);
     return 5 + 2 * doc_len;
 }
 
@@ -303,6 +368,7 @@ u8 doc_unpack(void) {
     if (mem_get(SCRATCH_LIN) != 'W' || mem_get(SCRATCH_LIN + 1) != 'P' || !v || v > WP_VERSION) return 1;
     n = mem_get(SCRATCH_LIN + 3) | (u16)(mem_get(SCRATCH_LIN + 4) << 8);
     if (n == 0 || n > DOC_MAX) return 1;
+    g_len = 0;
     mem_copy(TEXT_LIN, SCRATCH_LIN + 5, n);
     mem_copy(ATTR_LIN, SCRATCH_LIN + 5 + n, n);
     if (v == 1)

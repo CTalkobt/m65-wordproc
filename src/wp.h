@@ -31,24 +31,31 @@ typedef uint32_t u32;
 
 /* ---- memory (28-bit linear addresses) ----
  * bank 4: $40000 the bitmap (4000 glyphs x 8 bytes), $48000 the screen
- *         (80 x 50 x 2), $4A000 writer.fnt's first part (font_install), $4D000
- *         the layout's line table
+ *         (80 x 50 x 2), $4A000 writer.fnt's first part (font_install)
  * bank 5: $50000 the scratch area (insertions' bounce buffer; the file
  *         image BSAVE writes; undo's buffer at its end), $5EC00 the
  *         clipboard (text, then attributes)
- * attic RAM (the MEGA65's 8 MB HyperRAM at $8000000): the text, and 64 KB
- *         on the attributes (the host: bank 3, past HI_LIN's 20 KB) */
+ * attic RAM (the MEGA65's 8 MB HyperRAM at $8000000), 64 KB each: the
+ *         text and the attributes, each with the gap; the layout's line
+ *         table; the line table's bounce buffer (the host: from $60000) */
 #define BITMAP_LIN  0x40000UL
 #define SCREEN_LIN  0x48000UL
 #define FONT_LIN    0x4A000UL
-#define LINES_LIN   0x4D000UL
 #ifdef __cc45__
 #define TEXT_LIN    0x8000000UL
 #define ATTR_LIN    0x8010000UL
+#define LINES_LIN   0x8020000UL
+#define LBOUNCE_LIN 0x8030000UL
 #else
-#define TEXT_LIN    0x36000UL
-#define ATTR_LIN    0x3A000UL
+#define TEXT_LIN    0x60000UL
+#define ATTR_LIN    0x70000UL
+#define LINES_LIN   0x80000UL
+#define LBOUNCE_LIN 0x90000UL
 #endif
+#define AO          (ATTR_LIN - TEXT_LIN)
+/* the gap kept in the document's store at the last edit (doc.c): opened
+ * GAP_SPAN at a time (can be changed: the store holds DOC_MAX + GAP_SPAN) */
+#define GAP_SPAN    2048u
 #define SCRATCH_LIN 0x50000UL
 #define CLIP_LIN    0x5EC00UL
 #define SCRATCH_MAX 60416u      /* the scratch area's size: SCRATCH_LIN to CLIP_LIN */
@@ -74,14 +81,14 @@ typedef uint32_t u32;
 #define REPL_LIN  (FIND_LIN + FIND_MAX + 1)
 #define CACHE_LIN (HI_LIN + 0x3080)
 #define EDIT_LIN  (HI_LIN + 0x3680)
-#define UNDO_MAX  10000u
-#define PARK_LIN  (SCRATCH_LIN + 15104)  /* (past DOC_MAX; its 2 * UNDO_MAX before UNDO_LIN) */
+#define UNDO_MAX  7500u
+#define PARK_LIN  (SCRATCH_LIN + DOC_MAX)       /* (its 2 * UNDO_MAX before UNDO_LIN) */
 #define UNDO_OFS  (SCRATCH_MAX - 2 * UNDO_MAX)
 #define UNDO_LIN  (SCRATCH_LIN + UNDO_OFS)
 
-#define DOC_MAX   15000u        /* characters, the final CR included */
+#define DOC_MAX   30000u        /* characters, the final CR included */
 #define CLIP_MAX  2560u
-#define MAX_LINES 1024u         /* 12 bytes each */
+#define MAX_LINES 4096u         /* 12 bytes each */
 
 /* ---- characters and attributes ---- */
 #define CH_CR 13
@@ -209,11 +216,13 @@ u8 frames(void);                    /* video frames counted (wraps) */
 
 #ifdef __cc45__
 #define TXT ((u8 __far *)TEXT_LIN)
+#define FARP(a) ((u8 __far *)(a))
 #define ATR ((u8 __far *)ATTR_LIN)
 #define LINES ((struct line __far *)LINES_LIN)
 #else
-extern u8 MEM[0x60000];
+extern u8 MEM[0xA0000];
 #define TXT (MEM + TEXT_LIN)
+#define FARP(a) (MEM + (a))
 #define ATR (MEM + ATTR_LIN)
 #define LINES ((struct line *)(MEM + LINES_LIN))
 #endif
@@ -246,6 +255,11 @@ void open_gap(u16 at, u16 n);   /* the text from at moved up n (doc_len not chan
 u8 make_room(u16 at, u16 n);    /* room for n characters at at (noted for undo); 1: none */
 void room(u16 at, u16 n);       /* the same, not noted, nor checked */
 void del_raw(u16 from, u16 to); /* from..to-1 removed, not noted (from < to < doc_len) */
+extern u16 g_at, g_len;         /* the gap in the store (doc.c) */
+void gap_close(void);           /* the store's text without it */
+void move2(u16 d, u16 s, u16 n);        /* the store's s..s+n-1 to d (doc.c; gapmove.s45) */
+void gap_to(u16 p);             /* the gap moved to before p (the same) */
+void doc_out(u16 d, u16 o, u16 i, u16 n);       /* n characters from i to SCRATCH_LIN + d (attributes to + o) */
 
 /* ---- undo, find and replace: DEFAULT0.OVL (edit.c), run by edit_run (doc.c) ---- */
 #define FIND_STOP 0             /* (mod_cmd) replacing ends (BASIC: a key not Y / N / A) */

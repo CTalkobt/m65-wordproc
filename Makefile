@@ -55,14 +55,14 @@ SMALL   = api conv doc layout
 # (conv.c is called by the modules, whose base-page blocks start at $80:
 # its functions keep their variables out of the base page)
 NOZP    = conv
-OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45) $(BUILD)/obj/modcall.o45
+OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45) $(BUILD)/obj/modcall.o45 $(BUILD)/obj/gap.o45 $(BUILD)/obj/gapmove.o45
 CCQUIET = 2>&1 | grep -v 'note:\|^ *[0-9]* |\|^ *|' || true
 
 $(BUILD)/obj/%.o45: src/%.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
 	$(CC45) $(if $(filter $*,$(SMALL)),-O1,-O2) $(if $(filter $*,$(NOZP)),-fno-zp-locals) $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
 
-$(BUILD)/obj/modcall.o45: src/modcall.s45
+$(BUILD)/obj/%.o45: src/%.s45
 	@mkdir -p $(BUILD)/obj
 	$(CC45_ROOT)/bin/ca45 -c $< -o $@
 

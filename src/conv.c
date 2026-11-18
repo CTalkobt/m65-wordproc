@@ -16,10 +16,14 @@
 
 /* the document's character i, its attribute (with cc45 a far TXT[i] is
  * some 30 bytes of code, a call to these 10) */
-u8 txt_at(u16 i) { return TXT[i]; }
-u8 atr_at(u16 i) { return ATR[i]; }
-void txt_put(u16 i, u8 c) { TXT[i] = c; }
-void atr_put(u16 i, u8 a) { ATR[i] = a; }
+#ifndef __cc45__
+/* (round the gap: doc.c; on the MEGA65 gap.s45, a third of the size) */
+static u16 gmap(u16 i) { return i >= g_at ? i + g_len : i; }
+u8 txt_at(u16 i) { return TXT[gmap(i)]; }
+u8 atr_at(u16 i) { return ATR[gmap(i)]; }
+void txt_put(u16 i, u8 c) { TXT[gmap(i)] = c; }
+void atr_put(u16 i, u8 a) { ATR[gmap(i)] = a; }
+#endif
 
 /* ==== output: bytes to SCRATCH_LIN ==== */
 u16 o_n;
@@ -95,6 +99,7 @@ u16 b_n;
 u8 b_attr, b_done;
 
 void build_start(void) {
+    g_len = 0;
     b_n = 0;
     b_attr = 0;
 }

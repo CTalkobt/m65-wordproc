@@ -111,11 +111,10 @@ ESC leaves it).
 **Undo** (CTRL+Z) takes back the last edit: what was typed (with its DELs)
 since the cursor last moved, or one command (a style, a cut, a paste, a
 replace-all). CTRL+Z again does it again, so it also redoes. It keeps the
-text the edit replaced, up to 10000 characters: a longer cut, say, can't
+text the edit replaced, up to 7500 characters: a longer cut, say, can't
 be undone ("Nothing to undo."). A new document, a load or an import
-leaves nothing to undo, and so does an export whose file is larger than
-about 39 KB (it needs the scratch area where undo keeps its copy; a saved
-document is at most 30 KB).
+leaves nothing to undo, and so does a save or export whose file is larger
+than about 44 KB (it needs the scratch area where undo keeps its copy).
 
 **Find** (CTRL+F) asks for the text (up to 40 characters; letters match
 either case, the accented ones only as they are), and selects the next
@@ -155,7 +154,8 @@ letter with its accent), in `WRITER.FNT`.
 | Part | Language | Does |
 |------|----------|------|
 | `src/wp.bas` | BASIC 65 | the main loop (GET and what each key means; idle time handed to C), the menu, file-name prompts and confirmations, all disk work (`BLOAD` / `BSAVE` documents and fonts, `DOPEN` + `FREAD#` / `FWRITE#` text and Markdown import and export, `DIR`), loading the help document, error trapping |
-| `src/doc.c` | C | the document: two parallel arrays in attic RAM (text, an attribute byte per character), insert and delete by DMA, styles, alignment, clipboard, the file image |
+| `src/doc.c` | C | the document: two parallel arrays in attic RAM (text, an attribute byte per character) with a gap at the last edit, insert and delete, the clipboard, the file image |
+| `src/gap.s45`, `src/gapmove.s45` | asm | reading and writing a character round the gap (`txt_at` ...), moving the gap (`gap_to`, `move2`): `doc.c` and `conv.c` have them in C for the host |
 | `src/layout.c` | C | line breaking for both views, justification, pagination, raw-view tags, cursor ↔ position mapping; incremental and lazy (below) |
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
 | `src/m65.c` | C | the VIC-IV screen mode, DMA and colour RAM |
@@ -283,6 +283,15 @@ the room for it. Two kinds:
 
 ### Speed
 
+- **The gap**: the document's store (text and attributes, in attic RAM)
+  keeps `GAP_SPAN` (2048, in `wp.h`) unused bytes at the last edit. Typing
+  fills them, a deletion widens them, and an edit elsewhere moves the gap
+  there, moving only the characters between the two places. The rest of
+  the document moves only when the gap is used up (every 2 KB typed, or a
+  larger paste), where before every key moved all of it (text and
+  attributes, each twice through the scratch area). Reading a character
+  past the gap adds its length (`gap.s45`). Undo and the clipboard's and
+  the file's copies see the document through it; undo closes it first.
 - **Layout** is incremental: an edit is laid out from the line before it
   (from its paragraph's start when a paragraph mark is added or removed)
   until a new line matches an old one moved by the edit, and the rest of
@@ -299,13 +308,14 @@ the room for it. Two kinds:
   a CRC-16) let a line in some ten thousand changed ones show its old text
   in the host tests' random editing. Should one ever, CTRL+L redraws all.
 
-About 10 ms a key in a short document and 80 ms in one of 10,000
-characters (40 MHz, measured in xemu), and some 5-8 % more since the
-layout is compiled with `-O1` and the raw font is fetched by DMA (to make
-room for Markdown). These are from before the document moved to attic
-RAM, which xemu does not slow down as the HyperRAM does: on a real MEGA65
-the layout's reads of the text (a 32-bit `lda [bp],z` each) and the DMA
-copies of insertions take longer.
+In xemu (40 MHz), typing takes about 65 ms a key in a document of 1000
+characters, 80 ms in one of 13,000 and 93 ms in one of 28,000 (2000
+lines): drawing the changed line is most of it, and what grows with the
+document is the layout's work on the lines after the edit. xemu does not
+slow attic RAM down as the HyperRAM does, so it shows nothing of what the
+gap saves; on a real MEGA65 each key used to copy the document's tail four
+times through the HyperRAM, and the reads of the text (a 32-bit
+`lda [bp],z` each) take longer there too. Not yet measured on hardware.
 
 ### The screen
 
@@ -322,11 +332,12 @@ the C64's. Each cell has its own colour (text, desk, tags, bars).
 | `$40000` | 32000 | the bitmap |
 | `$48000` | 8000 | the screen (16-bit cells) |
 | `$4A000` | 12 KB | `WRITER.FNT`'s first part: Head's glyphs and records, the raw font, the compose table |
-| `$4D000` | 12 KB | the line table (1024 lines) |
-| `$50000` | 59 KB | scratch (to the clipboard): insertion bounce buffer, file image, text and Markdown files; its last 20000 bytes (`$59DE0`) undo's copy of what the last edit replaced |
+| `$50000` | 59 KB | scratch (to the clipboard): the gap's bounce buffer, file image, text and Markdown files; from `$57530` (`DOC_MAX`) what undo puts back while it swaps; its last 15000 bytes (`$5B168`) undo's copy of what the last edit replaced |
 | `$5EC00` | 5 KB | clipboard |
-| `$8000000` | 15000 | attic RAM: document text |
-| `$8010000` | 15000 | attic RAM: document attributes |
+| `$8000000` | 64 KB | attic RAM: document text (up to 30000 characters) and the gap |
+| `$8010000` | 64 KB | attic RAM: document attributes, the same |
+| `$8020000` | 48 KB | attic RAM: the line table (4096 lines of 12 bytes) |
+| `$8030000` | 48 KB | attic RAM: the line table's bounce buffer (lines moved up) |
 | `$FF83000` | 20 KB | colour RAM past the screen's cells (`$FF81000`-`$FF82F3F`): `WRITER.FNT`'s second part, Sans, Serif and Mono (12 KB); then (`$FF86020`) the find and replace strings, the drawing's caches while `DEFAULT0.OVL` runs, and `DEFAULT0.OVL` (`$FF86680`) |
 
 ### Files
@@ -435,9 +446,9 @@ can be.
 
 ## Limits
 
-- 15000 characters (about 2500 words) and 1024 laid-out lines a document;
+- 30000 characters (about 5000 words) and 4096 laid-out lines a document;
   a 2560-character clipboard; imported text up to 14 KB, Markdown 59 KB.
-- One level of undo (the last edit, up to 10000 characters of what it
+- One level of undo (the last edit, up to 7500 characters of what it
   replaced); no printing (yet).
 
 ## MEGA65 details worth knowing
@@ -505,7 +516,10 @@ can be.
   static storage, not on the stack, and filled with a pattern then run
   through typing, find and replace, undo, the style drop-down, a Markdown
   export and list mode in xemu, the stack never went deeper than 32
-  bytes. (The BASIC program's
+  bytes. The gap (above) took 470 bytes, even with its hottest parts in
+  assembly (`gap.s45`, `gapmove.s45`: cc45's 32-bit address arithmetic
+  made the C some three times larger), so the C data ends at `$BF00` and
+  the stack has 256 bytes. (The BASIC program's
   two `poke`s of `$D1` / `$F7` are written in decimal: `--minify` turns
   `poke $d1` into a variable,
   [M65Compiler #603](https://github.com/CTalkobt/M65Compiler/issues/603).)

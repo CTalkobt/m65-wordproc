@@ -123,8 +123,8 @@ static u16 rtf_in(const char *s) {
 static u16 doc_sig(u8 *t, u8 *a) {
     u16 i;
     for (i = 0; i < doc_len; i++) {
-        t[i] = TXT[i];
-        a[i] = (u8)(ATR[i] & (TXT[i] == CH_CR || TXT[i] == CH_FF ? A_PARA : A_STYLE));
+        t[i] = txt_at(i);
+        a[i] = (u8)(atr_at(i) & (txt_at(i) == CH_CR || txt_at(i) == CH_FF ? A_PARA : A_STYLE));
     }
     return doc_len;
 }
@@ -177,7 +177,7 @@ static void md_fixed_point(const char *m1, char *m2, const char *what) {
 
 static void text_of(char *out, u16 max) {
     u16 i;
-    for (i = 0; i < doc_len && i + 1 < max; i++) out[i] = (char)TXT[i];
+    for (i = 0; i < doc_len && i + 1 < max; i++) out[i] = (char)txt_at(i);
     out[i] = 0;
 }
 
@@ -193,10 +193,10 @@ static void check_layout(void) {
         if (view_mode == VIEW_PAGE) {
             u16 trail = 0;
             for (i = LINES[l].start; i < e; i++) {
-                u8 c = TXT[i];
+                u8 c = txt_at(i);
                 if (c == CH_CR || c == CH_FF) continue;
-                w += char_w(c, ATR[i]);
-                trail = c == ' ' ? trail + char_w(c, ATR[i]) : 0;
+                w += char_w(c, atr_at(i));
+                trail = c == ' ' ? trail + char_w(c, atr_at(i)) : 0;
             }
             if (w - trail > TEXT_W && e - LINES[l].start > 1) {
                 printf("line %u too wide: %u\n", l, w - trail);
@@ -217,7 +217,7 @@ static void check_layout(void) {
 
 static void check_doc(void) {
     CHECK(doc_len >= 1 && doc_len <= DOC_MAX);
-    CHECK(TXT[doc_len - 1] == CH_CR);
+    CHECK(txt_at(doc_len - 1) == CH_CR);
     CHECK(cur < doc_len);
 }
 
@@ -281,7 +281,7 @@ static void test_edit(void) {
     n0 = doc_sig(t0, a0);
     wp_cmd(18);                 /* all */
     ctrl(2, 0);                 /* CTRL+B */
-    CHECK((ATR[0] & A_BOLD) != 0);
+    CHECK((atr_at(0) & A_BOLD) != 0);
     ctrl(0x1A, 0);
     n1 = doc_sig(t1, a1);
     CHECK(n0 == n1 && !memcmp(t0, t1, n0) && !memcmp(a0, a1, n0));
@@ -411,6 +411,130 @@ static void test_edit(void) {
     wp_cmd(13);
 }
 
+/* the gap (doc.c): edits at random places, long runs of typing (more than
+ * the gap holds), deletions both ways, cuts and pastes, against a plain
+ * copy of the text; the file image too, and undo across the gap */
+static void test_gap(void) {
+    static char ref[DOC_MAX + 1];
+    u16 n = 0, i, k, p, q, bad = 0;
+    wp_cmd(13);
+    n = 0;
+    srand(getenv("SEED") ? (unsigned)atoi(getenv("SEED")) + 11 : 12);
+    for (i = 0; i < 1500 && !bad; i++) {
+        int r = rand() % 10;
+        p = (u16)(rand() % (n + 1));
+        wp_cmd(9);
+        cur = p;
+        goal_valid = 0;
+        if (r < 4) {            /* typing: now and then more than the gap */
+            k = (u16)(rand() % 8 == 0 ? 2100 + rand() % 400 : 1 + rand() % 40);
+            if (n + k > 12000) k = 0;
+            for (q = 0; q < k; q++) {
+                u8 c = (u8)(rand() % 5 ? 0x41 + rand() % 26 : 0x20);
+                wp_key(c);
+                memmove(ref + p + q + 1, ref + p + q, n - p - q);
+                ref[p + q] = (char)(c + 0x20);
+                if (c == 0x20) ref[p + q] = ' ';
+                n++;
+            }
+        } else if (r < 6) {     /* DEL (backspace) */
+            for (k = (u16)(1 + rand() % 30); k > 0 && cur > 0; k--) {
+                wp_key(20);
+                memmove(ref + cur, ref + cur + 1, n - cur);
+                n--;
+            }
+        } else if (r < 7) {     /* INST (forwards) */
+            for (k = (u16)(1 + rand() % 30); k > 0 && cur < n; k--) {
+                wp_key(148);
+                memmove(ref + cur, ref + cur + 1, n - cur - 1);
+                n--;
+            }
+        } else if (r < 9 && n > 1) {    /* a cut, then a paste elsewhere */
+            q = (u16)(p + rand() % (n - p + 1));
+            if ((u16)(q - p) > CLIP_MAX) q = p + CLIP_MAX;
+            if (q > p) {
+                static char cut[CLIP_MAX];
+                k = q - p;
+                memcpy(cut, ref + p, k);
+                sel_anchor = p;
+                cur = q;
+                sel_on = 1;
+                wp_cmd(11);
+                memmove(ref + p, ref + q, n - q);
+                n -= k;
+                p = (u16)(rand() % (n + 1));
+                wp_cmd(9);
+                cur = p;
+                wp_cmd(12);
+                memmove(ref + p + k, ref + p, n - p);
+                memcpy(ref + p, cut, k);
+                n += k;
+            }
+        } else {                /* undo, then redo (the gap closed for it) */
+            wp_cmd(22);
+            wp_cmd(22);
+        }
+        if (doc_len != n + 1 || (g_len && g_at > doc_len) || (u32)doc_len + g_len > DOC_MAX + GAP_SPAN) bad = 1;
+        for (q = 0; q < n && !bad; q++)
+            if (txt_at(q) != (u8)ref[q]) bad = 1;
+        if (bad) printf("FAIL: gap %d (op %d at %u): doc_len %u (want %u), gap %u+%u, at %u\n", i, r, p, doc_len, n + 1, g_at, g_len, q);
+        if (i % 50 == 0) check_doc();
+    }
+    fails += bad;
+    /* the file image (round the gap) */
+    {
+        u16 sz = wp_get(2);
+        CHECK(sz == 5 + 2 * doc_len);
+        for (q = 0; q < n && MEM[SCRATCH_LIN + 5 + q] == (u8)ref[q]; q++) {}
+        CHECK(q == n);
+        CHECK(wp_get(4) == 0 && doc_len == n + 1);
+        for (q = 0; q < n && txt_at(q) == (u8)ref[q]; q++) {}
+        CHECK(q == n);
+    }
+    check_doc();
+    check_layout();
+
+    /* the limits: the scratch area's parts apart; a document near DOC_MAX,
+     * of more lines than the old 1024, edited, undone, saved and loaded */
+    CHECK(PARK_LIN + 2 * UNDO_MAX <= UNDO_LIN && UNDO_LIN + 2 * UNDO_MAX <= SCRATCH_LIN + SCRATCH_MAX);
+    CHECK(5 + 2 * (u32)DOC_MAX <= SCRATCH_MAX && (u32)DOC_MAX + GAP_SPAN + CLIP_MAX <= AO);
+    CHECK((u32)MAX_LINES * sizeof(struct line) <= LBOUNCE_LIN - LINES_LIN);
+    {
+        static const char w[] = "Line of text\n";
+        wp_cmd(13);
+        memset(MEM + SCRATCH_LIN, 0, SCRATCH_MAX);
+        for (n = 0; n + 13 < DOC_MAX - 1000; n += 13) memcpy(MEM + SCRATCH_LIN + n, w, 13);
+        for (q = 0; q < n; q++)
+            if (MEM[SCRATCH_LIN + q] == '\n') MEM[SCRATCH_LIN + q] = 13;
+        doc_import();
+        layout();
+        CHECK(doc_len > 28000 && nlines > 2000);
+        check_layout();
+        cur = doc_len / 2;
+        type("Typed in the middle of a long document. ");
+        check_doc();
+        check_incremental();
+        sel_anchor = 100;
+        cur = 2400;
+        sel_on = 1;
+        wp_cmd(11);
+        cur = doc_len - 50;
+        wp_cmd(12);
+        check_doc();
+        k = doc_len;
+        wp_cmd(22);
+        CHECK(doc_len == k - 2300);
+        wp_cmd(22);
+        CHECK(doc_len == k);
+        p = wp_get(2);
+        CHECK(p == 5 + 2 * doc_len);
+        CHECK(wp_get(4) == 0 && doc_len == k);
+        layout();
+        check_layout();
+    }
+    wp_cmd(13);
+}
+
 int main(void) {
     char buf[20000];
     u16 n, i;
@@ -490,9 +614,9 @@ int main(void) {
     for (i = 0; i < 5; i++) wp_key(29);
     CHECK(sel_on && sel_lo() == 0 && sel_hi() == 5);
     wp_cmd(1);                  /* bold */
-    CHECK(ATR[0] & A_BOLD);
-    CHECK(ATR[4] & A_BOLD);
-    CHECK(!(ATR[5] & A_BOLD));
+    CHECK(atr_at(0) & A_BOLD);
+    CHECK(atr_at(4) & A_BOLD);
+    CHECK(!(atr_at(5) & A_BOLD));
     wp_cmd(9);
     {
         char tags[48];
@@ -575,7 +699,7 @@ int main(void) {
     wp_cmd(5);
     wp_cmd(5);
     check_layout();
-    CHECK(((ATR[para_end(cur)] & A_ALIGN) >> A_ALIGN_SHIFT) == 3);
+    CHECK(((atr_at(para_end(cur)) & A_ALIGN) >> A_ALIGN_SHIFT) == 3);
     wp_key(147);
     wp_cmd(5);
     wp_cmd(5);
@@ -608,17 +732,20 @@ int main(void) {
 
     /* the file image */
     {
-        u16 len = doc_len, sz = wp_get(2);
+        u16 len = doc_len, sz = wp_get(2), i, same = 1;
         static u8 t[DOC_MAX], a[DOC_MAX];
-        memcpy(t, TXT, len);
-        memcpy(a, ATR, len);
+        for (i = 0; i < len; i++) {
+            t[i] = txt_at(i);
+            a[i] = atr_at(i);
+        }
         CHECK(sz == 5 + 2 * len);
         wp_cmd(13);
         CHECK(doc_len == 1);
         CHECK(wp_get(4) == 0);
         CHECK(doc_len == len);
-        CHECK(memcmp(t, TXT, len) == 0);
-        CHECK(memcmp(a, ATR, len) == 0);
+        for (i = 0; i < len; i++)
+            if (t[i] != txt_at(i) || a[i] != atr_at(i)) same = 0;
+        CHECK(same);
         MEM[SCRATCH_LIN] = 'X';
         CHECK(wp_get(4) == 1);
     }
@@ -689,22 +816,22 @@ int main(void) {
         md_fixed_point(m1, m2, "help");
         text_of(buf, sizeof buf);
         CHECK(strncmp(buf, "MEGA65 Writer\rA graphical word processor", 40) == 0);
-        CHECK((ATR[0] & A_FONT) == 3 && ((ATR[13] & A_ALIGN) >> A_ALIGN_SHIFT) == 1);
+        CHECK((atr_at(0) & A_FONT) == 3 && ((atr_at(13) & A_ALIGN) >> A_ALIGN_SHIFT) == 1);
 
         /* Markdown from elsewhere */
         md_in("Hello *world* and **bold**, `code` <u>under</u>.\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "Hello world and bold, code under.\r") == 0);
-        CHECK(ATR[6] == A_ITAL && ATR[16] == A_BOLD && ATR[22] == 2 && ATR[27] == A_UNDER && ATR[0] == 0);
+        CHECK(atr_at(6) == A_ITAL && atr_at(16) == A_BOLD && atr_at(22) == 2 && atr_at(27) == A_UNDER && atr_at(0) == 0);
         md_in("# Title\n\nPara one\nwraps here.\n\n- item 1\n- item 2\n\n1. first\n2) second\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "Title\rPara one wraps here.\r\ritem 1\ritem 2\rfirst\rsecond\r") == 0);
         CHECK(para_kind(28) == K_BULLET && para_kind(35) == K_BULLET && para_kind(42) == K_NUMBER && item_num(42) == 1 &&
               para_kind(48) == K_NUMBER && item_num(48) == 2);
-        CHECK((ATR[0] & A_FONT) == 3 && (ATR[6] & A_FONT) == 0);
+        CHECK((atr_at(0) & A_FONT) == 3 && (atr_at(6) & A_FONT) == 0);
         md_in("Setext\n======\nnext\n");
         text_of(buf, sizeof buf);
-        CHECK(strcmp(buf, "Setext\rnext\r") == 0 && (ATR[0] & A_FONT) == 3);
+        CHECK(strcmp(buf, "Setext\rnext\r") == 0 && (atr_at(0) & A_FONT) == 3);
         md_in("See [the site](http://x.y) and ![a picture](p.png); <http://a.b>.\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "See the site (http://x.y) and a picture; http://a.b.\r") == 0);
@@ -716,22 +843,22 @@ int main(void) {
         CHECK(strcmp(buf, "a*b* 5 < 6 & 7 8 &copy; 2 * 3 = 6 snake_case_name\r") == 0);
         md_in("```c\nint *p = 0;\n  x\n```\nafter\n");
         text_of(buf, sizeof buf);
-        CHECK(strcmp(buf, "int *p = 0;\r  x\r\rafter\r") == 0 && ATR[0] == 2 && ATR[5] == 2 && ATR[17] == 0);
+        CHECK(strcmp(buf, "int *p = 0;\r  x\r\rafter\r") == 0 && atr_at(0) == 2 && atr_at(5) == 2 && atr_at(17) == 0);
         md_in("one\n\n<div style=\"page-break-after: always\"></div>\n\ntwo\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "one\r\ftwo\r") == 0);
         md_in("<div align=\"center\">\n\nMid\nline\\\nnext  \nlast\n\n</div>\n\n> quoted\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "Mid line\rnext\rlast\r\rquoted\r") == 0);
-        CHECK(((ATR[8] & A_ALIGN) >> A_ALIGN_SHIFT) == 1 && ((ATR[18] & A_ALIGN) >> A_ALIGN_SHIFT) == 1 &&
-              ATR[19] == 0 && ((ATR[26] & A_ALIGN) >> A_ALIGN_SHIFT) == 0);
+        CHECK(((atr_at(8) & A_ALIGN) >> A_ALIGN_SHIFT) == 1 && ((atr_at(18) & A_ALIGN) >> A_ALIGN_SHIFT) == 1 &&
+              atr_at(19) == 0 && ((atr_at(26) & A_ALIGN) >> A_ALIGN_SHIFT) == 0);
         md_in("**a***b* ***c*** *d **e** f*\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "ab c d e f\r") == 0);
-        CHECK(ATR[0] == A_BOLD && ATR[1] == A_ITAL && ATR[3] == (A_BOLD | A_ITAL) && ATR[5] == A_ITAL &&
-              ATR[7] == (A_BOLD | A_ITAL) && ATR[9] == A_ITAL);
+        CHECK(atr_at(0) == A_BOLD && atr_at(1) == A_ITAL && atr_at(3) == (A_BOLD | A_ITAL) && atr_at(5) == A_ITAL &&
+              atr_at(7) == (A_BOLD | A_ITAL) && atr_at(9) == A_ITAL);
         md_in("");
-        CHECK(doc_len == 1 && TXT[0] == CH_CR);
+        CHECK(doc_len == 1 && txt_at(0) == CH_CR);
 
         /* random documents: exported, imported, exported again: the same */
         srand(getenv("SEED") ? (unsigned)atoi(getenv("SEED")) : 1);
@@ -745,19 +872,19 @@ int main(void) {
                 const char *t = w[rand() % 24];
                 u8 a = (u8)(rand() % 4 == 0 ? rand() % 32 : 0), r = (u8)(rand() % 14);
                 for (; *t; t++) {
-                    TXT[doc_len] = (u8)*t;
-                    ATR[doc_len++] = a;
+                    txt_put(doc_len, (u8)*t);
+                    atr_put(doc_len++, a);
                 }
                 if (r < 9) {
-                    TXT[doc_len] = ' ';
-                    ATR[doc_len++] = (u8)(rand() % 3 == 0 ? a : 0);
+                    txt_put(doc_len, ' ');
+                    atr_put(doc_len++, (u8)(rand() % 3 == 0 ? a : 0));
                 } else {
-                    TXT[doc_len] = r == 13 ? CH_FF : CH_CR;
-                    ATR[doc_len++] = (u8)((rand() % 4) << A_ALIGN_SHIFT);
+                    txt_put(doc_len, r == 13 ? CH_FF : CH_CR);
+                    atr_put(doc_len++, (u8)((rand() % 4) << A_ALIGN_SHIFT));
                 }
             }
-            TXT[doc_len] = CH_CR;
-            ATR[doc_len++] = 0;
+            txt_put(doc_len, CH_CR);
+            atr_put(doc_len++, 0);
             n = md_out(m1);
             md_fixed_point(m1, m2, "random");
             if (fails > 10) break;
@@ -776,11 +903,11 @@ int main(void) {
          * style and alignment */
         wp_cmd(13);
         for (k = 0; k < 40; k++) {
-            TXT[k] = (u8)("a{b}c\\d e  f\rg\f\fh  \ri j\rk\r"[k % 20]);
-            ATR[k] = (u8)(TXT[k] == CH_CR || TXT[k] == CH_FF ? (k % 4) << A_ALIGN_SHIFT : k % 32);
+            txt_put(k, (u8)("a{b}c\\d e  f\rg\f\fh  \ri j\rk\r"[k % 20]));
+            atr_put(k, (u8)(txt_at(k) == CH_CR || txt_at(k) == CH_FF ? (k % 4) << A_ALIGN_SHIFT : k % 32));
         }
-        TXT[40] = CH_CR;
-        ATR[40] = 0;
+        txt_put(40, CH_CR);
+        atr_put(40, 0);
         doc_len = 41;
         rtf_round("styles and breaks");
         /* random documents */
@@ -789,12 +916,12 @@ int main(void) {
             u16 len = (u16)(1 + rand() % 3000);
             for (k = 0; k < len; k++) {
                 int r2 = rand() % 40;
-                TXT[k] = (u8)(r2 == 0 ? CH_CR : r2 == 1 ? CH_FF : r2 < 8 ? ' ' : r2 < 12 ? 0xA0 + rand() % 96 : 32 + rand() % 95);
-                ATR[k] = (u8)(TXT[k] == CH_CR || TXT[k] == CH_FF ? (rand() % 4) << A_ALIGN_SHIFT
-                                                                 : rand() % 3 ? ATR[k ? k - 1 : 0] & A_STYLE : rand() % 32);
+                txt_put(k, (u8)(r2 == 0 ? CH_CR : r2 == 1 ? CH_FF : r2 < 8 ? ' ' : r2 < 12 ? 0xA0 + rand() % 96 : 32 + rand() % 95));
+                atr_put(k, (u8)(txt_at(k) == CH_CR || txt_at(k) == CH_FF ? (rand() % 4) << A_ALIGN_SHIFT
+                                                                 : rand() % 3 ? atr_at(k ? k - 1 : 0) & A_STYLE : rand() % 32));
             }
-            TXT[len] = CH_CR;
-            ATR[len] = 0;
+            txt_put(len, CH_CR);
+            atr_put(len, 0);
             doc_len = (u16)(len + 1);
             rtf_round("a random document");
         }
@@ -836,12 +963,12 @@ int main(void) {
                 show(want);
                 fails++;
             }
-            CHECK((ATR[0] & A_FONT) == 3 && (ATR[0] & A_BOLD));                 /* Title: 16 pt, Head */
-            CHECK(((ATR[5] & A_ALIGN) >> A_ALIGN_SHIFT) == 1);                  /* centred */
-            CHECK((ATR[6] & A_STYLE) == 0);                                     /* Plain: Arial, Sans */
-            CHECK((ATR[12] & A_STYLE) == A_BOLD && (ATR[17] & A_STYLE) == (A_BOLD | A_ITAL));
-            CHECK((ATR[22] & A_UNDER) && !(ATR[28] & A_UNDER));
-            CHECK((ATR[31] & A_FONT) == 2 && (ATR[36] & A_FONT) == 1 && (ATR[35] & A_FONT) == 0);
+            CHECK((atr_at(0) & A_FONT) == 3 && (atr_at(0) & A_BOLD));                 /* Title: 16 pt, Head */
+            CHECK(((atr_at(5) & A_ALIGN) >> A_ALIGN_SHIFT) == 1);                  /* centred */
+            CHECK((atr_at(6) & A_STYLE) == 0);                                     /* Plain: Arial, Sans */
+            CHECK((atr_at(12) & A_STYLE) == A_BOLD && (atr_at(17) & A_STYLE) == (A_BOLD | A_ITAL));
+            CHECK((atr_at(22) & A_UNDER) && !(atr_at(28) & A_UNDER));
+            CHECK((atr_at(31) & A_FONT) == 2 && (atr_at(36) & A_FONT) == 1 && (atr_at(35) & A_FONT) == 0);
         }
     }
 
@@ -856,13 +983,13 @@ int main(void) {
         type("Title\nBody text here\nmore");
         wp_key(147);                                    /* (the start) */
         wp_cmd(32 + K_H1);                              /* no selection: the cursor's paragraph */
-        CHECK(para_kind(0) == K_H1 && ATR[0] == (F_HEAD | A_BOLD) && ATR[4] == (F_HEAD | A_BOLD) && para_kind(6) == 0);
+        CHECK(para_kind(0) == K_H1 && atr_at(0) == (F_HEAD | A_BOLD) && atr_at(4) == (F_HEAD | A_BOLD) && para_kind(6) == 0);
         CHECK(wp_get(16) == K_H1);                      /* GET_KIND */
         CHECK(raw_tag(0, tags) >= 4 && memcmp(tags, "[H1]", 4) == 0);
         /* RETURN at a heading's end: a normal paragraph after it */
         wp_cmd(14);
         type("\nx");
-        CHECK(para_kind(0) == K_H1 && para_kind(6) == K_NORMAL && ATR[6] == 0);
+        CHECK(para_kind(0) == K_H1 && para_kind(6) == K_NORMAL && atr_at(6) == 0);
         wp_key(20);
         wp_key(20);                                     /* (the empty paragraph gone: the heading kept) */
         text_of(buf, sizeof buf);
@@ -872,21 +999,21 @@ int main(void) {
         sel_anchor = 11;
         cur = 15;
         wp_cmd(32 + K_CODE);
-        CHECK(ATR[10] == 0 && ATR[11] == F_MONO && ATR[14] == F_MONO && ATR[15] == 0 && para_kind(6) == K_NORMAL);
+        CHECK(atr_at(10) == 0 && atr_at(11) == F_MONO && atr_at(14) == F_MONO && atr_at(15) == 0 && para_kind(6) == K_NORMAL);
         /* part of one, all of the next: each its way */
         sel_anchor = 16;
         cur = 25;
         wp_cmd(32 + K_QUOTE);
-        CHECK(ATR[16] == (F_SERIF | A_ITAL) && para_kind(6) == K_NORMAL);
-        CHECK(para_kind(21) == K_QUOTE && ATR[21] == (F_SERIF | A_ITAL) && ATR[24] == (F_SERIF | A_ITAL));
+        CHECK(atr_at(16) == (F_SERIF | A_ITAL) && para_kind(6) == K_NORMAL);
+        CHECK(para_kind(21) == K_QUOTE && atr_at(21) == (F_SERIF | A_ITAL) && atr_at(24) == (F_SERIF | A_ITAL));
         /* a whole paragraph: the characters in the old kind's style take
          * the new one's, others keep their font (and what was added) */
         sel_on = 0;
         cur = 8;
         wp_cmd(32 + K_QUOTE);
-        CHECK(para_kind(6) == K_QUOTE && ATR[6] == (F_SERIF | A_ITAL) && ATR[11] == (F_MONO | A_ITAL));
+        CHECK(para_kind(6) == K_QUOTE && atr_at(6) == (F_SERIF | A_ITAL) && atr_at(11) == (F_MONO | A_ITAL));
         wp_cmd(32 + K_NORMAL);
-        CHECK(para_kind(6) == K_NORMAL && ATR[6] == 0 && ATR[11] == F_MONO && ATR[16] == 0);
+        CHECK(para_kind(6) == K_NORMAL && atr_at(6) == 0 && atr_at(11) == F_MONO && atr_at(16) == 0);
         CHECK(para_kind(21) == K_QUOTE);
         /* a quote laid out with its indent */
         get_line(line_of(21), &L);
@@ -909,11 +1036,11 @@ int main(void) {
         CHECK(strcmp(buf, "One\rTwo\rThree\rFour\rtext it\r\rq1 it b q2\rq3\r\rq4\r\rcode\r\r  more\r\rSetext\r") == 0);
         CHECK(para_kind(0) == K_H1 && para_kind(4) == K_H2 && para_kind(8) == K_H3 && para_kind(14) == K_H3 &&
               para_kind(19) == K_NORMAL);
-        CHECK(ATR[0] == (F_HEAD | A_BOLD) && ATR[8] == (F_SERIF | A_BOLD) && ATR[24] == A_ITAL);
-        CHECK(para_kind(28) == K_QUOTE && ATR[28] == (F_SERIF | A_ITAL) && ATR[34] == (F_SERIF | A_ITAL | A_BOLD));
+        CHECK(atr_at(0) == (F_HEAD | A_BOLD) && atr_at(8) == (F_SERIF | A_BOLD) && atr_at(24) == A_ITAL);
+        CHECK(para_kind(28) == K_QUOTE && atr_at(28) == (F_SERIF | A_ITAL) && atr_at(34) == (F_SERIF | A_ITAL | A_BOLD));
         CHECK(para_kind(39) == K_QUOTE && para_kind(42) == K_NORMAL && para_kind(43) == K_QUOTE);
-        CHECK(para_kind(47) == K_CODE && para_kind(52) == K_CODE && para_kind(53) == K_CODE && ATR[47] == F_MONO);
-        CHECK(para_kind(61) == K_H2 && ATR[61] == F_HEAD);
+        CHECK(para_kind(47) == K_CODE && para_kind(52) == K_CODE && para_kind(53) == K_CODE && atr_at(47) == F_MONO);
+        CHECK(para_kind(61) == K_H2 && atr_at(61) == F_HEAD);
         md_out(m1);
         CHECK(strstr(m1, "# One\n\n## Two\n\n### Three\n\n### Four\n\ntext *it*\n\n> q1 it **b** q2\\\n> q3\n\n> q4") != NULL);
         CHECK(strstr(m1, "```\ncode\n\n  more\n```\n\n## Setext") != NULL);
@@ -939,9 +1066,9 @@ int main(void) {
         md_in("- one\n- two\n    1. a\n    2. b\n        - deep\n    3. c\n- three\n\n1. x\n\n2. y\n3) z\n\ntext\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "one\rtwo\ra\rb\rdeep\rc\rthree\rx\ry\rz\r\rtext\r") == 0);
-        CHECK(ATR[3] == K_BULLET && ATR[7] == K_BULLET && ATR[9] == (K_NUMBER | 1 << A_LEVEL_SHIFT) &&
-              ATR[16] == (K_BULLET | 2 << A_LEVEL_SHIFT) && ATR[18] == (K_NUMBER | 1 << A_LEVEL_SHIFT) &&
-              ATR[24] == K_BULLET && ATR[25] == 0);
+        CHECK(atr_at(3) == K_BULLET && atr_at(7) == K_BULLET && atr_at(9) == (K_NUMBER | 1 << A_LEVEL_SHIFT) &&
+              atr_at(16) == (K_BULLET | 2 << A_LEVEL_SHIFT) && atr_at(18) == (K_NUMBER | 1 << A_LEVEL_SHIFT) &&
+              atr_at(24) == K_BULLET && atr_at(25) == 0);
         CHECK(item_num(8) == 1 && item_num(10) == 2 && item_num(17) == 3);  /* (deep passed over) */
         CHECK(item_num(25) == 1 && item_num(27) == 2 && item_num(29) == 3); /* (a loose list: one list) */
         CHECK(para_kind(32) == K_NORMAL);
@@ -958,13 +1085,13 @@ int main(void) {
         screen_ppm("build/lists_page.ppm");
         cur = 8;                                    /* "a": out of the list (level 1, then 0, then normal) */
         wp_key(20);
-        CHECK(para_kind(8) == K_NUMBER && (ATR[9] & A_LEVEL) == 0 && strcmp((text_of(buf, sizeof buf), buf), "one\rtwo\ra\rb\rdeep\rc\rthree\rx\ry\rz\r\rtext\r") == 0);
+        CHECK(para_kind(8) == K_NUMBER && (atr_at(9) & A_LEVEL) == 0 && strcmp((text_of(buf, sizeof buf), buf), "one\rtwo\ra\rb\rdeep\rc\rthree\rx\ry\rz\r\rtext\r") == 0);
         CHECK(item_num(10) == 1);                   /* (b: the first at level 1 now) */
         wp_key(9);                                  /* TAB: back in */
-        CHECK((ATR[9] & A_LEVEL) == 1 << A_LEVEL_SHIFT && item_num(10) == 2);
+        CHECK((atr_at(9) & A_LEVEL) == 1 << A_LEVEL_SHIFT && item_num(10) == 2);
         wp_key(20);
         wp_key(20);
-        CHECK(para_kind(8) == K_NORMAL && ATR[9] == 0 && item_num(10) == 1);
+        CHECK(para_kind(8) == K_NORMAL && atr_at(9) == 0 && item_num(10) == 1);
         /* RETURN on an empty item: out of the list */
         wp_cmd(13);
         wp_cmd(32 + K_BULLET);
@@ -976,9 +1103,9 @@ int main(void) {
         wp_key(147);
         wp_key(9);
         wp_cmd(32 + K_NUMBER);                      /* (a list's level kept as it changes kind) */
-        CHECK(ATR[1] == (K_NUMBER | 1 << A_LEVEL_SHIFT));
+        CHECK(atr_at(1) == (K_NUMBER | 1 << A_LEVEL_SHIFT));
         wp_cmd(32 + K_NORMAL);
-        CHECK(ATR[1] == 0);
+        CHECK(atr_at(1) == 0);
         wp_drop(K_NUMBER);
         screen_ppm("build/style_drop.ppm");
         wp_drop(0xFF);
@@ -990,15 +1117,15 @@ int main(void) {
                "{\\listtext\\pard\\plain 2.\\tab}\\pard\\s20\\ls2\\ilvl1 N2\\par\\pard After\\par}");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "B1\rN1\rN2\rAfter\r") == 0);
-        CHECK(ATR[2] == K_BULLET && ATR[5] == (K_NUMBER | 1 << A_LEVEL_SHIFT) && item_num(6) == 2 && ATR[11] == 0);
+        CHECK(atr_at(2) == K_BULLET && atr_at(5) == (K_NUMBER | 1 << A_LEVEL_SHIFT) && item_num(6) == 2 && atr_at(11) == 0);
 
         /* a version 1 file: its paragraph ends' style bits cleared */
         wp_cmd(13);
         type("ab");
-        ATR[2] = (u8)(A_BOLD | 3 | (2 << A_ALIGN_SHIFT));
+        atr_put(2, (u8)(A_BOLD | 3 | (2 << A_ALIGN_SHIFT)));
         n = doc_pack();
         MEM[SCRATCH_LIN + 2] = 1;
-        CHECK(doc_unpack() == 0 && ATR[2] == (2 << A_ALIGN_SHIFT) && para_kind(0) == K_NORMAL);
+        CHECK(doc_unpack() == 0 && atr_at(2) == (2 << A_ALIGN_SHIFT) && para_kind(0) == K_NORMAL);
         MEM[SCRATCH_LIN + 2] = 3;
         CHECK(doc_unpack() == 1);                       /* (a later version: refused) */
         (void)n;
@@ -1021,8 +1148,8 @@ int main(void) {
             if (keys[i] == 1) CHECK(msg[0] != 0);
         }
         CHECK(msg[0] != 0);                                         /* "Nothing to compose" */
-        CHECK(doc_len == 6 && TXT[0] == 0xE4 && TXT[1] == 0xE4 && TXT[2] == 0xDF && TXT[3] == 0xCA &&
-              TXT[4] == 0xF1 && cur == 5);
+        CHECK(doc_len == 6 && txt_at(0) == 0xE4 && txt_at(1) == 0xE4 && txt_at(2) == 0xDF && txt_at(3) == 0xCA &&
+              txt_at(4) == 0xF1 && cur == 5);
         CHECK(char_w(0xE4, 0) == char_w('a', 0) && char_w(0xE4, A_BOLD) == char_w(0xE4, 0) + 1);
         CHECK(char_w(0xC4, 3) > 8 && char_w(0xA0, 2) == 8);
         check_layout();
@@ -1034,7 +1161,7 @@ int main(void) {
         md_out(m);
         CHECK(strcmp(m, "\xc3\xa4\xc3\xa4\xc3\x9f\xc3\x8a\xc3\xb1\n\n") == 0);
         md_in(m);
-        CHECK(doc_len == 6 && TXT[0] == 0xE4 && TXT[3] == 0xCA && TXT[4] == 0xF1);
+        CHECK(doc_len == 6 && txt_at(0) == 0xE4 && txt_at(3) == 0xCA && txt_at(4) == 0xF1);
         /* RTF: \'hh */
         rtf_out(m);
         CHECK(strstr(m, "\\'e4\\'e4\\'df\\'ca\\'f1") != NULL);
@@ -1075,13 +1202,13 @@ int main(void) {
         const char *t = w[rand() % 7];
         u8 a = (u8)(rand() % 9 == 0 ? A_BOLD : rand() % 13 == 0 ? 3 : 0);
         for (k = 0; t[k]; k++) {
-            TXT[doc_len - 1 + k] = (u8)t[k];
-            ATR[doc_len - 1 + k] = a;
+            txt_put(doc_len - 1 + k, (u8)t[k]);
+            atr_put(doc_len - 1 + k, a);
         }
         doc_len += k;
-        if (rand() % 12 == 0) TXT[doc_len++ - 1] = CH_CR;
-        TXT[doc_len - 1] = CH_CR;
-        ATR[doc_len - 1] = (u8)((rand() % 4) << A_ALIGN_SHIFT);
+        if (rand() % 12 == 0) txt_put(doc_len++ - 1, CH_CR);
+        txt_put(doc_len - 1, CH_CR);
+        atr_put(doc_len - 1, (u8)((rand() % 4) << A_ALIGN_SHIFT));
     }
     layout_all();
     wp_key(147);
@@ -1107,6 +1234,7 @@ int main(void) {
     screen_ppm("build/fuzz2.ppm");
 
     test_edit();
+    test_gap();
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

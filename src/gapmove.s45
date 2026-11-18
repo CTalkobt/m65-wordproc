@@ -1,0 +1,160 @@
+; gapmove.s45 — doc.c's gap_to and move2 (in C there for the host)
+;
+; void gap_to(u16 p): the gap moved to before the document's character p
+; (the characters between moved across it).
+;
+; void move2(u16 d, u16 s, u16 n): n characters, text and attributes, moved from the store's s to its
+; d (TEXT_LIN, $8000000, and ATTR_LIN, $8010000; up: through the scratch
+; area, $50000, as the DMA copies upwards only when the ranges do not
+; overlap). A file of its own: ln45 takes an assembly file's labels as one
+; function, and gap.s45's must not seem to call mem_copy.
+
+; no calls through pointers here (ln45's call graph)
+.weak cc45.icallinfo
+cc45.icallinfo = 1
+
+.global _move2, _gap_to
+.extern _mem_copy, _g_at, _g_len
+
+.segment "bss"
+__m2:   .res 7          ; d, s, n; the bank's low byte (0 text, 1 attributes)
+__gp:   .res 2          ; gap_to's p
+
+.segment "code"
+proc _move2
+    .zp_uses $10, $11, $12, $13, $14, $15
+    .zp_clobbers $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+    .zp_release $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+    .reg_clobbers A, X, Y, Z
+    .flag_clobbers C, N, Z, V
+    ; (no indexed base page: ca45 would take every byte up to $80 as used)
+    ldq $10
+    stq __m2
+    lda $14
+    sta __m2+4
+    lda $15
+    sta __m2+5
+    lda #0
+    sta __m2+6
+@bank:
+    ; d > s: s to the scratch area first, then from there
+    lda __m2+2
+    cmp __m2
+    lda __m2+3
+    sbc __m2+1
+    bcs @direct
+    jsr @src
+    lda #0
+    sta $10
+    sta $11
+    sta $13
+    lda #5
+    sta $12
+    jsr _mem_copy
+    lda #0
+    sta $14
+    sta $15
+    sta $17
+    lda #5
+    sta $16
+    jsr @n
+    bra @copy
+@direct:
+    jsr @src
+@copy:
+    lda __m2
+    sta $10
+    lda __m2+1
+    sta $11
+    lda __m2+6
+    sta $12
+    lda #$08
+    sta $13
+    jsr _mem_copy
+    inc __m2+6
+    lda __m2+6
+    cmp #2
+    bne @bank
+    rts
+@src:
+    lda __m2+2
+    sta $14
+    lda __m2+3
+    sta $15
+    lda __m2+6
+    sta $16
+    lda #$08
+    sta $17
+@n:
+    lda __m2+4
+    sta $18
+    lda __m2+5
+    sta $19
+    rts
+    .func_flags zp_call
+endproc
+
+proc _gap_to
+    .zp_uses $10, $11
+    .zp_clobbers $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+    .zp_release $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+    .reg_clobbers A, X, Y, Z
+    .flag_clobbers C, N, Z, V
+    lda $10
+    sta __gp
+    lda $11
+    sta __gp+1
+    lda _g_len
+    ora _g_len+1
+    beq @set
+    lda _g_at
+    cmp $10
+    lda _g_at+1
+    sbc $11
+    bcc @after
+    ; p <= g_at: p..g_at-1 up across the gap (s p, d p + g_len, n g_at - p)
+    sec
+    lda _g_at
+    sbc $10
+    sta $14
+    lda _g_at+1
+    sbc $11
+    sta $15
+    lda $10
+    sta $12
+    clc
+    adc _g_len
+    sta $10
+    lda $11
+    sta $13
+    adc _g_len+1
+    sta $11
+    bra @move
+@after:
+    ; p > g_at: g_at + g_len.. down to g_at (n p - g_at)
+    sec
+    lda $10
+    sbc _g_at
+    sta $14
+    lda $11
+    sbc _g_at+1
+    sta $15
+    lda _g_at
+    sta $10
+    clc
+    adc _g_len
+    sta $12
+    lda _g_at+1
+    sta $11
+    adc _g_len+1
+    sta $13
+@move:
+    jsr _move2
+@set:
+    lda __gp
+    sta _g_at
+    lda __gp+1
+    sta _g_at+1
+    rts
+    .func_flags zp_call
+endproc

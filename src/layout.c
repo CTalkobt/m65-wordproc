@@ -359,15 +359,16 @@ static u16 line_of_laid(u16 pos) {
     return lo;
 }
 
-/* the lines from..from+n-1 moved to line to (bounced through the scratch
- * area when they move up: the DMA copies upwards only without overlap) */
+/* the lines from..from+n-1 moved to line to (bounced through attic RAM
+ * when they move up: the DMA copies upwards only without overlap; not the
+ * scratch area, where undo's copy is) */
 static void move_lines(u16 to, u16 from, u16 n) {
     u16 bytes = (u16)(n * sizeof(struct line));
     u32 dst = line_addr(to), src = line_addr(from);
     if (to == from || !n) return;
     if (to > from) {
-        mem_copy(SCRATCH_LIN, src, bytes);
-        src = SCRATCH_LIN;
+        mem_copy(LBOUNCE_LIN, src, bytes);
+        src = LBOUNCE_LIN;
     }
     mem_copy(dst, src, bytes);
 }
