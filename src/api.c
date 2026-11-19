@@ -8,7 +8,7 @@
  *   wp_find(op)      find and replace: FIND_... (the strings poked into msg)
  *   wp_get(w)        a value for BASIC (RREG lo, hi): GET_... (files: the
  *                    image, plain text or Markdown at SCRATCH_LIN; Markdown
- *                    by the modules MDIMPORT.OVL / MDEXPORT.OVL, RTF by RTF.OVL: 65535
+ *                    by the module MARKDOWN.OVL, RTF by RTF.OVL: 65535
  *                    when it is not loaded)
  *   wp_setmsg        msg (poked by BASIC as PETSCII) shown in the bottom bar
  *   wp_setname       fname (PETSCII) as the document's name

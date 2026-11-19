@@ -2,7 +2,7 @@
  * area, a walk over the document for export, a builder of the document for
  * import, and Unicode as the document's characters
  *
- * They are in the program, once: the converter modules (MDIMPORT.OVL,
+ * They are in the program, once: the converter modules (MARKDOWN.OVL,
  * RTF.OVL, ...) call them through mkmod.py's equates, as any program
  * function, and hold only their format's syntax. The text import and
  * export (doc.c) use them too.

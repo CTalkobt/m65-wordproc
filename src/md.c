@@ -1,5 +1,5 @@
 /* md.c — Markdown export and import (UTF-8 text, LF line ends): the
- * modules MDEXPORT.OVL and MDIMPORT.OVL, built from it apart (MD_PART)
+ * module MARKDOWN.OVL
  *
  * Export (md_export: the document to SCRATCH_LIN):
  *   a paragraph             a line; paragraphs that follow each other with
@@ -48,12 +48,6 @@ static u8 is_letter(u8 c) { return (u8)((c | 0x20) - 'a') < 26; }
 static u8 is_alnum(u8 c) { return is_letter(c) || (u8)(c - '0') < 10; }
 static u8 is_punct(u8 c) { return c > ' ' && c < 127 && !is_alnum(c); }
 
-/* (MD_PART: 1 builds MDEXPORT.OVL, 2 MDIMPORT.OVL; the host has both) */
-#ifndef MD_PART
-#define MD_PART 0
-#endif
-
-#if MD_PART != 2
 static u8 base;                 /* the paragraph kind's own style (kind_attr) */
 
 /* the Markdown style of character i: its underline / bold / italic (those
@@ -156,10 +150,7 @@ static void out_para(u16 ps, u16 pe, u8 code) {
 #define P_NONE 0xFF             /* (prev: no block yet; a page break) */
 #define P_BREAK 0xFE
 
-#endif
-
 static const char *const align_attr[4] = { "", "center", "right", "justify" };
-#if MD_PART != 2
 static u8 prev, pal;            /* the last block's kind; its alignment (a div open) */
 
 /* the last block closed (its fence, its div) and a blank line after it */
@@ -242,10 +233,7 @@ u16 md_export(void) {
     return o_end();
 }
 
-#endif
-
 /* ==== import ==== */
-#if MD_PART != 1
 static u8 pk, base_attr;        /* the paragraph's kind (and level), its style (kind_attr) */
 static u8 item, lv, lv_sp[4];   /* in a list; the last item's level; each level's indent */
 static u8 flags;                /* bold / italic / underline open */
@@ -646,15 +634,7 @@ u16 md_import(void) {
     return build_end();
 }
 
-#endif
-
-/* MDEXPORT.OVL's and MDIMPORT.OVL's entry (mod_run): export or import */
+/* MARKDOWN.OVL's entry (mod_run): export or import */
 void md_main(void) {
-#if MD_PART == 1
-    if (mod_cmd == MOD_MD_EXPORT) mod_ret = md_export();
-#elif MD_PART == 2
-    if (mod_cmd == MOD_MD_IMPORT) mod_ret = md_import();
-#else
     mod_ret = mod_cmd == MOD_MD_EXPORT ? md_export() : md_import();
-#endif
 }

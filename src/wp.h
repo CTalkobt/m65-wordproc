@@ -335,10 +335,10 @@ void doc_built(void);           /* after build_end (b_done): doc_loaded(1) (mod_
 /* ---- modules (.OVL files, loaded by BASIC into mod_area: render.c) ----
  * A module is built apart (Makefile: linked at mod_area against the
  * program's map) and is at most MOD_SIZE bytes, code, data and variables. */
-#define MOD_SIZE 6016            /* (LIST_OFS + LIST.OVL: the most a resident module needs) */
+#define MOD_SIZE 6784            /* (MARKDOWN.OVL: 6710, the largest module) */
 #define MOD_MORE 0x80                   /* (in a command: more calls follow, the module stays) */
-#define MOD_MD_EXPORT 0                 /* MDEXPORT.OVL: md_export */
-#define MOD_MD_IMPORT 1                 /* MDIMPORT.OVL: md_import */
+#define MOD_MD_EXPORT 0                 /* MARKDOWN.OVL: md_export */
+#define MOD_MD_IMPORT 1                 /* MARKDOWN.OVL: md_import */
 #define MOD_RTF_EXPORT 2                /* RTF.OVL: the document as RTF at SCRATCH_LIN */
 #define MOD_RTF_BEGIN (MOD_MORE | 3)    /* RTF.OVL: an import starts */
 #define MOD_RTF_CHUNK (MOD_MORE | 4)    /* RTF.OVL: the next 1 KB of the file, at SCRATCH_LIN */
@@ -347,7 +347,7 @@ extern u8 mod_cmd;                      /* what the module is to do */
 extern u16 mod_ret;                     /* its result */
 u8 mod_ok(const u8 *m);                 /* a module's header there, of this build */
 u16 mod_run(u8 cmd);                    /* run the module loaded; 0xFFFF: none */
-void md_main(void);                     /* MDEXPORT.OVL's and MDIMPORT.OVL's entry (md.c) */
+void md_main(void);                     /* MARKDOWN.OVL's entry (md.c) */
 void rtf_main(void);                    /* RTF.OVL's entry (rtf.c) */
 /* LIST.OVL (list.c), list mode: resident, it draws its markers over each
  * line drawn while list_on (render.c calls list_main with hk_l, hk_L: the

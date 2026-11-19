@@ -20,8 +20,9 @@ RAM." xemu emulates it.
 
 Needs the cc45 toolchain (M65Compiler: `basic45`, `cc45`, `disk45`), by
 default checked out next to this directory (`CC45_ROOT`), at master
-`6a7dd256` or later (`basic45 --map` and a working `--minify`; build
-`BASFLAGS=` for an unminified program).
+`968ae856` or later (`basic45 --map`, a working `--minify`, and struct
+fields read at their addresses (M65Compiler #657-#660), without which bank 0
+overflows; build `BASFLAGS=` for an unminified program).
 
 ```bash
 make            # build/writer.prg and build/writer.d81
@@ -33,9 +34,9 @@ On a MEGA65: copy `build/writer.d81` to the SD card, mount it, then
 `DLOAD "WRITER"` and `RUN`. The disk holds `WRITER` (the program),
 `WRITER.FNT` (the fonts' glyphs, loaded by the program), `WRITER.HELP` (the
 help: a Writer document shown when the program starts and again with F8 / HELP;
-without it the program starts with an empty document), `MDIMPORT.OVL` and
-`MDEXPORT.OVL` (Markdown import and export, modules: without them the rest
-works, and a `.md` name gets "Markdown needs MDIMPORT.OVL on the disk"),
+without it the program starts with an empty document), `MARKDOWN.OVL`
+(Markdown import and export, a module: without it the rest works, and a
+`.md` name gets "Markdown needs MARKDOWN.OVL on the disk"),
 `RTF.OVL` (RTF import and export, the same for `.rtf`), `LIST.OVL`
 (list mode, a module: without it the menu does not offer it) and
 `DEFAULT0.OVL` (undo, find and replace, and the styles; a required module,
@@ -160,7 +161,7 @@ letter with its accent), in `WRITER.FNT`.
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
 | `src/m65.c` | C | the VIC-IV screen mode, DMA and colour RAM |
 | `src/conv.c` | C | what the converters share (below): output to the scratch area, a walk over the document for export, a builder for import, Unicode as the document's characters |
-| `src/md.c` | C | Markdown export and import (below): the modules `MDEXPORT.OVL` and `MDIMPORT.OVL` (`MD_PART` 1, 2) |
+| `src/md.c` | C | Markdown export and import (below): the module `MARKDOWN.OVL` |
 | `src/rtf.c` | C | RTF export and (streamed) import: the module `RTF.OVL` |
 | `src/list.c` | C | list mode's markers: the module `LIST.OVL` |
 | `src/edit.c`, `src/edit_undo.c` | C | undo, find and replace, the styles: the module `DEFAULT0.OVL` |
@@ -183,8 +184,8 @@ has no use for one leaves it off the disk and the program does not need
 the room for it. Two kinds:
 
 - **Run once** (as one job over the document), loaded just before it runs:
-  Markdown (`MDIMPORT.OVL` and `MDEXPORT.OVL`, both from `src/md.c`, built
-  apart so that neither sets `MOD_SIZE`), RTF (`RTF.OVL`, from
+  Markdown (`MARKDOWN.OVL`, from `src/md.c`: the largest module, 6710
+  bytes, so it sets `MOD_SIZE`), RTF (`RTF.OVL`, from
   `src/rtf.c`); PETSCII graphics, PDF export, find and replace or a word
   count would fit the same way. One can also be called several times in a
   row (a command with `MOD_MORE`: `mod_run` then leaves it and the drawing's
@@ -216,7 +217,7 @@ the room for it. Two kinds:
   functions that note nothing (`del_raw`, `room`): it notes its own
   changes, and must not call back into itself.
 
-- **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6016 bytes in
+- **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6784 bytes in
   bank 0), which is also where the drawing keeps its buffers and caches
   (the band, the redraw cache, the bars' text, the row patterns, and the
   layout's buffer of new lines and the menu's text: 4.3 KB),
@@ -355,7 +356,7 @@ in `.md`, RTF for `.rtf`.
 
 ### Markdown
 
-Export (`src/md.c`, `md_export`, in the module `MDEXPORT.OVL`) writes
+Export (`src/md.c`, `md_export`, in the module `MARKDOWN.OVL`) writes
 UTF-8 with LF line ends; Import reads it back (up to 59 KB) and Markdown
 from elsewhere.
 
@@ -518,8 +519,12 @@ can be.
   export and list mode in xemu, the stack never went deeper than 32
   bytes. The gap (above) took 470 bytes, even with its hottest parts in
   assembly (`gap.s45`, `gapmove.s45`: cc45's 32-bit address arithmetic
-  made the C some three times larger), so the C data ends at `$BF00` and
-  the stack has 256 bytes. (The BASIC program's
+  made the C some three times larger), so the C data ended at `$BF00` and
+  the stack had 256 bytes. cc45's reading of struct fields at their
+  addresses, once (M65Compiler #657-#659), then made the C 827 bytes
+  smaller, and Markdown became one module again (`MARKDOWN.OVL`, import
+  and export: 6710 bytes), so `MOD_SIZE` went from 6016 to 6784 bytes:
+  the C data ends at `$BE00`, and the stack has 512 bytes. (The BASIC program's
   two `poke`s of `$D1` / `$F7` are written in decimal: `--minify` turns
   `poke $d1` into a variable,
   [M65Compiler #603](https://github.com/CTalkobt/M65Compiler/issues/603).)

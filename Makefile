@@ -70,7 +70,7 @@ $(BUILD)/obj/%.o45: src/%.s45
 # linked by tools/mkmod.py to run at the program's mod_area, against its
 # map (basic45 --map: M65Compiler #595, in master since 6a7dd256); the build's ID (of the sources and the tools) ties each to the
 # program it was linked with (render.c's mod_run refuses another's).
-MODS    = $(BUILD)/mdimport.ovl $(BUILD)/mdexport.ovl $(BUILD)/rtf.ovl $(BUILD)/list.ovl $(BUILD)/default0.ovl
+MODS    = $(BUILD)/markdown.ovl $(BUILD)/rtf.ovl $(BUILD)/list.ovl $(BUILD)/default0.ovl
 BUILD_ID := $(shell cat src/*.c src/*.h src/wp.bas tools/mkmod.py $(CC45) $(CC45_ROOT)/bin/ln45 2>/dev/null | cksum | awk '{print $$1 % 65536}')
 
 $(BUILD)/buildid.h: FORCE
@@ -80,14 +80,13 @@ $(BUILD)/buildid.h: FORCE
 
 $(BUILD)/obj/render.o45: $(BUILD)/buildid.h
 
-# Markdown is two modules from md.c (MD_PART), so neither sets MOD_SIZE:
-# MDEXPORT.OVL (1) and MDIMPORT.OVL (2)
-$(BUILD)/obj/mdexport_mod.o45 $(BUILD)/obj/mdimport_mod.o45: $(BUILD)/obj/md%_mod.o45: src/md.c $(HEADERS)
+# MARKDOWN.OVL: Markdown import and export (md.c), a run-once module
+$(BUILD)/obj/md_mod.o45: src/md.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
-	$(CC45) -O1 -DMD_PART=$(if $(filter export,$*),1,2) $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
 
-$(BUILD)/mdexport.ovl $(BUILD)/mdimport.ovl: $(BUILD)/md%.ovl: $(TARGET) $(BUILD)/obj/md%_mod.o45 tools/mkmod.py
-	python3 tools/mkmod.py --entry _md_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/md$*_mod.o45
+$(BUILD)/markdown.ovl: $(TARGET) $(BUILD)/obj/md_mod.o45 tools/mkmod.py
+	python3 tools/mkmod.py --entry _md_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/md_mod.o45
 
 $(BUILD)/obj/rtf_mod.o45: src/rtf.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
@@ -138,8 +137,7 @@ $(DISK): $(TARGET) src/writer.fnt $(BUILD)/help.prg $(MODS)
 	$(DISK45) add $@ $(TARGET) "WRITER"
 	$(DISK45) add $@ src/writer.fnt "WRITER.FNT"
 	$(DISK45) add $@ $(BUILD)/help.prg "WRITER.HELP"
-	$(DISK45) add $@ $(BUILD)/mdimport.ovl "MDIMPORT.OVL"
-	$(DISK45) add $@ $(BUILD)/mdexport.ovl "MDEXPORT.OVL"
+	$(DISK45) add $@ $(BUILD)/markdown.ovl "MARKDOWN.OVL"
 	$(DISK45) add $@ $(BUILD)/rtf.ovl "RTF.OVL"
 	$(DISK45) add $@ $(BUILD)/list.ovl "LIST.OVL"
 	$(DISK45) add $@ $(BUILD)/default0.ovl "DEFAULT0.OVL"

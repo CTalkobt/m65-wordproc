@@ -8,7 +8,7 @@
 ' document, lays it out and draws the 640 x 400 screen; BASIC calls it with
 ' SYS {name}, a and reads results with RREG.
 '
-' Modules (.OVL files: MDIMPORT.OVL, MDEXPORT.OVL, RTF.OVL, LIST.OVL) are loaded only when they
+' Modules (.OVL files: MARKDOWN.OVL, RTF.OVL, LIST.OVL, DEFAULT0.OVL) are loaded only when they
 ' are on the disk (below).
 '
 ' Build: make  (basic45 --link src/api.c ... src/wp.bas -o build/writer.prg)
@@ -319,7 +319,7 @@ proc importtext
           p = p + 1
         loop until st <> 0 or p >= 118
         dclose#2
-        ' (Markdown: by MDIMPORT.OVL, loaded last: drawing overwrites it)
+        ' (Markdown: by MARKDOWN.OVL, loaded last: drawing overwrites it)
         if fk then call loadmod
         if ml then sys {wp_get}, GET_IMPORT + fk * (GET_MDIMPORT - GET_IMPORT) : rreg lo, hi
       endif
@@ -358,8 +358,6 @@ proc exporttext
   call ask(p"Export as (name.md: Markdown, name.rtf: RTF): ")
   if ok and a$ <> "" then
     call ftype
-    ' (Markdown's export is a module of its own)
-    if fk = 1 then mf$ = "mdexport.ovl" : mu$ = p"MDEXPORT.OVL"
     ml = 1 : lo = 0 : hi = 0
     if fk then
       call loadmod
@@ -426,7 +424,7 @@ endproc
 proc ftype
   fk = 0
   b$ = right$(a$, 3)
-  if b$ = p".md" or b$ = p".MD" then fk = 1 : mf$ = "mdimport.ovl" : mu$ = p"MDIMPORT.OVL" : mn$ = p"Markdown"
+  if b$ = p".md" or b$ = p".MD" then fk = 1 : mf$ = "markdown.ovl" : mu$ = p"MARKDOWN.OVL" : mn$ = p"Markdown"
   b$ = right$(a$, 4)
   if b$ = p".rtf" or b$ = p".RTF" then fk = 2 : mf$ = "rtf.ovl" : mu$ = p"RTF.OVL" : mn$ = p"RTF"
 endproc

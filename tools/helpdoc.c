@@ -130,7 +130,7 @@ static const struct run help[] = {
             "R redraw the screen (also CTRL+L)\r"
             "T list mode on / off\r" },
     { 0, "Saved Writer documents keep their fonts and styles. "
-         "Markdown is read by MDIMPORT.OVL and written by MDEXPORT.OVL, RTF by RTF.OVL, when they are on the disk. "
+         "Markdown is read and written by MARKDOWN.OVL, RTF by RTF.OVL, when they are on the disk. "
          "List mode (LIST.OVL) marks spaces, paragraph ends, wrapped lines "
          "and trailing spaces.\r" },
 };
