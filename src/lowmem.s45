@@ -1,0 +1,19 @@
+; lowmem.s45 — the C half's base page, below the BASIC program in the RAM
+; BASIC 65 leaves free ($1600-$1EFF: the DOS's buffers end at $15FF, the
+; graphics kernel's variables start at $1F00; there is no ROM over
+; $0000-$1FFF), not at the end of bank 0 where ln45 would put it (after BSS,
+; page-aligned: 256 bytes and the padding up to the page). It is used only
+; while C runs (crt0 moves B there and back on each SYS), and a session
+; (typing, load, save, import, export, DIR, help) left a pattern over
+; $1600-$17FF untouched in xemu. (No __interrupt functions: no second page.)
+;
+; The CPU stack is the next page, $1700-$17FF (the Makefile's basic45
+; --stack-page=0x17): it never went deeper than 32 bytes.
+
+.weak cc45.icallinfo
+cc45.icallinfo = 1
+
+.global __zp_page, __zp_page_isr
+
+__zp_page = $1600
+__zp_page_isr = $1600

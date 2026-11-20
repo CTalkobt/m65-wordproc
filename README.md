@@ -20,9 +20,10 @@ RAM." xemu emulates it.
 
 Needs the cc45 toolchain (M65Compiler: `basic45`, `cc45`, `disk45`), by
 default checked out next to this directory (`CC45_ROOT`), at master
-`968ae856` or later (`basic45 --map`, a working `--minify`, and struct
-fields read at their addresses (M65Compiler #657-#660), without which bank 0
-overflows; build `BASFLAGS=` for an unminified program).
+`2b53dc79` or later (`basic45 --map`, a working
+`--minify`, struct fields read at their addresses (M65Compiler #657-#660),
+without which bank 0 overflows, and `basic45 --stack-page`; build
+`BASFLAGS=` for an unminified program).
 
 ```bash
 make            # build/writer.prg and build/writer.d81
@@ -524,7 +525,14 @@ can be.
   addresses, once (M65Compiler #657-#659), then made the C 827 bytes
   smaller, and Markdown became one module again (`MARKDOWN.OVL`, import
   and export: 6710 bytes), so `MOD_SIZE` went from 6016 to 6784 bytes:
-  the C data ends at `$BE00`, and the stack has 512 bytes. (The BASIC program's
+  the C data ended at `$BE00`, and the stack had 512 bytes. Then the C
+  half's base page moved below the BASIC program, to `$1600`
+  (`src/lowmem.s45`: BASIC 65 leaves `$1600`-`$1EFF` free, and a session
+  left a pattern there untouched), and its CPU stack to the page after it,
+  `$1700`-`$17FF` (`basic45 --stack-page=0x17`; BASIC's own page-1 stack,
+  `--stack-page=basic`, hung a session now and then in xemu, the ROM's
+  Ctrl-S pause flag set), so the C data ends at `$BC39`: 967 bytes free
+  below `$C000`. (The BASIC program's
   two `poke`s of `$D1` / `$F7` are written in decimal: `--minify` turns
   `poke $d1` into a variable,
   [M65Compiler #603](https://github.com/CTalkobt/M65Compiler/issues/603).)

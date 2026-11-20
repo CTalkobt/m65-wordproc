@@ -50,12 +50,19 @@ CC45FLAGS = -fno-tail-call-optimization -I$(CC45_ROOT)/lib/include -Isrc -I$(BUI
 # joined and its long names shortened (737 bytes less, so the C half starts
 # a page lower; needs M65Compiler #601, master since 6762f672)
 BASFLAGS ?= --minify
+# the C half's CPU stack: a page of its own, $1700-$17FF (it never goes
+# deeper than 32 bytes), next to its base page (src/lowmem.s45's $1600),
+# not 512 bytes at the end of bank 0 (ln45 --stack-page, M65Compiler
+# 2b53dc79). Not BASIC's page-1 stack (--stack-page=basic): with it a
+# session hung now and then in xemu, the ROM's Ctrl-S pause flag ($1119)
+# set. (0x17, not $17: the shell would take $1 as an argument)
+STACKFLAGS = --stack-page=0x17
 FAST    = render m65 fonts
 SMALL   = api conv doc layout
 # (conv.c is called by the modules, whose base-page blocks start at $80:
 # its functions keep their variables out of the base page)
 NOZP    = conv
-OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45) $(BUILD)/obj/modcall.o45 $(BUILD)/obj/gap.o45 $(BUILD)/obj/gapmove.o45
+OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45) $(BUILD)/obj/modcall.o45 $(BUILD)/obj/gap.o45 $(BUILD)/obj/gapmove.o45 $(BUILD)/obj/lowmem.o45
 CCQUIET = 2>&1 | grep -v 'note:\|^ *[0-9]* |\|^ *|' || true
 
 $(BUILD)/obj/%.o45: src/%.c $(HEADERS)
@@ -129,7 +136,7 @@ all: $(DISK)
 
 $(TARGET): src/wp.bas $(OBJS)
 	@mkdir -p $(BUILD)
-	$(BASIC45) $(foreach f,$(OBJS),--link $(f)) --map $(MAP) $(BASFLAGS) --report src/wp.bas -o $@
+	$(BASIC45) $(foreach f,$(OBJS),--link $(f)) --map $(MAP) $(BASFLAGS) $(STACKFLAGS) --report src/wp.bas -o $@
 
 $(DISK): $(TARGET) src/writer.fnt $(BUILD)/help.prg $(MODS)
 	rm -f $@
