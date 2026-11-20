@@ -64,6 +64,8 @@
 
 start:
   print chr$(14);
+  ' (the import and export prompts' end, once)
+  ft$ = p" (name.md: Markdown, name.rtf: RTF): "
   ' the fonts' glyphs, once: to the scratch area, then the C half copies
   ' codes 32-128 to bank 4 (FONT_LIN in wp.h) and the Latin-1 ones and the
   ' compose table to colour RAM (HI_LIN)
@@ -295,12 +297,15 @@ proc loaddoc
   endif
 endproc
 
-' a sequential PETSCII file as the text (no styles)
+' a sequential PETSCII file as the text (no styles). The file is opened
+' once first: DOPEN of a missing one is no BASIC error, only the drive's
+' (ds$, its number first), and the import would empty the document (#9)
 proc importtext
   call discard
   if yes then
     a$ = ""
-    call ask(p"Import (name.md: Markdown, name.rtf: RTF): ")
+    call ask(p"Import" + ft$)
+    if ok and a$ <> "" then dopen#2, (a$) : e$ = ds$ : dclose#2 : if val(e$) then call say(p"Not imported: " + e$) : ok = 0
     if ok and a$ <> "" then
       call say(p"Importing " + a$ + "...")
       call ftype
@@ -355,7 +360,7 @@ endproc
 
 proc exporttext
   a$ = ""
-  call ask(p"Export as (name.md: Markdown, name.rtf: RTF): ")
+  call ask(p"Export as" + ft$)
   if ok and a$ <> "" then
     call ftype
     ml = 1 : lo = 0 : hi = 0
