@@ -64,7 +64,7 @@ static u8 base;                 /* the paragraph kind's own style (kind_attr) */
 static u8 open_st;
 
 static u8 h_style(u16 i) {
-    u8 a = atr_at(i), s = a & (A_UNDER | A_BOLD | A_ITAL) & ~base, f = a & A_FONT;
+    u8 a = sty(atr_at(i)), s = a & (A_UNDER | A_BOLD | A_ITAL) & ~base, f = a & A_FONT;
     if (f != (base & A_FONT)) s |= (u8)(H_FONT | (f << 5));
     return s;
 }

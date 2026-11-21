@@ -54,7 +54,7 @@ static u8 base;                 /* the paragraph kind's own style (kind_attr) */
  * the paragraph's kind does not give it), and M_CODE for Mono in another
  * kind (never for a backtick, which a code span cannot hold) */
 static u8 raw_style(u16 i) {
-    u8 a = atr_at(i), s = a & M_FLAGS & ~base;
+    u8 a = sty(atr_at(i)), s = a & M_FLAGS & ~base;
     if ((a & A_FONT) == F_MONO && (base & A_FONT) != F_MONO && txt_at(i) != '`') s |= M_CODE;
     return s;
 }
@@ -554,7 +554,7 @@ u16 md_import(void) {
             if (e == le && (para_open ? c == '=' || c == '-' : n >= 3)) {
                 if (para_open) {
                     pk = c == '=' ? K_H1 : K_H2;
-                    for (e = pstart; e < b_n; e++) atr_put(e, (u8)(kind_attr[pk] | (atr_at(e) & M_FLAGS)));
+                    for (e = pstart; e < b_n; e++) atr_put(e, sty_find((u8)(kind_attr[pk] | (sty(atr_at(e)) & M_FLAGS))));
                     end_para();
                     after_head = 1;
                 }

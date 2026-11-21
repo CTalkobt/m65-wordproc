@@ -53,7 +53,7 @@ static u8 popen, want_gap, no_gap;      /* a paragraph started; an empty one due
 static u8 pk, pal;                      /* the paragraph's kind (and level), alignment */
 static u8 hk, nq, npre, pre_first;      /* in a heading (its kind); quotes, pre open; just after <pre> */
 static u8 ld, lt[4];                    /* lists open; each one's kind (K_BULLET / K_NUMBER) */
-static u8 sty[4];                       /* <b> <i> <u> <code> (and the like) open */
+static u8 n_on[4];                       /* <b> <i> <u> <code> (and the like) open */
 static u8 sd, sfont[8];                 /* <span>s open; each one's font (NONE: the kind's) */
 static u8 sp_n, sp_nl, sp_attr;         /* spaces held (to a paragraph's end: dropped); a line end among them; their style */
 static u8 u_need, u_lead;               /* UTF-8: continuation bytes due; the first byte */
@@ -62,11 +62,11 @@ static u16 u_val;
 /* the style of the text now: the paragraph kind's, with what is open */
 static u8 attr(void) {
     u8 b = kind_attr[pk & A_KIND], f = b & A_FONT;
-    if (sty[3]) f = F_MONO;
+    if (n_on[3]) f = F_MONO;
     else if (sd && sfont[sd - 1] != NONE) f = sfont[sd - 1];
-    if (sty[0]) b |= A_BOLD;
-    if (sty[1]) b |= A_ITAL;
-    if (sty[2]) b |= A_UNDER;
+    if (n_on[0]) b |= A_BOLD;
+    if (n_on[1]) b |= A_ITAL;
+    if (n_on[2]) b |= A_UNDER;
     return (u8)((b & (A_BOLD | A_ITAL | A_UNDER)) | f);
 }
 
@@ -226,8 +226,8 @@ static void tag_end(void) {
     }
     if (t >= T_BOLD && t < T_SPAN) {
         k = t < T_ITAL ? 0 : t < T_UNDER ? 1 : t < T_MONO ? 2 : 3;
-        if (!closing) sty[k]++;
-        else if (sty[k]) sty[k]--;
+        if (!closing) n_on[k]++;
+        else if (n_on[k]) n_on[k]--;
         return;
     }
     if (t == T_SPAN) {
@@ -464,7 +464,7 @@ static void html_begin(void) {
     build_start();
     st = S_TEXT;
     popen = want_gap = no_gap = pal = hk = nq = npre = ld = sd = sp_n = sp_nl = u_need = 0;
-    sty[0] = sty[1] = sty[2] = sty[3] = 0;
+    n_on[0] = n_on[1] = n_on[2] = n_on[3] = 0;
 }
 
 static void html_chunk(void) {

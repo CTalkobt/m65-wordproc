@@ -52,7 +52,7 @@ static u8 tag_put(char *out, u8 n, const char *s) {
 u8 prev_style(u16 i) {
     while (i > 0) {
         i--;
-        if (!is_break(txt_at(i))) return atr_at(i) & A_STYLE;
+        if (!is_break(txt_at(i))) return sty(atr_at(i));
     }
     return 0;
 }
@@ -73,7 +73,7 @@ u8 raw_tag(u16 i, char *out) {
     if (c == CH_FF) return tag_put(out, n, "[Page]");
     if (c == CH_CR) return n;
     prev = prev_style(i);
-    now = atr_at(i) & A_STYLE;
+    now = sty(atr_at(i));
     if (prev == now) return n;
     if ((prev & A_BOLD) && !(now & A_BOLD)) n = tag_put(out, n, "[/B]");
     if ((prev & A_ITAL) && !(now & A_ITAL)) n = tag_put(out, n, "[/I]");
@@ -96,7 +96,7 @@ static u8 tok_w(u16 i) {
         if (c == CH_FF) return raw_tag(i, 0);
         return (u8)(raw_tag(i, 0) + 1);
     }
-    return char_w(c, atr_at(i));
+    return char_w(c, sty(atr_at(i)));
 }
 
 /* ---- breaking lines ----
@@ -228,7 +228,7 @@ static u8 produce(struct lstate *st, struct line *L) {
     nsp = trail = 0;
     tw = 0;
     for (i = pos; i < end; i++) {
-        u8 c = txt_at(i), a = atr_at(i);
+        u8 c = txt_at(i), a = sty(atr_at(i));
         if (is_break(c)) {
             if (i > pos) continue;
             a = kind_attr[k & A_KIND];      /* (an empty paragraph: its kind's height) */
@@ -489,7 +489,7 @@ u16 x_of(u16 l, u16 pos) {
     }
     just_init(&j, &L);
     x = L.x;
-    for (; i < pos; i++) x += just_w(txt_at(i), atr_at(i), &j);
+    for (; i < pos; i++) x += just_w(txt_at(i), sty(atr_at(i)), &j);
     return x;
 }
 
@@ -507,7 +507,7 @@ u16 pos_at_x(u16 l, u16 x) {
             if (x <= px) return i;
             nx = (u16)(px + 1 + raw_tag((u16)(i + 1), 0));
         } else {
-            nx = px + just_w(txt_at(i), atr_at(i), &j);
+            nx = px + just_w(txt_at(i), sty(atr_at(i)), &j);
             if (x < px + (nx - px) / 2) return i;
         }
         px = nx;

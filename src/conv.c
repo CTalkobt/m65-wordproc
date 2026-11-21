@@ -25,6 +25,94 @@ void txt_put(u16 i, u8 c) { TXT[gmap(i)] = c; }
 void atr_put(u16 i, u8 a) { ATR[gmap(i)] = a; }
 #endif
 
+/* ==== the style table (issue #5): a character's attribute byte is an
+ * index into it; an entry is the style (now A_FONT | A_BOLD | A_ITAL |
+ * A_UNDER: ST_SIZE bytes). Entries 0-31 are those 32 styles, each at its
+ * own bits (so a document of before the table, or a style built from the
+ * bits, is the same index); others are added as styles are used (sty_find)
+ * and kept for the session: the clipboard, undo and each document loaded
+ * use the same table (doc_unpack: a file's entries merged into it). The
+ * host's tests with STY_SCRAMBLE put 0-31 in another order (index 0 still
+ * the plain style), so that a raw bit read anywhere shows. ==== */
+u16 st_n;
+#ifndef __cc45__
+/* (on the MEGA65 style.s45, in assembly: some 450 bytes smaller) */
+static u8 sc_i, sc_e, sf_e, sf_i;   /* sty's last lookup, sty_find's */
+
+void sty_init(void) {
+    u16 k;
+    for (k = 0; k < 256; k++) mem_put(ST_LIN + k, 0);
+    for (k = 0; k < 32; k++)
+#ifdef STY_SCRAMBLE
+        mem_put(ST_LIN + ((k * 5) & 31), (u8)k);    /* (style k at 5k) */
+#else
+        mem_put(ST_LIN + k, (u8)k);
+#endif
+    st_n = 32;
+    sc_i = sc_e = sf_e = sf_i = 0;
+}
+
+/* entry s's style */
+u8 sty(u8 s) {
+    if (s != sc_i) {
+        sc_i = s;
+        sc_e = mem_get(ST_LIN + s);
+    }
+    return sc_e;
+}
+
+/* style e's entry: found, or added (the table full: 0, the plain style) */
+u8 sty_find(u8 e) {
+    u16 k;
+    if (e == sf_e) return sf_i;
+    for (k = 0; k < st_n; k++)
+        if (mem_get(ST_LIN + k) == e) goto found;
+    if (st_n == 256) return 0;
+    mem_put(ST_LIN + k, e);
+    st_n++;
+    sc_i = (u8)k;               /* (sty's last: this index, as it is now) */
+    sc_e = e;
+found:
+    sf_e = e;
+    sf_i = (u8)k;
+    return (u8)k;
+}
+
+static u8 *mm, ms;
+static u16 mc;
+
+/* m[0..cnt-1] (a file's entries) each changed to its index here; 1 when
+ * each is its own */
+u8 sty_merge(u8 *m, u16 cnt) {
+    u16 k;
+    mm = m;
+    mc = cnt;
+    ms = 1;
+    for (k = 0; k < cnt; k++) {
+        m[k] = sty_find(m[k]);
+        if (m[k] != k) ms = 0;
+    }
+    return ms;
+}
+
+/* the document's characters 0..n-1 (no gap) given m[their index] (past
+ * cnt: 0) unless each was its own; v1: its CR / FF's attributes cleared but
+ * for the alignment */
+void sty_remap(u16 n, u8 v1) {
+    u16 i;
+    u8 a, c;
+    for (i = 0; i < n; i++) {
+        a = atr_at(i);
+        c = txt_at(i);
+        if (c == CH_CR || c == CH_FF) {
+            if (v1) atr_put(i, a & A_ALIGN);
+        } else if (!ms) {
+            atr_put(i, a < mc ? mm[a] : 0);
+        }
+    }
+}
+#endif
+
 /* ==== output: bytes to SCRATCH_LIN ==== */
 u16 o_n;
 
@@ -69,9 +157,9 @@ u8 walk_next(void) {
         w_at = (u16)(i + 1);
         return EV_PEND;
     }
-    a = atr_at(i) & A_STYLE;
-    while (++i < w_pe && (atr_at(i) & A_STYLE) == a) ;
-    w_attr = a;
+    a = atr_at(i);
+    while (++i < w_pe && atr_at(i) == a) ;
+    w_attr = sty(a);
     w_to = w_at = i;
     return EV_RUN;
 }
@@ -107,7 +195,7 @@ void build_start(void) {
 void build_put(u8 c) {
     if (b_n >= DOC_MAX - 1) return;     /* (room kept for the final CR) */
     txt_put(b_n, c);
-    atr_put(b_n, b_attr);
+    atr_put(b_n, c == CH_CR || c == CH_FF ? b_attr : sty_find(b_attr));   /* (b_attr: a style; a paragraph's) */
     b_n++;
 }
 

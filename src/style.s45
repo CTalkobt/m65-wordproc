@@ -1,0 +1,255 @@
+; style.s45 — the style table (conv.c, issue #5): sty, sty_find, sty_init
+; on the MEGA65 (conv.c has them in C for the host). The table is ST_LIN
+; (wp.h: HI_LIN + $4800 = $FF87800, colour RAM), st_n entries of a byte,
+; read with the 45GS02's 32-bit indirect [zp],z.
+;
+; u8 sty(u8 s): s at $10, its entry in A (the last one looked up kept)
+; u8 sty_find(u8 e): e at $10, its index in A (added if new; the table
+;   full: 0; the last one found kept)
+; void sty_init(void): entries 0-31 those styles, the rest 0
+; u8 sty_merge(u8 *m, u16 cnt): m at $10/$11, cnt (at most 256) at $12/$13:
+;   each of m[0..cnt-1] (a file's entries) changed to its index here
+;   (sty_find); 1 when each is its own index (kept for sty_remap)
+; void sty_remap(u16 n, u8 v1): n at $10/$11, v1 at $12: the document's
+;   characters 0..n-1 (no gap: doc_unpack) given m[their index] (past cnt:
+;   0) unless sty_merge found each its own; with v1, its CR / FF's
+;   attributes cleared but for the alignment (a version 1 file)
+
+; no calls through pointers here (ln45's call graph)
+.weak cc45.icallinfo
+cc45.icallinfo = 1
+
+.global _sty, _sty_find, _sty_init, _sty_merge, _sty_remap
+.extern _st_n
+
+.segment "bss"
+__sc:   .res 2          ; sty's last: index, entry
+__sf:   .res 2          ; sty_find's last: entry, index
+__mm:   .res 2          ; sty_merge's m, cnt, its answer
+__mc:   .res 2
+__ms:   .res 1
+
+.segment "code"
+
+; $10-$13: ST_LIN. A, Z kept.
+proc __st_ptr
+    pha
+    lda #$00
+    sta $10
+    lda #$78
+    sta $11
+    lda #$f8
+    sta $12
+    lda #$0f
+    sta $13
+    pla
+    rts
+endproc
+
+proc _sty
+    .zp_uses $10
+    .zp_clobbers $10, $11, $12, $13
+    .zp_release $10, $11, $12, $13
+    .reg_clobbers A, Z
+    .flag_clobbers C, N, Z, V
+    lda $10
+    cmp __sc
+    beq @hit
+    sta __sc
+    taz
+    jsr __st_ptr
+    lda [$10],z
+    sta __sc+1
+@hit:
+    lda __sc+1
+    rts
+    .func_flags zp_call
+endproc
+
+proc _sty_find
+    .zp_uses $10
+    .zp_clobbers $10, $11, $12, $13, $14
+    .zp_release $10, $11, $12, $13, $14
+    .reg_clobbers A, Z
+    .flag_clobbers C, N, Z, V
+    lda $10
+    cmp __sf
+    bne @look
+    lda __sf+1
+    rts
+@look:
+    sta $14
+    jsr __st_ptr
+    ldz #0
+@next:
+    lda _st_n+1             ; (256 entries: no end before Z wraps)
+    bne @cmp
+    cpz _st_n
+    beq @add
+@cmp:
+    lda [$10],z
+    cmp $14
+    beq @found
+    inz
+    bne @next
+    lda #0                  ; (full)
+    rts
+@add:
+    lda $14
+    sta [$10],z
+    inc _st_n
+    bne @kept
+    inc _st_n+1
+@kept:
+    stz __sc                ; (sty's last: this index, as it is now)
+    sta __sc+1
+@found:
+    lda $14
+    sta __sf
+    stz __sf+1
+    tza
+    rts
+    .func_flags zp_call
+endproc
+
+proc _sty_init
+    .zp_clobbers $10, $11, $12, $13
+    .zp_release $10, $11, $12, $13
+    .reg_clobbers A, Z
+    .flag_clobbers C, N, Z, V
+    jsr __st_ptr
+    ldz #0
+    lda #0
+@zero:
+    sta [$10],z
+    inz
+    bne @zero
+    ldz #31
+@ident:
+    tza
+    sta [$10],z
+    dez
+    bpl @ident
+    lda #32
+    sta _st_n
+    lda #0
+    sta _st_n+1
+    sta __sc
+    sta __sc+1
+    sta __sf
+    sta __sf+1
+    rts
+endproc
+
+proc _sty_merge
+    .zp_uses $10, $11, $12, $13
+    .zp_clobbers $10, $11, $12, $13, $14, $15, $1c, $1d
+    .zp_release $10, $11, $12, $13, $14, $15, $1c, $1d
+    .reg_clobbers A, Y, Z
+    .flag_clobbers C, N, Z, V
+    lda $10
+    sta __mm
+    sta $1c
+    lda $11
+    sta __mm+1
+    sta $1d
+    lda $12
+    sta __mc
+    lda $13
+    sta __mc+1
+    lda #1
+    sta __ms
+    ldy #0
+@next:
+    lda __mc+1              ; (256: to Y's wrap)
+    bne @one
+    cpy __mc
+    beq @done
+@one:
+    lda ($1c),y
+    sta $10
+    jsr _sty_find           ; (Y kept)
+    sta ($1c),y
+    sta $15
+    cpy $15
+    beq @own
+    lda #0
+    sta __ms
+@own:
+    iny
+    bne @next
+@done:
+    lda __ms
+    rts
+    .func_flags zp_call
+endproc
+
+proc _sty_remap
+    .zp_uses $10, $11, $12
+    .zp_clobbers $10, $11, $12, $14, $15, $16, $17, $18, $19, $1a, $1b, $1c, $1d
+    .zp_release $10, $11, $12, $14, $15, $16, $17, $18, $19, $1a, $1b, $1c, $1d
+    .reg_clobbers A, X, Y, Z
+    .flag_clobbers C, N, Z, V
+    lda #0                  ; $14: TEXT_LIN ($8000000), $18: ATTR_LIN
+    sta $14
+    sta $15
+    sta $16
+    sta $18
+    sta $19
+    lda #1
+    sta $1a
+    lda #8
+    sta $17
+    sta $1b
+    lda __mm
+    sta $1c
+    lda __mm+1
+    sta $1d
+    ldz #0
+@loop:
+    lda $10
+    ora $11
+    beq @done
+    lda [$14],z
+    cmp #13
+    beq @brk
+    cmp #12
+    beq @brk
+    lda __ms
+    bne @next
+    lda [$18],z
+    ldx __mc+1              ; (256 entries: every index in the table)
+    bne @map
+    cmp __mc
+    bcs @zero
+@map:
+    tay
+    lda ($1c),y
+    bra @put
+@zero:
+    lda #0
+@put:
+    sta [$18],z
+    bra @next
+@brk:
+    lda $12
+    beq @next
+    lda [$18],z
+    and #$60                ; (A_ALIGN)
+    sta [$18],z
+@next:
+    inz
+    bne @count
+    inc $15
+    inc $19
+@count:
+    lda $10
+    bne @low
+    dec $11
+@low:
+    dec $10
+    bra @loop
+@done:
+    rts
+    .func_flags zp_call
+endproc

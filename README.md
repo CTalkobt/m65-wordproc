@@ -160,6 +160,7 @@ letter with its accent), in `WRITER.FNT`.
 |------|----------|------|
 | `src/wp.bas` | BASIC 65 | the main loop (GET and what each key means; idle time handed to C), the menu, file-name prompts and confirmations, all disk work (`BLOAD` / `BSAVE` documents and fonts, `DOPEN` + `FREAD#` / `FWRITE#` text and Markdown import and export, `DIR`), loading the help document, error trapping |
 | `src/doc.c` | C | the document: two parallel arrays in attic RAM (text, an attribute byte per character) with a gap at the last edit, insert and delete, the clipboard, the file image |
+| `src/style.s45` | asm | the style table (`sty`, `sty_find`, `sty_init`; a loaded file's table merged, its indexes remapped): `conv.c` has them in C for the host |
 | `src/gap.s45`, `src/gapmove.s45` | asm | reading and writing a character round the gap (`txt_at` ...), moving the gap (`gap_to`, `move2`): `doc.c` and `conv.c` have them in C for the host |
 | `src/layout.c` | C | line breaking for both views, justification, pagination, raw-view tags, cursor ↔ position mapping; incremental and lazy (below) |
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
@@ -346,14 +347,23 @@ the C64's. Each cell has its own colour (text, desk, tags, bars).
 | `$8010000` | 64 KB | attic RAM: document attributes, the same |
 | `$8020000` | 48 KB | attic RAM: the line table (4096 lines of 12 bytes) |
 | `$8030000` | 48 KB | attic RAM: the line table's bounce buffer (lines moved up) |
-| `$FF83000` | 20 KB | colour RAM past the screen's cells (`$FF81000`-`$FF82F3F`): `WRITER.FNT`'s second part, Sans, Serif and Mono (12 KB); then (`$FF86020`) the find and replace strings, the drawing's caches while `DEFAULT0.OVL` runs, and `DEFAULT0.OVL` (`$FF86680`) |
+| `$FF83000` | 20 KB | colour RAM past the screen's cells (`$FF81000`-`$FF82F3F`): `WRITER.FNT`'s second part, Sans, Serif and Mono (12 KB); then (`$FF86020`) the find and replace strings, the drawing's caches while `DEFAULT0.OVL` runs, `DEFAULT0.OVL` (`$FF86680`), and the style table (`$FF87800`, up to 1 KB) |
 
 ### Files
 
-A document (`S`ave / `L`oad) is a PRG file: `"WP"`, version 2, the length
+A document (`S`ave / `L`oad) is a PRG file: `"WP"`, version 3, the length
 (2 bytes), the text (Latin-1: ASCII, and `$A0`-`$FF` for the accented
-characters; CR ends a paragraph, FF a page), then the attributes. A
-character's attribute byte: bits 0-1 font, 2 bold, 3 italic, 4 underline.
+characters; CR ends a paragraph, FF a page), the attributes, then the
+style table: its entry size (1), its count (2 bytes), its entries. A
+character's attribute byte is an index into the style table (issue #5),
+whose entry is its style: bits 0-1 font, 2 bold, 3 italic, 4 underline.
+Entries 0-31 are those 32 styles at their own bits; others are added as
+styles are used (none yet: room for strikethrough, superscript and
+subscript, more fonts, named styles). The table belongs to the session,
+so the clipboard and undo keep their meaning across documents: a file's
+entries are merged into it when it loads, and its characters' indexes
+changed where they differ. Version 2 files (before the table: a
+character's attribute was its style) load as they are.
 A paragraph's CR (or page break) holds the paragraph's: bits 0-2 its kind
 (0 Normal, 1-3 Heading 1-3, 4 Quote, 5 Code, 6 Bullet, 7 Numbered), bits
 3-4 a list item's level (0-3), bits 5-6 its alignment. Version 1 files (before the kinds: their
@@ -598,7 +608,14 @@ can be.
   text gone from it would not fit there.) HTML export and import, as
   modules (`HTML.OVL`, `HTMLIN.OVL`), then cost 94 bytes of BASIC and 87 of C:
   the BASIC program ends at `$2FC7` (57 bytes below the C half), and the C
-  data at `$BA76`: 1417 bytes free. (The BASIC program's
+  data at `$BA76`: 1417 bytes free. The style table (#5, its first step:
+  every character's style read through it) cost 812 bytes of C: `sty`,
+  `sty_find` and the loading's merge and remap in assembly
+  (`src/style.s45`, 337 bytes: in C they were some 1100), the rest
+  `doc_pack` / `doc_unpack` and the callers. `basic45 --link-align=1`
+  (M65Compiler #678) then put the C half right after the BASIC program, at
+  `$2FC8`, not the next page: the C data ends at `$BD6A`, 661 bytes free.
+  (The BASIC program's
   two `poke`s of `$D1` / `$F7` are written in decimal: `--minify` turns
   `poke $d1` into a variable,
   [M65Compiler #603](https://github.com/CTalkobt/M65Compiler/issues/603).)

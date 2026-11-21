@@ -383,7 +383,7 @@ static void bar_colour(u8 row) {
 static const char *const align_names[4] = { "Left", "Centre", "Right", "Justify" };
 
 void render_bars(void) {
-    u8 ln, a = typing_attr;
+    u8 ln, a = sty(typing_attr);
     u16 li = nlines ? line_of(cur) : 0;
     struct line L;
     if (!inited) init_rows();
@@ -502,7 +502,7 @@ static void draw_line(u16 l, const struct line *L) {
     }
     x = (u16)(TEXT_X + L->x);
     for (; i < e; i++) {
-        u8 c = txt_at(i), a = atr_at(i), w;
+        u8 c = txt_at(i), a = sty(atr_at(i)), w;
         const struct font *f = fonts[a & A_FONT];
         if (i == cur) cx = x;
         if (c == CH_CR || c == CH_FF) {

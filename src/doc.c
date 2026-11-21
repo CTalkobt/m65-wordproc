@@ -58,12 +58,12 @@ u16 para_start(u16 i) {
     return i;
 }
 
-/* the style for typing at the cursor: the character before it, or (at a
- * paragraph's start) the one after it */
+/* the style for typing at the cursor (its index): the character before
+ * it, or (at a paragraph's start) the one after it */
 u8 attr_at_cursor(void) {
-    if (cur > 0 && !is_break(txt_at(cur - 1))) return atr_at(cur - 1) & A_STYLE;
-    if (is_break(txt_at(cur))) return kind_attr[atr_at(cur) & A_KIND];     /* (an empty paragraph: its kind's) */
-    return atr_at(cur) & A_STYLE;
+    if (cur > 0 && !is_break(txt_at(cur - 1))) return atr_at(cur - 1);
+    if (is_break(txt_at(cur))) return sty_find(kind_attr[atr_at(cur) & A_KIND]);   /* (an empty paragraph: its kind's) */
+    return atr_at(cur);
 }
 
 /* ---- the gap: room kept in the store (attic RAM) at the last edit, so
@@ -280,7 +280,7 @@ u8 doc_type(u8 c) {
     u8 a, k, brk = is_break(c), at_end;
     if (brk && is_break(txt_at(cur)) && doc_list_level(0)) return 0;  /* RETURN in an empty list item: out a level */
     if (sel_on) {
-        typing_attr = atr_at(sel_lo()) & A_STYLE;
+        typing_attr = atr_at(sel_lo());
         delete_selection();
     }
     a = typing_attr;
@@ -297,7 +297,7 @@ u8 doc_type(u8 c) {
     if (brk && at_end && k < 3) {
         /* after a heading's end: a normal paragraph */
         atr_put(cur, (u8)(atr_at(cur) & ~A_KIND));
-        typing_attr = kind_attr[K_NORMAL];
+        typing_attr = sty_find(kind_attr[K_NORMAL]);
     }
     goal_valid = 0;
     return 0;
@@ -355,32 +355,60 @@ void doc_paste(void) {
 
 /* ---- files ----
  * The image BASIC saves with BSAVE and loads with BLOAD, at SCRATCH_LIN:
- * "WP", version 2, the length (2 bytes), the text, the attributes.
- * (Version 1, before paragraph kinds: a CR / FF's attribute also had the
+ * "WP", version 3, the length n (2 bytes), the text, the attributes (a
+ * character's: an index into the style table), then the style table:
+ * ST_SIZE, its entries' count (2 bytes), the entries. Loaded, the table's
+ * entries are merged into the session's (sty_find) and the characters'
+ * indexes changed to match, where they differ.
+ * (Version 2, before the table: a character's attribute was its style;
+ * version 1, before paragraph kinds: a CR / FF's attribute also had the
  * typing style in its low bits, cleared when one is loaded.) */
-#define WP_VERSION 2
+#define WP_VERSION 3
+
+/* the scratch area's byte o (one 32-bit sum, not one at each use) */
+static u32 scr(u16 o) { return SCRATCH_LIN + o; }
+
 u16 doc_pack(void) {
-    mem_put(SCRATCH_LIN, 'W');
-    mem_put(SCRATCH_LIN + 1, 'P');
-    mem_put(SCRATCH_LIN + 2, WP_VERSION);
-    mem_put(SCRATCH_LIN + 3, (u8)doc_len);
-    mem_put(SCRATCH_LIN + 4, (u8)(doc_len >> 8));
+    u16 o = (u16)(5 + 2 * doc_len);
+    u8 h[5];
+    h[0] = 'W';
+    h[1] = 'P';
+    h[2] = WP_VERSION;
+    h[3] = (u8)doc_len;
+    h[4] = (u8)(doc_len >> 8);
+    mem_write(SCRATCH_LIN, h, 5);
     doc_out(5, doc_len, 0, doc_len);
-    return 5 + 2 * doc_len;
+    h[0] = ST_SIZE;
+    h[1] = (u8)st_n;
+    h[2] = (u8)(st_n >> 8);
+    mem_write(scr(o), h, 3);
+    mem_copy(scr((u16)(o + 3)), ST_LIN, st_n);
+    return (u16)(o + 3 + st_n);
 }
 
 u8 doc_unpack(void) {
-    u16 n, i;
-    u8 v = mem_get(SCRATCH_LIN + 2);
-    if (mem_get(SCRATCH_LIN) != 'W' || mem_get(SCRATCH_LIN + 1) != 'P' || !v || v > WP_VERSION) return 1;
-    n = mem_get(SCRATCH_LIN + 3) | (u16)(mem_get(SCRATCH_LIN + 4) << 8);
-    if (n == 0 || n > DOC_MAX) return 1;
+    u16 n, o, i, cnt = 32;
+    u8 h[5], v, same, *m = mod_area.r.band;  /* (the drawing's: free here) */
+    mem_read(h, SCRATCH_LIN, 5);
+    v = h[2];
+    n = h[3] | (u16)(h[4] << 8);
+    if (h[0] != 'W' || h[1] != 'P' || !v || v > WP_VERSION || n == 0 || n > DOC_MAX) return 1;
+    /* the file's table (before version 3: entries 0-31, those styles),
+     * each entry's index in the session's */
+    o = (u16)(5 + 2 * n);
+    if (v < 3) {
+        for (i = 0; i < 32; i++) m[i] = (u8)i;
+    } else {
+        mem_read(h, scr(o), 3);
+        cnt = h[1] | (u16)(h[2] << 8);
+        if (h[0] != ST_SIZE || cnt > 256) return 1;
+        mem_read(m, scr((u16)(o + 3)), cnt);
+    }
+    same = sty_merge(m, cnt);
     g_len = 0;
     mem_copy(TEXT_LIN, SCRATCH_LIN + 5, n);
-    mem_copy(ATTR_LIN, SCRATCH_LIN + 5 + n, n);
-    if (v == 1)
-        for (i = 0; i < n; i++)
-            if (is_break(txt_at(i))) atr_put(i, atr_at(i) & A_ALIGN);
+    mem_copy(ATTR_LIN, scr((u16)(5 + n)), n);
+    if (v == 1 || !same) sty_remap(n, v == 1);
     doc_len = n;
     doc_loaded(0);
     return 0;

@@ -144,7 +144,7 @@ void doc_load_help(void) {
         a = help[i].attr;
         for (s = help[i].s; *s; s++) {
             TXT[doc_len] = (u8)*s;
-            ATR[doc_len] = *s == '\r' && help[i].s[1] ? ((a & A_FONT) == F_MONO ? K_CODE : K_NORMAL) : a;
+            ATR[doc_len] = *s == '\r' ? (help[i].s[1] ? ((a & A_FONT) == F_MONO ? K_CODE : K_NORMAL) : a) : sty_find(a);
             doc_len++;
         }
     }

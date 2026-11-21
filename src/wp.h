@@ -71,7 +71,8 @@ typedef uint32_t u32;
 /* The rest of colour RAM, after writer.fnt's second part (12306 bytes
  * from HI_LIN; colour RAM ends at HI_LIN + $5000): the find and replace
  * strings (FIND_MAX characters each), the drawing's caches while DEFAULT0.OVL
- * runs (CACHE_LIN), DEFAULT0.OVL (EDIT_LIN, EDIT_SIZE bytes: edit.c).
+ * runs (CACHE_LIN), DEFAULT0.OVL (EDIT_LIN, EDIT_SIZE bytes: edit.c), the
+ * style table (ST_LIN, 1 KB at most: conv.c).
  * Undo's buffer (UNDO_MAX characters: text, then attributes) is the
  * scratch area's last part, past where open_gap's copies go (the
  * document's length) and the middle undo replaces waits (PARK_LIN): a file
@@ -81,6 +82,8 @@ typedef uint32_t u32;
 #define REPL_LIN  (FIND_LIN + FIND_MAX + 1)
 #define CACHE_LIN (HI_LIN + 0x3080)
 #define EDIT_LIN  (HI_LIN + 0x3680)
+#define ST_LIN    (HI_LIN + 0x4800)     /* the style table: 256 entries of ST_SIZE (room for 4 bytes each) */
+#define ST_SIZE   1                     /* (to HI_LIN + $5000, colour RAM's end) */
 #define UNDO_MAX  7500u
 #define PARK_LIN  (SCRATCH_LIN + DOC_MAX)       /* (its 2 * UNDO_MAX before UNDO_LIN) */
 #define UNDO_OFS  (SCRATCH_MAX - 2 * UNDO_MAX)
@@ -97,7 +100,9 @@ typedef uint32_t u32;
 #define A_BOLD  0x04
 #define A_ITAL  0x08
 #define A_UNDER 0x10
-#define A_STYLE 0x1F            /* what a character carries */
+#define A_STYLE 0x1F            /* a style: font, bold, italic, underline */
+/* a character's attribute byte is not a style but an index into the style
+ * table (sty: its style; sty_find: a style's index; conv.c, issue #5) */
 /* a paragraph's CR / FF carries the paragraph's properties instead: */
 #define A_KIND  0x07            /* its kind (style): K_... */
 #define A_LEVEL 0x18            /* a list item's level, 0-3 (others: 0) */
@@ -232,7 +237,7 @@ extern u16 doc_len;             /* characters, the final CR included */
 extern u16 cur;                 /* the cursor: before character cur */
 extern u16 sel_anchor;          /* the selection's other end */
 extern u8 sel_on;
-extern u8 typing_attr;          /* the style a typed character gets */
+extern u8 typing_attr;          /* the style a typed character gets (its index) */
 extern u8 dirty;
 extern u8 view_mode;
 extern u16 nlines;
@@ -304,6 +309,13 @@ u8 txt_at(u16 i);               /* TXT[i], ATR[i]: smaller code than the far acc
 u8 atr_at(u16 i);
 void txt_put(u16 i, u8 c);      /* TXT[i] = c, ATR[i] = a */
 void atr_put(u16 i, u8 a);
+/* the style table (ST_LIN: st_n entries) */
+extern u16 st_n;
+void sty_init(void);            /* entries 0-31: those styles (at the start) */
+u8 sty(u8 s);                   /* entry s's style */
+u8 sty_find(u8 e);              /* style e's entry (added if new) */
+u8 sty_merge(u8 *m, u16 cnt);   /* a file's entries m[] made the session's indexes; 1: each its own */
+void sty_remap(u16 n, u8 v1);   /* the loaded document's indexes through sty_merge's m (v1: CR / FF cleared) */
 /* output: bytes to SCRATCH_LIN (o_n of them; past SCRATCH_MAX counted, not written) */
 extern u16 o_n;
 void o_start(void);

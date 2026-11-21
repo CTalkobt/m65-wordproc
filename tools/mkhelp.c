@@ -14,6 +14,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "usage: mkhelp out.prg\n");
         return 2;
     }
+    sty_init();
     doc_load_help();
     n = doc_pack();
     f = fopen(argv[1], "wb");

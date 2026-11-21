@@ -77,6 +77,18 @@ static void check_cache(void) {
 
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); fails++; } } while (0)
 
+/* the style of character i (a CR / FF: its paragraph's attribute), and
+ * character i's set (the attribute byte: an index into the style table) */
+static u8 sa(u16 i) {
+    u8 a = atr_at(i), c = txt_at(i);
+    return c == CH_CR || c == CH_FF ? a : sty(a);
+}
+
+static void sput(u16 i, u8 a) {
+    u8 c = txt_at(i);
+    atr_put(i, c == CH_CR || c == CH_FF ? a : sty_find(a));
+}
+
 static void type(const char *s) {
     /* as GET gives them: lower case letters $41-$5A, capitals $C1-$DA */
     for (; *s; s++) {
@@ -139,7 +151,7 @@ static u16 doc_sig(u8 *t, u8 *a) {
     u16 i;
     for (i = 0; i < doc_len; i++) {
         t[i] = txt_at(i);
-        a[i] = (u8)(atr_at(i) & (txt_at(i) == CH_CR || txt_at(i) == CH_FF ? A_PARA : A_STYLE));
+        a[i] = (u8)(sa(i) & (txt_at(i) == CH_CR || txt_at(i) == CH_FF ? A_PARA : A_STYLE));
     }
     return doc_len;
 }
@@ -210,8 +222,8 @@ static void check_layout(void) {
             for (i = LINES[l].start; i < e; i++) {
                 u8 c = txt_at(i);
                 if (c == CH_CR || c == CH_FF) continue;
-                w += char_w(c, atr_at(i));
-                trail = c == ' ' ? trail + char_w(c, atr_at(i)) : 0;
+                w += char_w(c, sa(i));
+                trail = c == ' ' ? trail + char_w(c, sa(i)) : 0;
             }
             if (w - trail > TEXT_W && e - LINES[l].start > 1) {
                 printf("line %u too wide: %u\n", l, w - trail);
@@ -296,7 +308,7 @@ static void test_edit(void) {
     n0 = doc_sig(t0, a0);
     wp_cmd(18);                 /* all */
     ctrl(2, 0);                 /* CTRL+B */
-    CHECK((atr_at(0) & A_BOLD) != 0);
+    CHECK((sa(0) & A_BOLD) != 0);
     ctrl(0x1A, 0);
     n1 = doc_sig(t1, a1);
     CHECK(n0 == n1 && !memcmp(t0, t1, n0) && !memcmp(a0, a1, n0));
@@ -313,11 +325,11 @@ static void test_edit(void) {
 
     /* CTRL keys: B / I / U the typing style; F / H / W BASIC's; F10, F8, ESC
      * BASIC's without CTRL (F10's code is CTRL+U's); TAB without CTRL */
-    a = typing_attr;
+    a = sty(typing_attr);
     ctrl(2, 0);
     ctrl(9, 0);
     ctrl(0x15, 0);
-    CHECK(typing_attr == (a ^ (A_BOLD | A_ITAL | A_UNDER)));
+    CHECK(sty(typing_attr) == (a ^ (A_BOLD | A_ITAL | A_UNDER)));
     ctrl(2, 0);
     ctrl(9, 0);
     ctrl(0x15, 0);
@@ -499,7 +511,7 @@ static void test_gap(void) {
     /* the file image (round the gap) */
     {
         u16 sz = wp_get(2);
-        CHECK(sz == 5 + 2 * doc_len);
+        CHECK(sz == 5 + 2 * doc_len + 3 + st_n);
         for (q = 0; q < n && MEM[SCRATCH_LIN + 5 + q] == (u8)ref[q]; q++) {}
         CHECK(q == n);
         CHECK(wp_get(4) == 0 && doc_len == n + 1);
@@ -542,7 +554,7 @@ static void test_gap(void) {
         wp_cmd(22);
         CHECK(doc_len == k);
         p = wp_get(2);
-        CHECK(p == 5 + 2 * doc_len);
+        CHECK(p == 5 + 2 * doc_len + 3 + st_n);
         CHECK(wp_get(4) == 0 && doc_len == k);
         layout();
         check_layout();
@@ -637,9 +649,9 @@ int main(void) {
     for (i = 0; i < 5; i++) wp_key(29);
     CHECK(sel_on && sel_lo() == 0 && sel_hi() == 5);
     wp_cmd(1);                  /* bold */
-    CHECK(atr_at(0) & A_BOLD);
-    CHECK(atr_at(4) & A_BOLD);
-    CHECK(!(atr_at(5) & A_BOLD));
+    CHECK(sa(0) & A_BOLD);
+    CHECK(sa(4) & A_BOLD);
+    CHECK(!(sa(5) & A_BOLD));
     wp_cmd(9);
     {
         char tags[48];
@@ -652,7 +664,7 @@ int main(void) {
     }
     /* the typing style follows the cursor */
     wp_key(157);
-    CHECK(typing_attr & A_BOLD);
+    CHECK(sty(typing_attr) & A_BOLD);
 
     /* CTRL + cursor keys select (read from the keyboard by wp_idle): a
      * selection is started, then extended; the key repeats while held */
@@ -722,7 +734,7 @@ int main(void) {
     wp_cmd(5);
     wp_cmd(5);
     check_layout();
-    CHECK(((atr_at(para_end(cur)) & A_ALIGN) >> A_ALIGN_SHIFT) == 3);
+    CHECK(((sa(para_end(cur)) & A_ALIGN) >> A_ALIGN_SHIFT) == 3);
     wp_key(147);
     wp_cmd(5);
     wp_cmd(5);
@@ -761,7 +773,7 @@ int main(void) {
             t[i] = txt_at(i);
             a[i] = atr_at(i);
         }
-        CHECK(sz == 5 + 2 * len);
+        CHECK(sz == 5 + 2 * len + 3 + st_n);
         wp_cmd(13);
         CHECK(doc_len == 1);
         CHECK(wp_get(4) == 0);
@@ -881,23 +893,23 @@ int main(void) {
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "Hello bold and it u, c.\r\rtwo  spaces\r") == 0);
         CHECK(n == 36);
-        CHECK(atr_at(6) == A_BOLD && atr_at(15) == A_ITAL && atr_at(18) == A_UNDER && atr_at(21) == F_MONO &&
-              atr_at(0) == 0 && atr_at(10) == 0);
+        CHECK(sa(6) == A_BOLD && sa(15) == A_ITAL && sa(18) == A_UNDER && sa(21) == F_MONO &&
+              sa(0) == 0 && sa(10) == 0);
         html_in("<h1>Title</h1><p>para</p><h2>Sub</h2>\n<h4>deep</h4><p align=\"center\">mid</p>"
                 "<div style=\"color: red; text-align: right\">r</div>");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "Title\rpara\r\rSub\rdeep\rmid\r\rr\r") == 0);
         CHECK(para_kind(0) == K_H1 && para_kind(6) == K_NORMAL && para_kind(12) == K_H2 && para_kind(16) == K_H3 &&
-              ((atr_at(24) & A_ALIGN) >> A_ALIGN_SHIFT) == 1 && ((atr_at(27) & A_ALIGN) >> A_ALIGN_SHIFT) == 2);
+              ((sa(24) & A_ALIGN) >> A_ALIGN_SHIFT) == 1 && ((sa(27) & A_ALIGN) >> A_ALIGN_SHIFT) == 2);
         html_in("<ul>\n  <li>one</li>\n  <li><p>two</p>\n    <ol start=3><li>a<li>b</ol>\n  </li>\n</ul>\n<p>after</p>");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "one\rtwo\ra\rb\r\rafter\r") == 0);
         CHECK(para_kind(0) == K_BULLET && para_kind(4) == K_BULLET && para_kind(8) == K_NUMBER &&
-              (atr_at(9) & A_LEVEL) == 1 << A_LEVEL_SHIFT && item_num(10) == 2 && para_kind(13) == K_NORMAL);
+              (sa(9) & A_LEVEL) == 1 << A_LEVEL_SHIFT && item_num(10) == 2 && para_kind(13) == K_NORMAL);
         html_in("<pre>\nint *p;\n\n  x &lt; 1\n</pre><blockquote><p>q1</p><p>q2<br>q3</p></blockquote>");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "int *p;\r\r  x < 1\r\rq1\r\rq2\rq3\r") == 0);
-        CHECK(para_kind(0) == K_CODE && para_kind(8) == K_CODE && atr_at(10) == F_MONO && para_kind(20) == K_QUOTE &&
+        CHECK(para_kind(0) == K_CODE && para_kind(8) == K_CODE && sa(10) == F_MONO && para_kind(20) == K_QUOTE &&
               para_kind(26) == K_QUOTE);
         html_in("caf&eacute; &Uuml;ber &szlig; &AElig; &yuml; &#233;&#xE9; &copy; &mdash; &bogus; a & b &lt\n"
                 "caf\xc3\xa9 \xe2\x80\x9cq\xe2\x80\x9d \xe9t\xe9 \xf0\x9f\x98\x80!");
@@ -909,7 +921,7 @@ int main(void) {
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "one\r\ftwo\r\ra  b\rc\r") == 0);
         html_in("<p>x <span class=\"r\">serif <code>mono</code></span> <span>y</span></p>");
-        CHECK(atr_at(0) == F_SANS && atr_at(2) == F_SERIF && atr_at(8) == F_MONO && atr_at(13) == F_SANS);
+        CHECK(sa(0) == F_SANS && sa(2) == F_SERIF && sa(8) == F_MONO && sa(13) == F_SANS);
         html_in("");
         CHECK(doc_len == 1);
     }
@@ -940,22 +952,22 @@ int main(void) {
         md_fixed_point(m1, m2, "help");
         text_of(buf, sizeof buf);
         CHECK(strncmp(buf, "MEGA65 Writer\rA graphical word processor", 40) == 0);
-        CHECK((atr_at(0) & A_FONT) == 3 && ((atr_at(13) & A_ALIGN) >> A_ALIGN_SHIFT) == 1);
+        CHECK((sa(0) & A_FONT) == 3 && ((sa(13) & A_ALIGN) >> A_ALIGN_SHIFT) == 1);
 
         /* Markdown from elsewhere */
         md_in("Hello *world* and **bold**, `code` <u>under</u>.\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "Hello world and bold, code under.\r") == 0);
-        CHECK(atr_at(6) == A_ITAL && atr_at(16) == A_BOLD && atr_at(22) == 2 && atr_at(27) == A_UNDER && atr_at(0) == 0);
+        CHECK(sa(6) == A_ITAL && sa(16) == A_BOLD && sa(22) == 2 && sa(27) == A_UNDER && sa(0) == 0);
         md_in("# Title\n\nPara one\nwraps here.\n\n- item 1\n- item 2\n\n1. first\n2) second\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "Title\rPara one wraps here.\r\ritem 1\ritem 2\rfirst\rsecond\r") == 0);
         CHECK(para_kind(28) == K_BULLET && para_kind(35) == K_BULLET && para_kind(42) == K_NUMBER && item_num(42) == 1 &&
               para_kind(48) == K_NUMBER && item_num(48) == 2);
-        CHECK((atr_at(0) & A_FONT) == 3 && (atr_at(6) & A_FONT) == 0);
+        CHECK((sa(0) & A_FONT) == 3 && (sa(6) & A_FONT) == 0);
         md_in("Setext\n======\nnext\n");
         text_of(buf, sizeof buf);
-        CHECK(strcmp(buf, "Setext\rnext\r") == 0 && (atr_at(0) & A_FONT) == 3);
+        CHECK(strcmp(buf, "Setext\rnext\r") == 0 && (sa(0) & A_FONT) == 3);
         md_in("See [the site](http://x.y) and ![a picture](p.png); <http://a.b>.\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "See the site (http://x.y) and a picture; http://a.b.\r") == 0);
@@ -967,20 +979,20 @@ int main(void) {
         CHECK(strcmp(buf, "a*b* 5 < 6 & 7 8 &copy; 2 * 3 = 6 snake_case_name\r") == 0);
         md_in("```c\nint *p = 0;\n  x\n```\nafter\n");
         text_of(buf, sizeof buf);
-        CHECK(strcmp(buf, "int *p = 0;\r  x\r\rafter\r") == 0 && atr_at(0) == 2 && atr_at(5) == 2 && atr_at(17) == 0);
+        CHECK(strcmp(buf, "int *p = 0;\r  x\r\rafter\r") == 0 && sa(0) == 2 && sa(5) == 2 && sa(17) == 0);
         md_in("one\n\n<div style=\"page-break-after: always\"></div>\n\ntwo\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "one\r\ftwo\r") == 0);
         md_in("<div align=\"center\">\n\nMid\nline\\\nnext  \nlast\n\n</div>\n\n> quoted\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "Mid line\rnext\rlast\r\rquoted\r") == 0);
-        CHECK(((atr_at(8) & A_ALIGN) >> A_ALIGN_SHIFT) == 1 && ((atr_at(18) & A_ALIGN) >> A_ALIGN_SHIFT) == 1 &&
-              atr_at(19) == 0 && ((atr_at(26) & A_ALIGN) >> A_ALIGN_SHIFT) == 0);
+        CHECK(((sa(8) & A_ALIGN) >> A_ALIGN_SHIFT) == 1 && ((sa(18) & A_ALIGN) >> A_ALIGN_SHIFT) == 1 &&
+              sa(19) == 0 && ((sa(26) & A_ALIGN) >> A_ALIGN_SHIFT) == 0);
         md_in("**a***b* ***c*** *d **e** f*\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "ab c d e f\r") == 0);
-        CHECK(atr_at(0) == A_BOLD && atr_at(1) == A_ITAL && atr_at(3) == (A_BOLD | A_ITAL) && atr_at(5) == A_ITAL &&
-              atr_at(7) == (A_BOLD | A_ITAL) && atr_at(9) == A_ITAL);
+        CHECK(sa(0) == A_BOLD && sa(1) == A_ITAL && sa(3) == (A_BOLD | A_ITAL) && sa(5) == A_ITAL &&
+              sa(7) == (A_BOLD | A_ITAL) && sa(9) == A_ITAL);
         md_in("");
         CHECK(doc_len == 1 && txt_at(0) == CH_CR);
 
@@ -997,11 +1009,11 @@ int main(void) {
                 u8 a = (u8)(rand() % 4 == 0 ? rand() % 32 : 0), r = (u8)(rand() % 14);
                 for (; *t; t++) {
                     txt_put(doc_len, (u8)*t);
-                    atr_put(doc_len++, a);
+                    sput(doc_len++, a);
                 }
                 if (r < 9) {
                     txt_put(doc_len, ' ');
-                    atr_put(doc_len++, (u8)(rand() % 3 == 0 ? a : 0));
+                    sput(doc_len++, (u8)(rand() % 3 == 0 ? a : 0));
                 } else {
                     txt_put(doc_len, r == 13 ? CH_FF : CH_CR);
                     atr_put(doc_len++, (u8)((rand() % 4) << A_ALIGN_SHIFT));
@@ -1028,7 +1040,7 @@ int main(void) {
         wp_cmd(13);
         for (k = 0; k < 40; k++) {
             txt_put(k, (u8)("a{b}c\\d e  f\rg\f\fh  \ri j\rk\r"[k % 20]));
-            atr_put(k, (u8)(txt_at(k) == CH_CR || txt_at(k) == CH_FF ? (k % 4) << A_ALIGN_SHIFT : k % 32));
+            sput(k, (u8)(txt_at(k) == CH_CR || txt_at(k) == CH_FF ? (k % 4) << A_ALIGN_SHIFT : k % 32));
         }
         txt_put(40, CH_CR);
         atr_put(40, 0);
@@ -1041,8 +1053,8 @@ int main(void) {
             for (k = 0; k < len; k++) {
                 int r2 = rand() % 40;
                 txt_put(k, (u8)(r2 == 0 ? CH_CR : r2 == 1 ? CH_FF : r2 < 8 ? ' ' : r2 < 12 ? 0xA0 + rand() % 96 : 32 + rand() % 95));
-                atr_put(k, (u8)(txt_at(k) == CH_CR || txt_at(k) == CH_FF ? (rand() % 4) << A_ALIGN_SHIFT
-                                                                 : rand() % 3 ? atr_at(k ? k - 1 : 0) & A_STYLE : rand() % 32));
+                sput(k, (u8)(txt_at(k) == CH_CR || txt_at(k) == CH_FF ? (rand() % 4) << A_ALIGN_SHIFT
+                                                                 : rand() % 3 ? sa(k ? k - 1 : 0) & A_STYLE : rand() % 32));
             }
             txt_put(len, CH_CR);
             atr_put(len, 0);
@@ -1087,12 +1099,12 @@ int main(void) {
                 show(want);
                 fails++;
             }
-            CHECK((atr_at(0) & A_FONT) == 3 && (atr_at(0) & A_BOLD));                 /* Title: 16 pt, Head */
-            CHECK(((atr_at(5) & A_ALIGN) >> A_ALIGN_SHIFT) == 1);                  /* centred */
-            CHECK((atr_at(6) & A_STYLE) == 0);                                     /* Plain: Arial, Sans */
-            CHECK((atr_at(12) & A_STYLE) == A_BOLD && (atr_at(17) & A_STYLE) == (A_BOLD | A_ITAL));
-            CHECK((atr_at(22) & A_UNDER) && !(atr_at(28) & A_UNDER));
-            CHECK((atr_at(31) & A_FONT) == 2 && (atr_at(36) & A_FONT) == 1 && (atr_at(35) & A_FONT) == 0);
+            CHECK((sa(0) & A_FONT) == 3 && (sa(0) & A_BOLD));                 /* Title: 16 pt, Head */
+            CHECK(((sa(5) & A_ALIGN) >> A_ALIGN_SHIFT) == 1);                  /* centred */
+            CHECK((sa(6) & A_STYLE) == 0);                                     /* Plain: Arial, Sans */
+            CHECK((sa(12) & A_STYLE) == A_BOLD && (sa(17) & A_STYLE) == (A_BOLD | A_ITAL));
+            CHECK((sa(22) & A_UNDER) && !(sa(28) & A_UNDER));
+            CHECK((sa(31) & A_FONT) == 2 && (sa(36) & A_FONT) == 1 && (sa(35) & A_FONT) == 0);
         }
     }
 
@@ -1107,13 +1119,13 @@ int main(void) {
         type("Title\nBody text here\nmore");
         wp_key(147);                                    /* (the start) */
         wp_cmd(32 + K_H1);                              /* no selection: the cursor's paragraph */
-        CHECK(para_kind(0) == K_H1 && atr_at(0) == (F_HEAD | A_BOLD) && atr_at(4) == (F_HEAD | A_BOLD) && para_kind(6) == 0);
+        CHECK(para_kind(0) == K_H1 && sa(0) == (F_HEAD | A_BOLD) && sa(4) == (F_HEAD | A_BOLD) && para_kind(6) == 0);
         CHECK(wp_get(16) == K_H1);                      /* GET_KIND */
         CHECK(raw_tag(0, tags) >= 4 && memcmp(tags, "[H1]", 4) == 0);
         /* RETURN at a heading's end: a normal paragraph after it */
         wp_cmd(14);
         type("\nx");
-        CHECK(para_kind(0) == K_H1 && para_kind(6) == K_NORMAL && atr_at(6) == 0);
+        CHECK(para_kind(0) == K_H1 && para_kind(6) == K_NORMAL && sa(6) == 0);
         wp_key(20);
         wp_key(20);                                     /* (the empty paragraph gone: the heading kept) */
         text_of(buf, sizeof buf);
@@ -1123,21 +1135,21 @@ int main(void) {
         sel_anchor = 11;
         cur = 15;
         wp_cmd(32 + K_CODE);
-        CHECK(atr_at(10) == 0 && atr_at(11) == F_MONO && atr_at(14) == F_MONO && atr_at(15) == 0 && para_kind(6) == K_NORMAL);
+        CHECK(sa(10) == 0 && sa(11) == F_MONO && sa(14) == F_MONO && sa(15) == 0 && para_kind(6) == K_NORMAL);
         /* part of one, all of the next: each its way */
         sel_anchor = 16;
         cur = 25;
         wp_cmd(32 + K_QUOTE);
-        CHECK(atr_at(16) == (F_SERIF | A_ITAL) && para_kind(6) == K_NORMAL);
-        CHECK(para_kind(21) == K_QUOTE && atr_at(21) == (F_SERIF | A_ITAL) && atr_at(24) == (F_SERIF | A_ITAL));
+        CHECK(sa(16) == (F_SERIF | A_ITAL) && para_kind(6) == K_NORMAL);
+        CHECK(para_kind(21) == K_QUOTE && sa(21) == (F_SERIF | A_ITAL) && sa(24) == (F_SERIF | A_ITAL));
         /* a whole paragraph: the characters in the old kind's style take
          * the new one's, others keep their font (and what was added) */
         sel_on = 0;
         cur = 8;
         wp_cmd(32 + K_QUOTE);
-        CHECK(para_kind(6) == K_QUOTE && atr_at(6) == (F_SERIF | A_ITAL) && atr_at(11) == (F_MONO | A_ITAL));
+        CHECK(para_kind(6) == K_QUOTE && sa(6) == (F_SERIF | A_ITAL) && sa(11) == (F_MONO | A_ITAL));
         wp_cmd(32 + K_NORMAL);
-        CHECK(para_kind(6) == K_NORMAL && atr_at(6) == 0 && atr_at(11) == F_MONO && atr_at(16) == 0);
+        CHECK(para_kind(6) == K_NORMAL && sa(6) == 0 && sa(11) == F_MONO && sa(16) == 0);
         CHECK(para_kind(21) == K_QUOTE);
         /* a quote laid out with its indent */
         get_line(line_of(21), &L);
@@ -1160,11 +1172,11 @@ int main(void) {
         CHECK(strcmp(buf, "One\rTwo\rThree\rFour\rtext it\r\rq1 it b q2\rq3\r\rq4\r\rcode\r\r  more\r\rSetext\r") == 0);
         CHECK(para_kind(0) == K_H1 && para_kind(4) == K_H2 && para_kind(8) == K_H3 && para_kind(14) == K_H3 &&
               para_kind(19) == K_NORMAL);
-        CHECK(atr_at(0) == (F_HEAD | A_BOLD) && atr_at(8) == (F_SERIF | A_BOLD) && atr_at(24) == A_ITAL);
-        CHECK(para_kind(28) == K_QUOTE && atr_at(28) == (F_SERIF | A_ITAL) && atr_at(34) == (F_SERIF | A_ITAL | A_BOLD));
+        CHECK(sa(0) == (F_HEAD | A_BOLD) && sa(8) == (F_SERIF | A_BOLD) && sa(24) == A_ITAL);
+        CHECK(para_kind(28) == K_QUOTE && sa(28) == (F_SERIF | A_ITAL) && sa(34) == (F_SERIF | A_ITAL | A_BOLD));
         CHECK(para_kind(39) == K_QUOTE && para_kind(42) == K_NORMAL && para_kind(43) == K_QUOTE);
-        CHECK(para_kind(47) == K_CODE && para_kind(52) == K_CODE && para_kind(53) == K_CODE && atr_at(47) == F_MONO);
-        CHECK(para_kind(61) == K_H2 && atr_at(61) == F_HEAD);
+        CHECK(para_kind(47) == K_CODE && para_kind(52) == K_CODE && para_kind(53) == K_CODE && sa(47) == F_MONO);
+        CHECK(para_kind(61) == K_H2 && sa(61) == F_HEAD);
         md_out(m1);
         CHECK(strstr(m1, "# One\n\n## Two\n\n### Three\n\n### Four\n\ntext *it*\n\n> q1 it **b** q2\\\n> q3\n\n> q4") != NULL);
         CHECK(strstr(m1, "```\ncode\n\n  more\n```\n\n## Setext") != NULL);
@@ -1190,9 +1202,9 @@ int main(void) {
         md_in("- one\n- two\n    1. a\n    2. b\n        - deep\n    3. c\n- three\n\n1. x\n\n2. y\n3) z\n\ntext\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "one\rtwo\ra\rb\rdeep\rc\rthree\rx\ry\rz\r\rtext\r") == 0);
-        CHECK(atr_at(3) == K_BULLET && atr_at(7) == K_BULLET && atr_at(9) == (K_NUMBER | 1 << A_LEVEL_SHIFT) &&
-              atr_at(16) == (K_BULLET | 2 << A_LEVEL_SHIFT) && atr_at(18) == (K_NUMBER | 1 << A_LEVEL_SHIFT) &&
-              atr_at(24) == K_BULLET && atr_at(25) == 0);
+        CHECK(sa(3) == K_BULLET && sa(7) == K_BULLET && sa(9) == (K_NUMBER | 1 << A_LEVEL_SHIFT) &&
+              sa(16) == (K_BULLET | 2 << A_LEVEL_SHIFT) && sa(18) == (K_NUMBER | 1 << A_LEVEL_SHIFT) &&
+              sa(24) == K_BULLET && sa(25) == 0);
         CHECK(item_num(8) == 1 && item_num(10) == 2 && item_num(17) == 3);  /* (deep passed over) */
         CHECK(item_num(25) == 1 && item_num(27) == 2 && item_num(29) == 3); /* (a loose list: one list) */
         CHECK(para_kind(32) == K_NORMAL);
@@ -1209,13 +1221,13 @@ int main(void) {
         screen_ppm("build/lists_page.ppm");
         cur = 8;                                    /* "a": out of the list (level 1, then 0, then normal) */
         wp_key(20);
-        CHECK(para_kind(8) == K_NUMBER && (atr_at(9) & A_LEVEL) == 0 && strcmp((text_of(buf, sizeof buf), buf), "one\rtwo\ra\rb\rdeep\rc\rthree\rx\ry\rz\r\rtext\r") == 0);
+        CHECK(para_kind(8) == K_NUMBER && (sa(9) & A_LEVEL) == 0 && strcmp((text_of(buf, sizeof buf), buf), "one\rtwo\ra\rb\rdeep\rc\rthree\rx\ry\rz\r\rtext\r") == 0);
         CHECK(item_num(10) == 1);                   /* (b: the first at level 1 now) */
         wp_key(9);                                  /* TAB: back in */
-        CHECK((atr_at(9) & A_LEVEL) == 1 << A_LEVEL_SHIFT && item_num(10) == 2);
+        CHECK((sa(9) & A_LEVEL) == 1 << A_LEVEL_SHIFT && item_num(10) == 2);
         wp_key(20);
         wp_key(20);
-        CHECK(para_kind(8) == K_NORMAL && atr_at(9) == 0 && item_num(10) == 1);
+        CHECK(para_kind(8) == K_NORMAL && sa(9) == 0 && item_num(10) == 1);
         /* RETURN on an empty item: out of the list */
         wp_cmd(13);
         wp_cmd(32 + K_BULLET);
@@ -1227,9 +1239,9 @@ int main(void) {
         wp_key(147);
         wp_key(9);
         wp_cmd(32 + K_NUMBER);                      /* (a list's level kept as it changes kind) */
-        CHECK(atr_at(1) == (K_NUMBER | 1 << A_LEVEL_SHIFT));
+        CHECK(sa(1) == (K_NUMBER | 1 << A_LEVEL_SHIFT));
         wp_cmd(32 + K_NORMAL);
-        CHECK(atr_at(1) == 0);
+        CHECK(sa(1) == 0);
         wp_drop(K_NUMBER);
         screen_ppm("build/style_drop.ppm");
         wp_drop(0xFF);
@@ -1241,7 +1253,7 @@ int main(void) {
                "{\\listtext\\pard\\plain 2.\\tab}\\pard\\s20\\ls2\\ilvl1 N2\\par\\pard After\\par}");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "B1\rN1\rN2\rAfter\r") == 0);
-        CHECK(atr_at(2) == K_BULLET && atr_at(5) == (K_NUMBER | 1 << A_LEVEL_SHIFT) && item_num(6) == 2 && atr_at(11) == 0);
+        CHECK(sa(2) == K_BULLET && sa(5) == (K_NUMBER | 1 << A_LEVEL_SHIFT) && item_num(6) == 2 && sa(11) == 0);
 
         /* a version 1 file: its paragraph ends' style bits cleared */
         wp_cmd(13);
@@ -1249,9 +1261,34 @@ int main(void) {
         atr_put(2, (u8)(A_BOLD | 3 | (2 << A_ALIGN_SHIFT)));
         n = doc_pack();
         MEM[SCRATCH_LIN + 2] = 1;
-        CHECK(doc_unpack() == 0 && atr_at(2) == (2 << A_ALIGN_SHIFT) && para_kind(0) == K_NORMAL);
-        MEM[SCRATCH_LIN + 2] = 3;
+        CHECK(doc_unpack() == 0 && sa(2) == (2 << A_ALIGN_SHIFT) && para_kind(0) == K_NORMAL);
+        MEM[SCRATCH_LIN + 2] = 4;
         CHECK(doc_unpack() == 1);                       /* (a later version: refused) */
+        /* the style table: a version 2 file (a character's attribute: its
+         * style), and a version 3 file's table merged into the session's */
+        {
+        u16 k;
+        wp_cmd(13);
+        type("abcd");
+        sput(1, A_BOLD);
+        sput(2, F_SERIF | A_UNDER);
+        n = doc_pack();
+        CHECK(n == 5 + 2 * 5 + 3 + st_n && MEM[SCRATCH_LIN + 15] == ST_SIZE);
+        for (k = 0; k < 4; k++) MEM[SCRATCH_LIN + 10 + k] = sa(k);
+        MEM[SCRATCH_LIN + 2] = 2;
+        CHECK(doc_unpack() == 0 && sa(0) == 0 && sa(1) == A_BOLD && sa(2) == (F_SERIF | A_UNDER) && sa(3) == 0);
+        k = st_n;
+        n = doc_pack();
+        MEM[SCRATCH_LIN + 16] = 41;                     /* (the file's table: 41 entries, 40 bold italic) */
+        for (n = 32; n < 40; n++) MEM[SCRATCH_LIN + 18 + n] = 0;
+        MEM[SCRATCH_LIN + 18 + 40] = A_BOLD | A_ITAL;
+        MEM[SCRATCH_LIN + 10 + 1] = 40;
+        MEM[SCRATCH_LIN + 10 + 3] = 200;                /* (past the table: plain) */
+        CHECK(doc_unpack() == 0 && sa(1) == (A_BOLD | A_ITAL) && sa(2) == (F_SERIF | A_UNDER) && sa(3) == 0 &&
+              atr_at(1) == sty_find(A_BOLD | A_ITAL) && atr_at(1) < 32 && st_n == k);
+        MEM[SCRATCH_LIN + 15] = 2;                      /* (another entry size: refused) */
+        CHECK(doc_unpack() == 1);
+        }
         (void)n;
     }
 
@@ -1327,7 +1364,7 @@ int main(void) {
         u8 a = (u8)(rand() % 9 == 0 ? A_BOLD : rand() % 13 == 0 ? 3 : 0);
         for (k = 0; t[k]; k++) {
             txt_put(doc_len - 1 + k, (u8)t[k]);
-            atr_put(doc_len - 1 + k, a);
+            sput(doc_len - 1 + k, a);
         }
         doc_len += k;
         if (rand() % 12 == 0) txt_put(doc_len++ - 1, CH_CR);

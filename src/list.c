@@ -100,7 +100,7 @@ static void page_marks(void) {
     tr = trailing(i, e);
     for (; i < e; i++) {
         c = txt_at(i);
-        a = atr_at(i);
+        a = sty(atr_at(i));
         if (is_end(c)) {
             blit(raw_glyph(G_PILCROW), x, (int16_t)(asc - 10));
             continue;

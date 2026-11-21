@@ -105,6 +105,7 @@ void wp_init(void) {
     video_on();
     render_invalidate();
     if (!started) {
+        sty_init();
         view_mode = VIEW_PAGE;
         doc_new();
         started = 1;

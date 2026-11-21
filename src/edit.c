@@ -37,14 +37,15 @@ u8 undo_swap(void);
 /* ---- styles (F3 / F5 / F7, CTRL+B / I / U; F2; F4; CTRL+D), list levels ---- */
 static u8 is_brk(u8 c) { return c == CH_CR || c == CH_FF; }
 
-/* the selection's attributes: (a & keep) | set; then the typing style
- * is its first character's */
+/* the selection's styles: (a & keep) | set (each character's entry in the
+ * style table changed for that style's); then the typing style is its
+ * first character's */
 static void restyle(u8 keep, u8 set) {
     u16 lo = sel_lo(), hi = sel_hi(), i;
     note(lo, hi);
     for (i = lo; i < hi; i++)
-        if (!is_brk(txt_at(i))) atr_put(i, (u8)((atr_at(i) & keep) | set));
-    typing_attr = atr_at(lo) & A_STYLE;
+        if (!is_brk(txt_at(i))) atr_put(i, sty_find((u8)((sty(atr_at(i)) & keep) | set)));
+    typing_attr = atr_at(lo);
     dirty = 1;
     layout_edit(lo, hi, 0);
 }
@@ -52,17 +53,17 @@ static void restyle(u8 keep, u8 set) {
 /* bold / italic / underline: over the selection (all on unless the first
  * character has it already), else for what is typed next */
 static void toggle(u8 bit) {
-    if (!sel_on) typing_attr ^= bit;
-    else if (atr_at(sel_lo()) & bit) restyle((u8)~bit, 0);
+    if (!sel_on) typing_attr = sty_find(sty(typing_attr) ^ bit);
+    else if (sty(atr_at(sel_lo())) & bit) restyle((u8)~bit, 0);
     else restyle(0xFF, bit);
 }
 
 /* the next font: over the selection (after its first character's), else
  * for what is typed next */
 static void cycle_font(void) {
-    u8 a = sel_on ? atr_at(sel_lo()) : typing_attr, f = (u8)((a + 1) & A_FONT);   /* (NFONTS: 4) */
+    u8 a = sty(sel_on ? atr_at(sel_lo()) : typing_attr), f = (u8)((a + 1) & A_FONT);   /* (NFONTS: 4) */
     if (sel_on) restyle((u8)~A_FONT, f);
-    else typing_attr = (u8)((typing_attr & ~A_FONT) | f);
+    else typing_attr = sty_find((u8)((a & ~A_FONT) | f));
 }
 
 /* the alignment of the paragraph(s) at the cursor / selection: left,
@@ -126,14 +127,14 @@ static void style(u8 k) {
             of = a & A_FONT;
             keep = (u8)(~a & (A_BOLD | A_ITAL | A_UNDER));
             for (i = p; i < e; i++) {
-                a = atr_at(i);
+                a = sty(atr_at(i));
                 f = a & A_FONT;
                 if (f == of) f = kf;
-                atr_put(i, (u8)(f | (a & keep) | kfl));
+                atr_put(i, sty_find((u8)(f | (a & keep) | kfl)));
             }
             atr_put(e, (u8)((atr_at(e) & (k >= K_BULLET ? ~A_KIND : A_ALIGN)) | k));    /* (a list keeps its level) */
         } else {
-            for (i = lo > p ? lo : p; i < e && i < hi; i++) atr_put(i, ka);
+            for (i = lo > p ? lo : p; i < e && i < hi; i++) atr_put(i, sty_find(ka));
         }
         if (!sel_on || e + 1 >= hi || e >= doc_len - 1) break;
         p = (u16)(e + 1);
@@ -193,7 +194,7 @@ static void replace_sel(void) {
     u16 lo = sel_lo();
     u8 a;
     if (!sel_on || sel_hi() - lo != f_len || !match_at(lo) || (u16)(doc_len - f_len + r_len) > DOC_MAX) return;
-    a = atr_at(lo) & A_STYLE;
+    a = atr_at(lo);
     note(lo, lo + f_len + 1);   /* (as doc_delete would: and the end after it) */
     del_raw(lo, lo + f_len);
     cur = lo;

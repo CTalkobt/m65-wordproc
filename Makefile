@@ -49,7 +49,10 @@ CC45FLAGS = -fno-tail-call-optimization -I$(CC45_ROOT)/lib/include -Isrc -I$(BUI
 # --minify: the BASIC program without comments and indentation, its lines
 # joined and its long names shortened (737 bytes less, so the C half starts
 # a page lower; needs M65Compiler #601, master since 6762f672)
-BASFLAGS ?= --minify
+# --link-align=1: the C half right after the BASIC program, not at the next
+# page (as much as 255 bytes of bank 0 otherwise lost; M65Compiler #678,
+# main since c6006fdd)
+BASFLAGS ?= --minify --link-align=1
 # the C half's CPU stack: a page of its own, $1700-$17FF (it never goes
 # deeper than 32 bytes), next to its base page (src/lowmem.s45's $1600),
 # not 512 bytes at the end of bank 0 (ln45 --stack-page, M65Compiler
@@ -62,7 +65,7 @@ SMALL   = api conv doc layout
 # (conv.c is called by the modules, whose base-page blocks start at $80:
 # its functions keep their variables out of the base page)
 NOZP    = conv
-OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45) $(BUILD)/obj/modcall.o45 $(BUILD)/obj/gap.o45 $(BUILD)/obj/gapmove.o45 $(BUILD)/obj/lowmem.o45 $(BUILD)/obj/vicunlock.o45
+OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45) $(BUILD)/obj/modcall.o45 $(BUILD)/obj/gap.o45 $(BUILD)/obj/gapmove.o45 $(BUILD)/obj/style.o45 $(BUILD)/obj/lowmem.o45 $(BUILD)/obj/vicunlock.o45
 CCQUIET = 2>&1 | grep -v 'note:\|^ *[0-9]* |\|^ *|' || true
 
 # The messages (src/messages.txt): WRITER.MSG, BLOADed by the BASIC program
@@ -197,7 +200,14 @@ $(BUILD)/test_wp: tests/test_wp.c tests/host.c tools/helpdoc.c $(PORTABLE) $(HEA
 	@mkdir -p $(BUILD)
 	$(HOSTCC) $(HOSTFLAGS) -fsanitize=address,undefined -o $@ tests/test_wp.c tests/host.c tools/helpdoc.c $(PORTABLE) $(BUILD)/msgtab.c
 
-test: $(BUILD)/test_wp
+# (test_wp_s: the same with the style table's entries 0-31 in another
+# order, so that a style read without the table (sty) shows)
+$(BUILD)/test_wp_s: tests/test_wp.c tests/host.c tools/helpdoc.c $(PORTABLE) $(HEADERS) $(MSGS)
+	@mkdir -p $(BUILD)
+	$(HOSTCC) $(HOSTFLAGS) -DSTY_SCRAMBLE -fsanitize=address,undefined -o $@ tests/test_wp.c tests/host.c tools/helpdoc.c $(PORTABLE) $(BUILD)/msgtab.c
+
+test: $(BUILD)/test_wp $(BUILD)/test_wp_s
+	$(BUILD)/test_wp_s
 	$(BUILD)/test_wp
 	python3 -c "from PIL import Image; [Image.open('$(BUILD)/%s.ppm' % n).save('$(BUILD)/%s.png' % n) for n in ('page', 'raw', 'list_page', 'list_raw', 'latin_page', 'latin_raw', 'style_drop', 'kinds_page', 'kinds_raw', 'lists_page', 'long', 'justify', 'fuzz', 'fuzz2')]"
 
