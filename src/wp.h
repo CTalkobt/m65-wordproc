@@ -345,6 +345,9 @@ void doc_built(void);           /* after build_end (b_done): doc_loaded(1) (mod_
 #define MOD_RTF_CHUNK (MOD_MORE | 4)    /* RTF.OVL: the next 1 KB of the file, at SCRATCH_LIN */
 #define MOD_RTF_END 5                   /* RTF.OVL: the import's end: the document's length */
 #define MOD_HTML_EXPORT 6               /* HTML.OVL: the document as HTML at SCRATCH_LIN */
+#define MOD_HTML_BEGIN (MOD_MORE | 7)   /* HTMLIN.OVL: an import starts (streamed, as RTF's) */
+#define MOD_HTML_CHUNK (MOD_MORE | 8)   /* HTMLIN.OVL: the next 1 KB of the file, at SCRATCH_LIN */
+#define MOD_HTML_END 9                  /* HTMLIN.OVL: the import's end: the document's length */
 extern u8 mod_cmd;                      /* what the module is to do */
 extern u16 mod_ret;                     /* its result */
 u8 mod_ok(const u8 *m);                 /* a module's header there, of this build */
@@ -352,6 +355,7 @@ u16 mod_run(u8 cmd);                    /* run the module loaded; 0xFFFF: none *
 void md_main(void);                     /* MARKDOWN.OVL's entry (md.c) */
 void rtf_main(void);                    /* RTF.OVL's entry (rtf.c) */
 void html_main(void);                   /* HTML.OVL's entry (html.c) */
+void htmlin_main(void);                 /* HTMLIN.OVL's entry (htmlin.c) */
 /* LIST.OVL (list.c), list mode: resident, it draws its markers over each
  * line drawn while list_on (render.c calls list_main with hk_l, hk_L: the
  * line). It is loaded by BASIC at the start into mod_area's last LIST_SIZE

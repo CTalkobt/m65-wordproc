@@ -40,8 +40,8 @@ help: a Writer document shown when the program starts and again with F8 / HELP;
 without it the program starts with an empty document), `MARKDOWN.OVL`
 (Markdown import and export, a module: without it the rest works, and a
 `.md` name gets "Markdown needs MARKDOWN.OVL on the disk"),
-`RTF.OVL` (RTF import and export, the same for `.rtf`), `HTML.OVL` (HTML
-export, the same for `.htm` and `.html`), `LIST.OVL`
+`RTF.OVL` (RTF import and export, the same for `.rtf`), `HTML.OVL` and
+`HTMLIN.OVL` (HTML export and import, the same for `.htm` and `.html`), `LIST.OVL`
 (list mode, a module: without it the menu does not offer it) and
 `DEFAULT0.OVL` (undo, find and replace, and the styles; a required module,
 named so that it is not taken for an optional one: without it those do
@@ -74,7 +74,7 @@ keyboard buffer and saves a screenshot, e.g.
 | CTRL+H | find and replace (below) |
 | CTRL+W | save, under the document's name (asking only when it has none) |
 | F8 or HELP | the help (`WRITER.HELP`) as the document (after asking about unsaved changes) |
-| ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text; Markdown for a name ending in `.md`, RTF for `.rtf`, HTML for `.htm` or `.html`: export only), Directory; Redraw, List on / off (with `LIST.OVL`), Help, Quit (ESC also ends a selection) |
+| ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text; Markdown for a name ending in `.md`, RTF for `.rtf`, HTML for `.htm` or `.html`), Directory; Redraw, List on / off (with `LIST.OVL`), Help, Quit (ESC also ends a selection) |
 | CTRL+D | the style drop-down (below) |
 | CTRL+L | redraw the whole screen |
 | CTRL+A | Compose: the next two characters make an accented one (below) |
@@ -168,6 +168,7 @@ letter with its accent), in `WRITER.FNT`.
 | `src/md.c` | C | Markdown export and import (below): the module `MARKDOWN.OVL` |
 | `src/rtf.c` | C | RTF export and (streamed) import: the module `RTF.OVL` |
 | `src/html.c` | C | HTML export (below): the module `HTML.OVL` |
+| `src/htmlin.c` | C | HTML (streamed) import: the module `HTMLIN.OVL` |
 | `src/list.c` | C | list mode's markers: the module `LIST.OVL` |
 | `src/edit.c`, `src/edit_undo.c` | C | undo, find and replace, the styles: the module `DEFAULT0.OVL` |
 | `src/modcall.s45` | asm | the jump into `DEFAULT0.OVL` (and, for ln45's call graph, what it calls) |
@@ -191,7 +192,8 @@ the room for it. Two kinds:
 - **Run once** (as one job over the document), loaded just before it runs:
   Markdown (`MARKDOWN.OVL`, from `src/md.c`: the largest module, 6710
   bytes, so it sets `MOD_SIZE`), RTF (`RTF.OVL`, from
-  `src/rtf.c`), HTML (`HTML.OVL`, from `src/html.c`); PETSCII graphics, PDF export, find and replace or a word
+  `src/rtf.c`), HTML (`HTML.OVL`, from `src/html.c`, and `HTMLIN.OVL`, from
+  `src/htmlin.c`: together more than `MOD_SIZE`); PETSCII graphics, PDF export, find and replace or a word
   count would fit the same way. One can also be called several times in a
   row (a command with `MOD_MORE`: `mod_run` then leaves it and the drawing's
   caches alone, as they share its memory): RTF import is streamed that way,
@@ -357,7 +359,7 @@ A paragraph's CR (or page break) holds the paragraph's: bits 0-2 its kind
 3-4 a list item's level (0-3), bits 5-6 its alignment. Version 1 files (before the kinds: their
 CRs had the typing style in bits 0-4) load as Normal paragraphs. Import / Export use sequential files: plain PETSCII text
 (accents left out on export: PETSCII has none), Markdown when the name ends
-in `.md`, RTF for `.rtf`, HTML (export only) for `.htm` or `.html`.
+in `.md`, RTF for `.rtf`, HTML for `.htm` or `.html`.
 
 ### Markdown
 
@@ -408,8 +410,37 @@ the same alignment: one, with `<br>`), `<h1>`-`<h3>`, `<blockquote>`,
 Bold, italic and underline (where the kind's own style lacks them) are
 `<b>` `<i>` `<u>`; another font in part is `<code>` (Mono) or a `<span>`
 (Serif, Sans, Head); alignment is `text-align`, a page break a `<div>`
-with `page-break-after: always`. There is no HTML import: an `.htm` name
-for I)mport says "HTML is export only: no import."
+with `page-break-after: always`.
+
+Import (`src/htmlin.c`, in its own module `HTMLIN.OVL`, 4.6 KB) is
+streamed as RTF's, 1 KB of the file a call, so a page larger than the
+scratch area can be read. It takes back what the export writes, and from
+elsewhere:
+
+| HTML | Writer |
+|------|--------|
+| `<p>`, `<div>` and the other block elements (`section`, `table`, ...) | paragraphs; an empty one between blocks (not after a heading or a page break, nor between a list's items), as the Markdown import |
+| `<br>` | a paragraph's end |
+| `<h1>`-`<h3>` (`<h4>`-`<h6>`: Heading 3), `<blockquote>`, `<pre>` | the kinds; each line of a `<pre>` a Code paragraph |
+| `<ul>`, `<ol>`, `<li>` | Bullet, Numbered, nested: the level (up to 4) |
+| `<b>` `<strong>`, `<i>` `<em>` `<cite>`, `<u>` `<ins>`, `<code>` `<tt>` `<kbd>` `<samp>` | bold, italic, underline, Mono |
+| `<span class="s">` / `"r"` / `"h"` (the export's) | Sans, Serif, Head |
+| `style="text-align: ..."`, `align="..."`, `<center>` | alignment |
+| `style="page-break-after: always"` (or `break-before` / `break-after`) | a page break |
+| table rows, cells | a paragraph a row, two spaces between cells |
+| `<title>`, `<script>`, `<style>`, `<svg>`, `<template>`; comments, `<!...>` | left out; other tags are dropped, their text kept |
+
+White space with a line end in it is one space (spaces alone are kept, as
+the export writes them), and there is none at a paragraph's start or end;
+in `<pre>` it is kept. Characters: UTF-8 (as the Markdown import: Latin-1
+as it is, some punctuation as ASCII, others `?`; a byte that is not UTF-8
+is taken as Latin-1), `&#N;`, `&#xH;`, and named entities: the common ones
+and Latin-1's accented letters (`&eacute;`, `&Uuml;`, `&szlig;`, ...).
+
+Tests (`make test`): the help exported, imported and exported again gives
+the same HTML; HTML from elsewhere imported as expected. In xemu a
+2.8 KB page from elsewhere and the help's HTML, imported and exported
+again on the MEGA65, are byte for byte what the host makes.
 
 ### RTF
 
@@ -564,7 +595,10 @@ can be.
   `$BA1F`: 1504 bytes free. (The drawing's caches, saved in colour RAM
   while `DEFAULT0.OVL` runs, are now saved alone, not the whole of
   `mod_area` past its buffers up to `EDIT_SIZE`, which with the menu's
-  text gone from it would not fit there.) (The BASIC program's
+  text gone from it would not fit there.) HTML export and import, as
+  modules (`HTML.OVL`, `HTMLIN.OVL`), then cost 94 bytes of BASIC and 87 of C:
+  the BASIC program ends at `$2FC7` (57 bytes below the C half), and the C
+  data at `$BA76`: 1417 bytes free. (The BASIC program's
   two `poke`s of `$D1` / `$F7` are written in decimal: `--minify` turns
   `poke $d1` into a variable,
   [M65Compiler #603](https://github.com/CTalkobt/M65Compiler/issues/603).)

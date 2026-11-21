@@ -119,6 +119,20 @@ static u16 rtf_in(const char *s) {
     return mod_run(MOD_RTF_END);
 }
 
+/* HTML s imported as BASIC streams a file (as rtf_in) */
+static u16 html_in(const char *s) {
+    size_t len = strlen(s), at = 0;
+    mod_run(MOD_HTML_BEGIN);
+    do {
+        size_t k = len - at < 1024 ? len - at : 1024;
+        memset(MEM + SCRATCH_LIN, CH_CR, 1024);
+        memcpy(MEM + SCRATCH_LIN, s + at, k);
+        mod_run(MOD_HTML_CHUNK);
+        at += k;
+    } while (at < len);
+    return mod_run(MOD_HTML_END);
+}
+
 /* the document as it matters to a file: the text, each character's style,
  * each paragraph's kind and alignment */
 static u16 doc_sig(u8 *t, u8 *a) {
@@ -832,6 +846,72 @@ int main(void) {
         h[n] = 0;
         CHECK(strstr(h, "<p>a &lt; b &amp; c &gt; d\xC3\xA9</p>") != NULL);
         gap_close();            /* (doc_load_help writes the text as it is) */
+    }
+
+    /* ---- HTML import ---- */
+    {
+        static char h1[40000], h2[40000];
+        u16 k;
+        /* the help's HTML imported and exported again: the same */
+        doc_load_help();
+        n = mod_run(MOD_HTML_EXPORT);
+        memcpy(h1, MEM + SCRATCH_LIN, n);
+        h1[n] = 0;
+        html_in(h1);
+        n = mod_run(MOD_HTML_EXPORT);
+        memcpy(h2, MEM + SCRATCH_LIN, n);
+        h2[n] = 0;
+        if (strcmp(h1, h2) != 0) {
+            k = 0;
+            while (h1[k] && h1[k] == h2[k]) k++;
+            printf("FAIL: the help's HTML changed by an import at byte %u\n  was: ", k);
+            show(h1 + (k > 40 ? k - 40 : 0));
+            printf("  now: ");
+            show(h2 + (k > 40 ? k - 40 : 0));
+            fails++;
+        }
+        text_of(buf, sizeof buf);
+        CHECK(strncmp(buf, "MEGA65 Writer\rA graphical word processor", 40) == 0);
+
+        /* HTML from elsewhere */
+        n = html_in("<!DOCTYPE html>\n<html><head><title>T</title><style>p { x: 1 }</style>\n"
+                    "<script>if (a<b) x = \"</p>\";</script></head>\n<body>\n"
+                    "<p>Hello <strong>bold</strong>\n  and <em>it</em> <u>u</u>, <code>c</code>.</p>\n"
+                    "<!-- a <p>comment</p> -->\n<p class=x>two  spaces</p></body></html>\n");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "Hello bold and it u, c.\r\rtwo  spaces\r") == 0);
+        CHECK(n == 36);
+        CHECK(atr_at(6) == A_BOLD && atr_at(15) == A_ITAL && atr_at(18) == A_UNDER && atr_at(21) == F_MONO &&
+              atr_at(0) == 0 && atr_at(10) == 0);
+        html_in("<h1>Title</h1><p>para</p><h2>Sub</h2>\n<h4>deep</h4><p align=\"center\">mid</p>"
+                "<div style=\"color: red; text-align: right\">r</div>");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "Title\rpara\r\rSub\rdeep\rmid\r\rr\r") == 0);
+        CHECK(para_kind(0) == K_H1 && para_kind(6) == K_NORMAL && para_kind(12) == K_H2 && para_kind(16) == K_H3 &&
+              ((atr_at(24) & A_ALIGN) >> A_ALIGN_SHIFT) == 1 && ((atr_at(27) & A_ALIGN) >> A_ALIGN_SHIFT) == 2);
+        html_in("<ul>\n  <li>one</li>\n  <li><p>two</p>\n    <ol start=3><li>a<li>b</ol>\n  </li>\n</ul>\n<p>after</p>");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "one\rtwo\ra\rb\r\rafter\r") == 0);
+        CHECK(para_kind(0) == K_BULLET && para_kind(4) == K_BULLET && para_kind(8) == K_NUMBER &&
+              (atr_at(9) & A_LEVEL) == 1 << A_LEVEL_SHIFT && item_num(10) == 2 && para_kind(13) == K_NORMAL);
+        html_in("<pre>\nint *p;\n\n  x &lt; 1\n</pre><blockquote><p>q1</p><p>q2<br>q3</p></blockquote>");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "int *p;\r\r  x < 1\r\rq1\r\rq2\rq3\r") == 0);
+        CHECK(para_kind(0) == K_CODE && para_kind(8) == K_CODE && atr_at(10) == F_MONO && para_kind(20) == K_QUOTE &&
+              para_kind(26) == K_QUOTE);
+        html_in("caf&eacute; &Uuml;ber &szlig; &AElig; &yuml; &#233;&#xE9; &copy; &mdash; &bogus; a & b &lt\n"
+                "caf\xc3\xa9 \xe2\x80\x9cq\xe2\x80\x9d \xe9t\xe9 \xf0\x9f\x98\x80!");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "caf\xe9 \xdc" "ber \xdf \xc6 \xff \xe9\xe9 \xa9 -- &bogus; a & b < caf\xe9 \"q\" \xe9t\xe9 ?!\r") ==
+              0);
+        html_in("<p>one</p><div style=\"page-break-after: always\"></div><p>two</p>"
+                "<table><tr><td>a</td><td>b</td></tr><tr><th>c</th></tr></table>");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "one\r\ftwo\r\ra  b\rc\r") == 0);
+        html_in("<p>x <span class=\"r\">serif <code>mono</code></span> <span>y</span></p>");
+        CHECK(atr_at(0) == F_SANS && atr_at(2) == F_SERIF && atr_at(8) == F_MONO && atr_at(13) == F_SANS);
+        html_in("");
+        CHECK(doc_len == 1);
     }
 
     /* ---- Markdown ---- */

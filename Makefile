@@ -31,8 +31,8 @@ TARGET = $(BUILD)/writer.prg
 MAP    = $(BUILD)/writer.map
 DISK   = $(BUILD)/writer.d81
 
-CSRC    = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/html.c src/list.c src/edit.c src/edit_undo.c src/m65.c src/fonts.c
-PORTABLE = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/html.c src/list.c src/edit.c src/edit_undo.c src/fonts.c
+CSRC    = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/m65.c src/fonts.c
+PORTABLE = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/fonts.c
 HEADERS = src/wp.h
 
 # The C half is compiled here (basic45 --link takes the objects): -O2 for
@@ -87,7 +87,7 @@ $(BUILD)/obj/%.o45: src/%.s45
 # linked by tools/mkmod.py to run at the program's mod_area, against its
 # map (basic45 --map: M65Compiler #595, in master since 6a7dd256); the build's ID (of the sources and the tools) ties each to the
 # program it was linked with (render.c's mod_run refuses another's).
-MODS    = $(BUILD)/markdown.ovl $(BUILD)/rtf.ovl $(BUILD)/html.ovl $(BUILD)/list.ovl $(BUILD)/default0.ovl
+MODS    = $(BUILD)/markdown.ovl $(BUILD)/rtf.ovl $(BUILD)/html.ovl $(BUILD)/htmlin.ovl $(BUILD)/list.ovl $(BUILD)/default0.ovl
 BUILD_ID := $(shell cat src/*.c src/*.h src/wp.bas tools/mkmod.py $(CC45) $(CC45_ROOT)/bin/ln45 2>/dev/null | cksum | awk '{print $$1 % 65536}')
 
 $(BUILD)/buildid.h: FORCE
@@ -119,6 +119,15 @@ $(BUILD)/obj/html_mod.o45: src/html.c $(HEADERS)
 
 $(BUILD)/html.ovl: $(TARGET) $(BUILD)/obj/html_mod.o45 tools/mkmod.py
 	python3 tools/mkmod.py --entry _html_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/html_mod.o45
+
+# HTMLIN.OVL: HTML import (htmlin.c), streamed as RTF.OVL's (its own module:
+# with the export it is more than MOD_SIZE)
+$(BUILD)/obj/htmlin_mod.o45: src/htmlin.c $(HEADERS)
+	@mkdir -p $(BUILD)/obj
+	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+
+$(BUILD)/htmlin.ovl: $(TARGET) $(BUILD)/obj/htmlin_mod.o45 tools/mkmod.py
+	python3 tools/mkmod.py --entry _htmlin_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/htmlin_mod.o45
 
 # LIST.OVL: resident (loaded at the start), at the end of mod_area
 # (LIST_OFS); render.c's list_marks calls it while drawing (inlined: from
@@ -166,6 +175,7 @@ $(DISK): $(TARGET) src/writer.fnt $(BUILD)/writer.msg $(BUILD)/help.prg $(MODS)
 	$(DISK45) add $@ $(BUILD)/markdown.ovl "MARKDOWN.OVL"
 	$(DISK45) add $@ $(BUILD)/rtf.ovl "RTF.OVL"
 	$(DISK45) add $@ $(BUILD)/html.ovl "HTML.OVL"
+	$(DISK45) add $@ $(BUILD)/htmlin.ovl "HTMLIN.OVL"
 	$(DISK45) add $@ $(BUILD)/list.ovl "LIST.OVL"
 	$(DISK45) add $@ $(BUILD)/default0.ovl "DEFAULT0.OVL"
 

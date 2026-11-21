@@ -1,4 +1,5 @@
-/* html.c — HTML export (UTF-8): the module HTML.OVL (issue #4)
+/* html.c — HTML export (UTF-8): the module HTML.OVL (issue #4; the import
+ * is HTMLIN.OVL, htmlin.c)
  *
  * The document to SCRATCH_LIN (html_export) as one page: a head with the
  * document's name as its title and a style sheet that keeps the spaces

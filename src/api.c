@@ -8,7 +8,8 @@
  *   wp_find(op)      find and replace: FIND_... (the strings poked into msg)
  *   wp_get(w)        a value for BASIC (RREG lo, hi): GET_... (files: the
  *                    image, plain text or Markdown at SCRATCH_LIN; Markdown
- *                    by the module MARKDOWN.OVL, RTF by RTF.OVL: 65535
+ *                    by the module MARKDOWN.OVL, RTF by RTF.OVL, HTML by
+ *                    HTML.OVL and HTMLIN.OVL: 65535
  *                    when it is not loaded)
  *   wp_say(n)        message n of the table (WRITER.MSG, at MSG_TAB) shown in
  *                    the bottom bar, with what BASIC poked into msg (PETSCII)
@@ -71,6 +72,9 @@ static char msg_parm[81];
 #define GET_KIND 16              /* the kind of the cursor's (the selection's first) paragraph */
 #define GET_XEXPORT 17           /* + the file's kind (BASIC's fk): the document exported to
                                     SCRATCH_LIN as 0 text, 1 Markdown, 2 RTF, 3 HTML (a module) */
+#define GET_HTMLBEGIN 21         /* HTML import (HTMLIN.OVL), streamed as RTF's: begin, chunk, end */
+#define GET_HTMLCHUNK 22
+#define GET_HTMLEND 23
 
 /* what wp_key leaves to BASIC (its ON ... GOSUB) */
 #define ACT_HELP 1                 /* F8, HELP */
@@ -435,6 +439,8 @@ u16 wp_get(u8 w) {
     case GET_XEXPORT + 3: return scratched(mod_run(MOD_HTML_EXPORT));
     case GET_RTFBEGIN: return mod_run(MOD_RTF_BEGIN);
     case GET_RTFCHUNK: return mod_run(MOD_RTF_CHUNK);
+    case GET_HTMLBEGIN:
+    case GET_HTMLCHUNK: return mod_run((u8)(w + (MOD_HTML_BEGIN - GET_HTMLBEGIN)));
     case GET_LISTOK:            /* (and DEFAULT0.OVL, loaded at mod_area) */
         edit_keep();
         return list_check();
@@ -445,8 +451,11 @@ u16 wp_get(u8 w) {
     case GET_KIND: return cur_kind();
     case GET_IMPORT:
     case GET_MDIMPORT:
-    case GET_RTFEND: {
-        u16 n = w == GET_IMPORT ? doc_import() : mod_run(w == GET_MDIMPORT ? MOD_MD_IMPORT : MOD_RTF_END);
+    case GET_RTFEND:
+    case GET_HTMLEND: {
+        u16 n = w == GET_IMPORT      ? doc_import()
+                : w == GET_MDIMPORT ? mod_run(MOD_MD_IMPORT)
+                : mod_run(w == GET_RTFEND ? MOD_RTF_END : MOD_HTML_END);
         refresh(1);
         return n;
     }

@@ -8,7 +8,7 @@
 ' document, lays it out and draws the 640 x 400 screen; BASIC calls it with
 ' SYS {name}, a and reads results with RREG.
 '
-' Modules (.OVL files: MARKDOWN.OVL, RTF.OVL, HTML.OVL, LIST.OVL, DEFAULT0.OVL) are loaded only when they
+' Modules (.OVL files: MARKDOWN.OVL, RTF.OVL, HTML.OVL, HTMLIN.OVL, LIST.OVL, DEFAULT0.OVL) are loaded only when they
 ' are on the disk (below).
 '
 ' Build: make  (basic45 --link src/api.c ... src/wp.bas -o build/writer.prg)
@@ -44,8 +44,8 @@
 #define GET_MDIMPORT 9
 #define GET_LISTOK 10
 #define GET_RTFBEGIN 12
-#define GET_RTFCHUNK 13
-#define GET_RTFEND 14
+' (then CHUNK, END: GET_RTFBEGIN + 1, + 2; HTML's likewise)
+#define GET_HTMLBEGIN 21
 #define GET_FONTS 15
 #define GET_KIND 16
 ' + the file's kind (fk): the document exported, as text, Markdown, RTF, HTML
@@ -293,14 +293,13 @@ proc importtext
   if yes then
     a$ = ""
     call ask(MSG_IMPORT)
-    ' (HTML: export only)
-    if ok and a$ <> "" then call ftype : if fk = 3 then sys {wp_say}, MSG_NOHTMLIN : ok = 0
+    if ok and a$ <> "" then call ftype : if fk = 3 then mf$ = "htmlin.ovl"
     if ok and a$ <> "" then dopen#2, (a$) : e$ = ds$ : dclose#2 : if val(e$) then call sp(MSG_NOTIMP, e$) : ok = 0
     if ok and a$ <> "" then
       call sp(MSG_IMPORTING, a$)
       ml = 1 : lo = 0 : hi = 0
-      if fk = 2 then
-        call rtfin
+      if fk >= 2 then
+        call streamin
       else
         sys {wp_get}, GET_PREP
         dopen#2, (a$)
@@ -328,21 +327,23 @@ proc importtext
   endif
 endproc
 
-' RTF: by RTF.OVL, loaded first, the file streamed to it 1 KB at a time (it
-' can be larger than the scratch area); nothing is drawn until the end
-proc rtfin
+' RTF and HTML: by RTF.OVL or HTMLIN.OVL, loaded first, the file streamed to
+' it 1 KB at a time (it can be larger than the scratch area); nothing is
+' drawn until the end. g: the module's first GET_...
+proc streamin
   call loadmod
+  g = GET_RTFBEGIN : if fk = 3 then g = GET_HTMLBEGIN
   if ml then
-    sys {wp_get}, GET_RTFBEGIN : rreg lo, hi
+    sys {wp_get}, g : rreg lo, hi
     if lo <> 255 or hi <> 255 then
       dopen#2, (a$)
       do
         fread#2, $50000, 1024
         s = st
-        sys {wp_get}, GET_RTFCHUNK
+        sys {wp_get}, g + 1
       loop until s <> 0
       dclose#2
-      sys {wp_get}, GET_RTFEND : rreg lo, hi
+      sys {wp_get}, g + 2 : rreg lo, hi
     endif
   endif
 endproc
