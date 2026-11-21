@@ -1,0 +1,27 @@
+; vicunlock.s45 — m65.c's vic_unlock: the VIC-IV's registers unlocked
+;
+; void vic_unlock(void): $47, $53 written to $D02F (the MEGA65's I/O
+; personality) with interrupts masked. Between the two writes $D611 reads
+; $FF; the KERNAL's keyboard scan, in an IRQ there, takes that as No Scroll
+; held and turns its Ctrl-S pause flag ($1119) on, and the next PRINT then
+; waits for ever (M65Compiler #667: its crt0 does the same).
+
+; no calls through pointers here (ln45's call graph)
+.weak cc45.icallinfo
+cc45.icallinfo = 1
+
+.global _vic_unlock
+
+.segment "code"
+proc _vic_unlock
+    .reg_clobbers A
+    .flag_clobbers N, Z
+    php
+    sei
+    lda #$47
+    sta $d02f
+    lda #$53
+    sta $d02f
+    plp
+    rts
+endproc

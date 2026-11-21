@@ -15,6 +15,8 @@
 #define VIC(r) (*(volatile u8 *)(r))
 #define COLRAM (0xFF80000UL + COLOR_OFS)
 
+void vic_unlock(void);          /* $D02F unlocked, interrupts masked (vicunlock.s45) */
+
 u8 mem_get(u32 a) { return *(u8 __far *)a; }
 void mem_put(u32 a, u8 v) { *(u8 __far *)a = v; }
 void mem_copy(u32 dst, u32 src, u16 n) {
@@ -69,8 +71,7 @@ static void make_screen(void) {
 
 void video_on(void) {
     u8 i;
-    VIC(0xD02F) = 0x47;         /* the VIC-IV's registers unlocked */
-    VIC(0xD02F) = 0x53;
+    vic_unlock();               /* the VIC-IV's registers (vicunlock.s45) */
     if (!is_on) {
         for (i = 0; i < NSAVED; i++) saved[i] = VIC(0xD000 + saved_regs[i]);
         is_on = 1;
@@ -102,8 +103,7 @@ void video_on(void) {
 void video_off(void) {
     u8 i;
     if (!is_on) return;
-    VIC(0xD02F) = 0x47;
-    VIC(0xD02F) = 0x53;
+    vic_unlock();
     VIC(0xD031) = saved[0];     /* first: it resets others */
     for (i = 1; i < NSAVED; i++) VIC(0xD000 + saved_regs[i]) = saved[i];
     is_on = 0;
