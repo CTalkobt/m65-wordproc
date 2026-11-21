@@ -78,26 +78,43 @@ found:
     return (u8)k;
 }
 
-static u8 *mm, ms;
-static u16 mc;
+static u16 mm, mc;               /* sty_load's table (its offset in the scratch area), count */
+static u8 ms;
 
-/* m[0..cnt-1] (a file's entries) each changed to its index here; 1 when
- * each is its own */
-u8 sty_merge(u8 *m, u16 cnt) {
+/* ST_SIZE, st_n and the entries at the scratch area's o; the end */
+u16 sty_save(u16 o) {
+    mem_put(SCRATCH_LIN + o, ST_SIZE);
+    mem_put(SCRATCH_LIN + o + 1, (u8)st_n);
+    mem_put(SCRATCH_LIN + o + 2, (u8)(st_n >> 8));
+    mem_copy(SCRATCH_LIN + o + 3, ST_LIN, st_n);
+    return (u16)(o + 3 + st_n);
+}
+
+/* the file's table at the scratch area's o (before version 3: entries
+ * 0-31, those styles), each entry changed in place to its index here; 1:
+ * each its own; 2: not a table */
+u8 sty_load(u16 o, u8 v) {
     u16 k;
-    mm = m;
-    mc = cnt;
+    mm = (u16)(o + 3);
+    mc = 32;
+    if (v < 3) {
+        for (k = 0; k < 32; k++) mem_put(SCRATCH_LIN + mm + k, (u8)k);
+    } else {
+        mc = mem_get(SCRATCH_LIN + o + 1) | (u16)(mem_get(SCRATCH_LIN + o + 2) << 8);
+        if (mem_get(SCRATCH_LIN + o) != ST_SIZE || mc > 256) return 2;
+    }
     ms = 1;
-    for (k = 0; k < cnt; k++) {
-        m[k] = sty_find(m[k]);
-        if (m[k] != k) ms = 0;
+    for (k = 0; k < mc; k++) {
+        u8 a = sty_find(mem_get(SCRATCH_LIN + mm + k));
+        mem_put(SCRATCH_LIN + mm + k, a);
+        if (a != k) ms = 0;
     }
     return ms;
 }
 
-/* the document's characters 0..n-1 (no gap) given m[their index] (past
- * cnt: 0) unless each was its own; v1: its CR / FF's attributes cleared but
- * for the alignment */
+/* the document's characters 0..n-1 (no gap) given sty_load's index for
+ * theirs (past its count: 0) unless each was its own; v1: its CR / FF's
+ * attributes cleared but for the alignment */
 void sty_remap(u16 n, u8 v1) {
     u16 i;
     u8 a, c;
@@ -107,7 +124,7 @@ void sty_remap(u16 n, u8 v1) {
         if (c == CH_CR || c == CH_FF) {
             if (v1) atr_put(i, a & A_ALIGN);
         } else if (!ms) {
-            atr_put(i, a < mc ? mm[a] : 0);
+            atr_put(i, a < mc ? mem_get(SCRATCH_LIN + mm + a) : 0);
         }
     }
 }

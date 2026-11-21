@@ -160,7 +160,7 @@ letter with its accent), in `WRITER.FNT`.
 |------|----------|------|
 | `src/wp.bas` | BASIC 65 | the main loop (GET and what each key means; idle time handed to C), the menu, file-name prompts and confirmations, all disk work (`BLOAD` / `BSAVE` documents and fonts, `DOPEN` + `FREAD#` / `FWRITE#` text and Markdown import and export, `DIR`), loading the help document, error trapping |
 | `src/doc.c` | C | the document: two parallel arrays in attic RAM (text, an attribute byte per character) with a gap at the last edit, insert and delete, the clipboard, the file image |
-| `src/style.s45` | asm | the style table (`sty`, `sty_find`, `sty_init`; a loaded file's table merged, its indexes remapped): `conv.c` has them in C for the host |
+| `src/style.s45` | asm | the style table (`sty`, `sty_find`, `sty_init`; the file image's table written, read and merged, the indexes remapped): `conv.c` has them in C for the host |
 | `src/gap.s45`, `src/gapmove.s45` | asm | reading and writing a character round the gap (`txt_at` ...), moving the gap (`gap_to`, `move2`): `doc.c` and `conv.c` have them in C for the host |
 | `src/layout.c` | C | line breaking for both views, justification, pagination, raw-view tags, cursor ↔ position mapping; incremental and lazy (below) |
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
@@ -347,7 +347,7 @@ the C64's. Each cell has its own colour (text, desk, tags, bars).
 | `$8010000` | 64 KB | attic RAM: document attributes, the same |
 | `$8020000` | 48 KB | attic RAM: the line table (4096 lines of 12 bytes) |
 | `$8030000` | 48 KB | attic RAM: the line table's bounce buffer (lines moved up) |
-| `$FF83000` | 20 KB | colour RAM past the screen's cells (`$FF81000`-`$FF82F3F`): `WRITER.FNT`'s second part, Sans, Serif and Mono (12 KB); then (`$FF86020`) the find and replace strings, the drawing's caches while `DEFAULT0.OVL` runs, `DEFAULT0.OVL` (`$FF86680`), and the style table (`$FF87800`, up to 1 KB) |
+| `$FF83000` | 20 KB | colour RAM past the screen's cells (`$FF81000`-`$FF82F3F`): `WRITER.FNT`'s second part, Sans, Serif and Mono (12 KB); then (`$FF86020`) the find and replace strings, the drawing's caches while `DEFAULT0.OVL` runs, `DEFAULT0.OVL` (`$FF86680`), and the style table (`$FF87C00`, up to 1 KB) |
 
 ### Files
 
@@ -615,7 +615,13 @@ can be.
   `doc_pack` / `doc_unpack` and the callers. `basic45 --link-align=1`
   (M65Compiler #678) then put the C half right after the BASIC program, at
   `$2FC8`, not the next page: the C data ends at `$BD6A`, 661 bytes free.
-  (The BASIC program's
+  Then the file image's table (writing it, reading and merging it) went
+  into `src/style.s45` too (`sty_save`, `sty_load`: 524 bytes in all),
+  and `doc_pack` / `doc_unpack` back to their size of before the table:
+  the C data ends at `$BCA9`, 854 bytes free. `LIST_OFS` went from 4288
+  to 4800, so `DEFAULT0.OVL` has 4800 bytes (it used 4270) and `LIST.OVL`
+  1984 (it uses 1667), at no cost in bank 0; the style table moved up to
+  `$FF87C00`, past `DEFAULT0.OVL`'s copy in colour RAM. (The BASIC program's
   two `poke`s of `$D1` / `$F7` are written in decimal: `--minify` turns
   `poke $d1` into a variable,
   [M65Compiler #603](https://github.com/CTalkobt/M65Compiler/issues/603).)

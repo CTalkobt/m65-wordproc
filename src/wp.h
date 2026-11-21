@@ -82,7 +82,7 @@ typedef uint32_t u32;
 #define REPL_LIN  (FIND_LIN + FIND_MAX + 1)
 #define CACHE_LIN (HI_LIN + 0x3080)
 #define EDIT_LIN  (HI_LIN + 0x3680)
-#define ST_LIN    (HI_LIN + 0x4800)     /* the style table: 256 entries of ST_SIZE (room for 4 bytes each) */
+#define ST_LIN    (HI_LIN + 0x4C00)     /* the style table: 256 entries of ST_SIZE (room for 4 bytes each) */
 #define ST_SIZE   1                     /* (to HI_LIN + $5000, colour RAM's end) */
 #define UNDO_MAX  7500u
 #define PARK_LIN  (SCRATCH_LIN + DOC_MAX)       /* (its 2 * UNDO_MAX before UNDO_LIN) */
@@ -314,8 +314,9 @@ extern u16 st_n;
 void sty_init(void);            /* entries 0-31: those styles (at the start) */
 u8 sty(u8 s);                   /* entry s's style */
 u8 sty_find(u8 e);              /* style e's entry (added if new) */
-u8 sty_merge(u8 *m, u16 cnt);   /* a file's entries m[] made the session's indexes; 1: each its own */
-void sty_remap(u16 n, u8 v1);   /* the loaded document's indexes through sty_merge's m (v1: CR / FF cleared) */
+u16 sty_save(u16 o);            /* the table at the scratch area's o (doc_pack); the end */
+u8 sty_load(u16 o, u8 v);       /* a file's table there merged (v: its version); 1: each its own; 2: not one */
+void sty_remap(u16 n, u8 v1);   /* the loaded document's indexes through sty_load's (v1: CR / FF cleared) */
 /* output: bytes to SCRATCH_LIN (o_n of them; past SCRATCH_MAX counted, not written) */
 extern u16 o_n;
 void o_start(void);
@@ -374,7 +375,7 @@ void htmlin_main(void);                 /* HTMLIN.OVL's entry (htmlin.c) */
  * bytes, past the drawing's buffers (mod_area.r: at most LIST_OFS bytes),
  * so it costs no memory of its own; a module run in mod_area (Markdown)
  * overwrites it, so list_ok is then 0 until BASIC has loaded it again. */
-#define LIST_OFS 4288           /* (wp.bas's too) */
+#define LIST_OFS 4800           /* (wp.bas's too; DEFAULT0.OVL's room: EDIT_SIZE) */
 #define LIST_SIZE (MOD_SIZE - LIST_OFS)
 extern u8 list_ok, list_on;             /* LIST.OVL loaded (and from this build); asked for */
 extern u16 hk_l;                        /* the line drawn (raw view: >= nlines, a row past the end) */

@@ -148,6 +148,9 @@ u16 ed_a, ed_b;
 /* the drawing's caches: mod_area.r past its buffers (MOD_SCRATCH), not
  * all of it up to EDIT_SIZE, which is more than CACHE_LIN has room for */
 #define CACHE_SIZE (sizeof mod_area.r - MOD_SCRATCH)
+/* (DEFAULT0.OVL's copy in colour RAM ends before the style table, and the
+ * table's 1 KB before colour RAM's end) */
+typedef char edit_fits[EDIT_LIN + EDIT_SIZE <= ST_LIN && ST_LIN + 1024 <= HI_LIN + 0x5000 ? 1 : -1];
 #ifdef __cc45__
 typedef char cache_fits[CACHE_SIZE <= EDIT_LIN - CACHE_LIN ? 1 : -1];
 #endif
@@ -365,11 +368,7 @@ void doc_paste(void) {
  * typing style in its low bits, cleared when one is loaded.) */
 #define WP_VERSION 3
 
-/* the scratch area's byte o (one 32-bit sum, not one at each use) */
-static u32 scr(u16 o) { return SCRATCH_LIN + o; }
-
 u16 doc_pack(void) {
-    u16 o = (u16)(5 + 2 * doc_len);
     u8 h[5];
     h[0] = 'W';
     h[1] = 'P';
@@ -378,36 +377,21 @@ u16 doc_pack(void) {
     h[4] = (u8)(doc_len >> 8);
     mem_write(SCRATCH_LIN, h, 5);
     doc_out(5, doc_len, 0, doc_len);
-    h[0] = ST_SIZE;
-    h[1] = (u8)st_n;
-    h[2] = (u8)(st_n >> 8);
-    mem_write(scr(o), h, 3);
-    mem_copy(scr((u16)(o + 3)), ST_LIN, st_n);
-    return (u16)(o + 3 + st_n);
+    return sty_save((u16)(5 + 2 * doc_len));
 }
 
 u8 doc_unpack(void) {
-    u16 n, o, i, cnt = 32;
-    u8 h[5], v, same, *m = mod_area.r.band;  /* (the drawing's: free here) */
+    u16 n;
+    u8 h[5], v, same;
     mem_read(h, SCRATCH_LIN, 5);
     v = h[2];
     n = h[3] | (u16)(h[4] << 8);
     if (h[0] != 'W' || h[1] != 'P' || !v || v > WP_VERSION || n == 0 || n > DOC_MAX) return 1;
-    /* the file's table (before version 3: entries 0-31, those styles),
-     * each entry's index in the session's */
-    o = (u16)(5 + 2 * n);
-    if (v < 3) {
-        for (i = 0; i < 32; i++) m[i] = (u8)i;
-    } else {
-        mem_read(h, scr(o), 3);
-        cnt = h[1] | (u16)(h[2] << 8);
-        if (h[0] != ST_SIZE || cnt > 256) return 1;
-        mem_read(m, scr((u16)(o + 3)), cnt);
-    }
-    same = sty_merge(m, cnt);
+    same = sty_load((u16)(5 + 2 * n), v);
+    if (same > 1) return 1;
     g_len = 0;
     mem_copy(TEXT_LIN, SCRATCH_LIN + 5, n);
-    mem_copy(ATTR_LIN, scr((u16)(5 + n)), n);
+    mem_copy(ATTR_LIN, SCRATCH_LIN + 5 + n, n);
     if (v == 1 || !same) sty_remap(n, v == 1);
     doc_len = n;
     doc_loaded(0);

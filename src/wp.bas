@@ -56,7 +56,7 @@
 #define FIND_SETR 6
 
 ' LIST.OVL's place: mod_area + LIST_OFS (wp.h)
-#define LIST_OFS 4288
+#define LIST_OFS 4800
 
 ' the file image's place: bank 5, $0000 (SCRATCH_LIN in wp.h)
 #define IMG 0

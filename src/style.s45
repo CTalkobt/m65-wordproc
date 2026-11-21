@@ -1,31 +1,35 @@
 ; style.s45 — the style table (conv.c, issue #5): sty, sty_find, sty_init
 ; on the MEGA65 (conv.c has them in C for the host). The table is ST_LIN
-; (wp.h: HI_LIN + $4800 = $FF87800, colour RAM), st_n entries of a byte,
+; (wp.h: HI_LIN + $4C00 = $FF87C00, colour RAM), st_n entries of a byte,
 ; read with the 45GS02's 32-bit indirect [zp],z.
 ;
 ; u8 sty(u8 s): s at $10, its entry in A (the last one looked up kept)
 ; u8 sty_find(u8 e): e at $10, its index in A (added if new; the table
 ;   full: 0; the last one found kept)
 ; void sty_init(void): entries 0-31 those styles, the rest 0
-; u8 sty_merge(u8 *m, u16 cnt): m at $10/$11, cnt (at most 256) at $12/$13:
-;   each of m[0..cnt-1] (a file's entries) changed to its index here
-;   (sty_find); 1 when each is its own index (kept for sty_remap)
+; u16 sty_save(u16 o): o at $10/$11: ST_SIZE, st_n (2 bytes) and the
+;   entries at SCRATCH_LIN + o (doc_pack); the end, o + 3 + st_n, in A/X
+; u8 sty_load(u16 o, u8 v): o at $10/$11, v (the file's version) at $12:
+;   the file's table at SCRATCH_LIN + o (before version 3: entries 0-31,
+;   those styles, written there), each entry changed in place to its index
+;   here (sty_find); 1 when each is its own, 2 when it is not a table
+;   (doc_unpack); its place and count kept for sty_remap
 ; void sty_remap(u16 n, u8 v1): n at $10/$11, v1 at $12: the document's
-;   characters 0..n-1 (no gap: doc_unpack) given m[their index] (past cnt:
-;   0) unless sty_merge found each its own; with v1, its CR / FF's
-;   attributes cleared but for the alignment (a version 1 file)
+;   characters 0..n-1 (no gap: doc_unpack) given the index sty_load made
+;   for theirs (past its count: 0), unless each was its own; with v1, its
+;   CR / FF's attributes cleared but for the alignment (a version 1 file)
 
 ; no calls through pointers here (ln45's call graph)
 .weak cc45.icallinfo
 cc45.icallinfo = 1
 
-.global _sty, _sty_find, _sty_init, _sty_merge, _sty_remap
+.global _sty, _sty_find, _sty_init, _sty_save, _sty_load, _sty_remap
 .extern _st_n
 
 .segment "bss"
 __sc:   .res 2          ; sty's last: index, entry
 __sf:   .res 2          ; sty_find's last: entry, index
-__mm:   .res 2          ; sty_merge's m, cnt, its answer
+__mm:   .res 2          ; sty_load's table (its offset in the scratch area), count, answer
 __mc:   .res 2
 __ms:   .res 1
 
@@ -36,7 +40,7 @@ proc __st_ptr
     pha
     lda #$00
     sta $10
-    lda #$78
+    lda #$7c
     sta $11
     lda #$f8
     sta $12
@@ -141,54 +145,156 @@ proc _sty_init
     rts
 endproc
 
-proc _sty_merge
-    .zp_uses $10, $11, $12, $13
-    .zp_clobbers $10, $11, $12, $13, $14, $15, $1c, $1d
-    .zp_release $10, $11, $12, $13, $14, $15, $1c, $1d
-    .reg_clobbers A, Y, Z
+proc _sty_save
+    .zp_uses $10, $11
+    .zp_clobbers $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+    .zp_release $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+    .reg_clobbers A, X, Z
     .flag_clobbers C, N, Z, V
-    lda $10
-    sta __mm
-    sta $1c
+    lda $10                 ; $14: SCRATCH_LIN + o (the table's head)
+    sta $14
     lda $11
-    sta __mm+1
-    sta $1d
-    lda $12
-    sta __mc
-    lda $13
-    sta __mc+1
-    lda #1
-    sta __ms
-    ldy #0
+    sta $15
+    lda #5
+    sta $16
+    lda #0
+    sta $17
+    ldz #0
+    lda #1                  ; (ST_SIZE)
+    sta [$14],z
+    inz
+    lda _st_n
+    sta [$14],z
+    inz
+    lda _st_n+1
+    sta [$14],z
+    clc                     ; then + 3: its entries (and $18: their offset)
+    lda $14
+    adc #3
+    sta $14
+    sta $18
+    lda $15
+    adc #0
+    sta $15
+    sta $19
+    jsr __st_ptr
+    ldz #0
 @next:
-    lda __mc+1              ; (256: to Y's wrap)
+    lda _st_n+1             ; (256: to Z's wrap)
     bne @one
-    cpy __mc
+    cpz _st_n
     beq @done
 @one:
-    lda ($1c),y
-    sta $10
-    jsr _sty_find           ; (Y kept)
-    sta ($1c),y
+    lda [$10],z
+    sta [$14],z
+    inz
+    bne @next
+@done:
+    clc
+    lda $18
+    adc _st_n
+    pha
+    lda $19
+    adc _st_n+1
+    tax
+    pla
+    rts
+    .func_flags zp_call
+endproc
+
+proc _sty_load
+    .zp_uses $10, $11, $12
+    .zp_clobbers $10, $11, $12, $13, $14, $15, $16, $17, $1c, $1d, $1e, $1f
+    .zp_release $10, $11, $12, $13, $14, $15, $16, $17, $1c, $1d, $1e, $1f
+    .reg_clobbers A, Z
+    .flag_clobbers C, N, Z, V
+    lda $10                 ; $14: SCRATCH_LIN + o (the table's head)
+    sta $14
+    lda $11
     sta $15
-    cpy $15
+    lda #5
+    sta $16
+    sta $1e
+    lda #0
+    sta $17
+    sta $1f
+    clc                     ; $1c: + 3 (its entries)
+    lda $10
+    adc #3
+    sta $1c
+    sta __mm
+    lda $11
+    adc #0
+    sta $1d
+    sta __mm+1
+    lda #0
+    sta __mc+1
+    lda $12
+    cmp #3
+    bcs @v3
+    lda #32                 ; (before version 3: 0-31, those styles)
+    sta __mc
+    ldz #31
+@ident:
+    tza
+    sta [$1c],z
+    dez
+    bpl @ident
+    bra @merge
+@v3:
+    ldz #0
+    lda [$14],z
+    cmp #1                  ; (ST_SIZE)
+    bne @bad
+    inz
+    lda [$14],z
+    sta __mc
+    inz
+    lda [$14],z
+    sta __mc+1
+    beq @merge
+    cmp #1                  ; (at most 256)
+    bne @bad
+    lda __mc
+    bne @bad
+@merge:
+    lda #1
+    sta __ms
+    ldz #0
+@next:
+    lda __mc+1              ; (256: to Z's wrap)
+    bne @one
+    cpz __mc
+    beq @done
+@one:
+    lda [$1c],z
+    sta $10
+    phz
+    jsr _sty_find
+    plz
+    sta [$1c],z
+    sta $15
+    cpz $15
     beq @own
     lda #0
     sta __ms
 @own:
-    iny
+    inz
     bne @next
 @done:
     lda __ms
+    rts
+@bad:
+    lda #2
     rts
     .func_flags zp_call
 endproc
 
 proc _sty_remap
     .zp_uses $10, $11, $12
-    .zp_clobbers $10, $11, $12, $14, $15, $16, $17, $18, $19, $1a, $1b, $1c, $1d
-    .zp_release $10, $11, $12, $14, $15, $16, $17, $18, $19, $1a, $1b, $1c, $1d
-    .reg_clobbers A, X, Y, Z
+    .zp_clobbers $10, $11, $12, $14, $15, $16, $17, $18, $19, $1a, $1b, $1c, $1d, $1e, $1f
+    .zp_release $10, $11, $12, $14, $15, $16, $17, $18, $19, $1a, $1b, $1c, $1d, $1e, $1f
+    .reg_clobbers A, X, Z
     .flag_clobbers C, N, Z, V
     lda #0                  ; $14: TEXT_LIN ($8000000), $18: ATTR_LIN
     sta $14
@@ -201,10 +307,14 @@ proc _sty_remap
     lda #8
     sta $17
     sta $1b
-    lda __mm
+    lda __mm                ; $1c: sty_load's table (SCRATCH_LIN + its offset)
     sta $1c
     lda __mm+1
     sta $1d
+    lda #5
+    sta $1e
+    lda #0
+    sta $1f
     ldz #0
 @loop:
     lda $10
@@ -223,8 +333,10 @@ proc _sty_remap
     cmp __mc
     bcs @zero
 @map:
-    tay
-    lda ($1c),y
+    phz
+    taz
+    lda [$1c],z
+    plz
     bra @put
 @zero:
     lda #0
