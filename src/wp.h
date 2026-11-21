@@ -296,6 +296,7 @@ u16 doc_export(void);           /* the PETSCII text at SCRATCH_LIN; its size */
 u16 doc_import(void);           /* PETSCII text at SCRATCH_LIN as the document */
 void doc_loaded(u8 d);          /* after a load / import: the final CR, the cursor at the start; d: changed */
 u16 md_export(void);            /* Markdown at SCRATCH_LIN; its size (0: too long) */
+u16 html_export(void);          /* HTML at SCRATCH_LIN (html.c); its size (0: too long) */
 u16 md_import(void);            /* Markdown at SCRATCH_LIN as the document; its length */
 
 /* ---- what the converters share (conv.c; issue #3) ---- */
@@ -343,12 +344,14 @@ void doc_built(void);           /* after build_end (b_done): doc_loaded(1) (mod_
 #define MOD_RTF_BEGIN (MOD_MORE | 3)    /* RTF.OVL: an import starts */
 #define MOD_RTF_CHUNK (MOD_MORE | 4)    /* RTF.OVL: the next 1 KB of the file, at SCRATCH_LIN */
 #define MOD_RTF_END 5                   /* RTF.OVL: the import's end: the document's length */
+#define MOD_HTML_EXPORT 6               /* HTML.OVL: the document as HTML at SCRATCH_LIN */
 extern u8 mod_cmd;                      /* what the module is to do */
 extern u16 mod_ret;                     /* its result */
 u8 mod_ok(const u8 *m);                 /* a module's header there, of this build */
 u16 mod_run(u8 cmd);                    /* run the module loaded; 0xFFFF: none */
 void md_main(void);                     /* MARKDOWN.OVL's entry (md.c) */
 void rtf_main(void);                    /* RTF.OVL's entry (rtf.c) */
+void html_main(void);                   /* HTML.OVL's entry (html.c) */
 /* LIST.OVL (list.c), list mode: resident, it draws its markers over each
  * line drawn while list_on (render.c calls list_main with hk_l, hk_L: the
  * line). It is loaded by BASIC at the start into mod_area's last LIST_SIZE

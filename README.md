@@ -40,7 +40,8 @@ help: a Writer document shown when the program starts and again with F8 / HELP;
 without it the program starts with an empty document), `MARKDOWN.OVL`
 (Markdown import and export, a module: without it the rest works, and a
 `.md` name gets "Markdown needs MARKDOWN.OVL on the disk"),
-`RTF.OVL` (RTF import and export, the same for `.rtf`), `LIST.OVL`
+`RTF.OVL` (RTF import and export, the same for `.rtf`), `HTML.OVL` (HTML
+export, the same for `.htm` and `.html`), `LIST.OVL`
 (list mode, a module: without it the menu does not offer it) and
 `DEFAULT0.OVL` (undo, find and replace, and the styles; a required module,
 named so that it is not taken for an optional one: without it those do
@@ -73,7 +74,7 @@ keyboard buffer and saves a screenshot, e.g.
 | CTRL+H | find and replace (below) |
 | CTRL+W | save, under the document's name (asking only when it has none) |
 | F8 or HELP | the help (`WRITER.HELP`) as the document (after asking about unsaved changes) |
-| ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text; Markdown for a name ending in `.md`, RTF for `.rtf`), Directory; Redraw, List on / off (with `LIST.OVL`), Help, Quit (ESC also ends a selection) |
+| ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text; Markdown for a name ending in `.md`, RTF for `.rtf`, HTML for `.htm` or `.html`: export only), Directory; Redraw, List on / off (with `LIST.OVL`), Help, Quit (ESC also ends a selection) |
 | CTRL+D | the style drop-down (below) |
 | CTRL+L | redraw the whole screen |
 | CTRL+A | Compose: the next two characters make an accented one (below) |
@@ -166,6 +167,7 @@ letter with its accent), in `WRITER.FNT`.
 | `src/conv.c` | C | what the converters share (below): output to the scratch area, a walk over the document for export, a builder for import, Unicode as the document's characters |
 | `src/md.c` | C | Markdown export and import (below): the module `MARKDOWN.OVL` |
 | `src/rtf.c` | C | RTF export and (streamed) import: the module `RTF.OVL` |
+| `src/html.c` | C | HTML export (below): the module `HTML.OVL` |
 | `src/list.c` | C | list mode's markers: the module `LIST.OVL` |
 | `src/edit.c`, `src/edit_undo.c` | C | undo, find and replace, the styles: the module `DEFAULT0.OVL` |
 | `src/modcall.s45` | asm | the jump into `DEFAULT0.OVL` (and, for ln45's call graph, what it calls) |
@@ -189,7 +191,7 @@ the room for it. Two kinds:
 - **Run once** (as one job over the document), loaded just before it runs:
   Markdown (`MARKDOWN.OVL`, from `src/md.c`: the largest module, 6710
   bytes, so it sets `MOD_SIZE`), RTF (`RTF.OVL`, from
-  `src/rtf.c`); PETSCII graphics, PDF export, find and replace or a word
+  `src/rtf.c`), HTML (`HTML.OVL`, from `src/html.c`); PETSCII graphics, PDF export, find and replace or a word
   count would fit the same way. One can also be called several times in a
   row (a command with `MOD_MORE`: `mod_run` then leaves it and the drawing's
   caches alone, as they share its memory): RTF import is streamed that way,
@@ -355,7 +357,7 @@ A paragraph's CR (or page break) holds the paragraph's: bits 0-2 its kind
 3-4 a list item's level (0-3), bits 5-6 its alignment. Version 1 files (before the kinds: their
 CRs had the typing style in bits 0-4) load as Normal paragraphs. Import / Export use sequential files: plain PETSCII text
 (accents left out on export: PETSCII has none), Markdown when the name ends
-in `.md`, RTF for `.rtf`.
+in `.md`, RTF for `.rtf`, HTML (export only) for `.htm` or `.html`.
 
 ### Markdown
 
@@ -392,6 +394,22 @@ Tests (`make test`): the help and 300 random documents (each `SEED`)
 exported, imported and exported again give the same Markdown; Markdown
 from elsewhere imported as expected. The exported random documents were
 also checked with markdown-it (CommonMark): their text comes out exactly.
+
+### HTML
+
+Export (`src/html.c`, `html_export`, in the module `HTML.OVL`, 2.6 KB)
+writes one UTF-8 page: the document's name as its title, a style sheet
+(spaces kept with `white-space: pre-wrap`; quotes and Heading 3 in a serif
+font, as Writer draws them), then the paragraphs grouped as the Markdown
+export groups them: `<p>` (paragraphs with no empty one between them, of
+the same alignment: one, with `<br>`), `<h1>`-`<h3>`, `<blockquote>`,
+`<pre><code>` (a line a paragraph), and list items as `<li>` in `<ul>` /
+`<ol>` (`start="N"` past 1), each level's list inside the item before it.
+Bold, italic and underline (where the kind's own style lacks them) are
+`<b>` `<i>` `<u>`; another font in part is `<code>` (Mono) or a `<span>`
+(Serif, Sans, Head); alignment is `text-align`, a page break a `<div>`
+with `page-break-after: always`. There is no HTML import: an `.htm` name
+for I)mport says "HTML is export only: no import."
 
 ### RTF
 

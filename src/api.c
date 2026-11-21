@@ -58,20 +58,19 @@ static char msg_parm[81];
 #define GET_DIRTY 0
 #define GET_LEN 1
 #define GET_PACK 2
-#define GET_EXPORT 3
 #define GET_UNPACK 4
 #define GET_SEL 5
 #define GET_IMPORT_PREP 6
 #define GET_IMPORT 7
-#define GET_MDEXPORT 8
 #define GET_MDIMPORT 9
 #define GET_LISTOK 10
-#define GET_RTFEXPORT 11
 #define GET_RTFBEGIN 12
 #define GET_RTFCHUNK 13
 #define GET_RTFEND 14
 #define GET_FONTS 15
 #define GET_KIND 16              /* the kind of the cursor's (the selection's first) paragraph */
+#define GET_XEXPORT 17           /* + the file's kind (BASIC's fk): the document exported to
+                                    SCRATCH_LIN as 0 text, 1 Markdown, 2 RTF, 3 HTML (a module) */
 
 /* what wp_key leaves to BASIC (its ON ... GOSUB) */
 #define ACT_HELP 1                 /* F8, HELP */
@@ -418,7 +417,6 @@ u16 wp_get(u8 w) {
     case GET_DIRTY: return dirty;
     case GET_LEN: return doc_len;
     case GET_PACK: return scratched(doc_pack());
-    case GET_EXPORT: return scratched(doc_export());
     case GET_UNPACK: {          /* (the file BLOADed over undo's buffer) */
         u8 r;
         u_have = 0;
@@ -431,8 +429,10 @@ u16 wp_get(u8 w) {
         u_have = 0;
         mem_fill(SCRATCH_LIN, SCRATCH_MAX, 0);       /* (all the scratch area: Markdown is longer) */
         return 0;
-    case GET_MDEXPORT: return scratched(mod_run(MOD_MD_EXPORT));
-    case GET_RTFEXPORT: return scratched(mod_run(MOD_RTF_EXPORT));
+    case GET_XEXPORT: return scratched(doc_export());
+    case GET_XEXPORT + 1: return scratched(mod_run(MOD_MD_EXPORT));
+    case GET_XEXPORT + 2: return scratched(mod_run(MOD_RTF_EXPORT));
+    case GET_XEXPORT + 3: return scratched(mod_run(MOD_HTML_EXPORT));
     case GET_RTFBEGIN: return mod_run(MOD_RTF_BEGIN);
     case GET_RTFCHUNK: return mod_run(MOD_RTF_CHUNK);
     case GET_LISTOK:            /* (and DEFAULT0.OVL, loaded at mod_area) */

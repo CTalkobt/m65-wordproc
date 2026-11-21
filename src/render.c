@@ -120,6 +120,7 @@ u16 mod_run(u8 cmd) {
 #else
     mod_cmd = cmd;
     if (cmd <= MOD_MD_IMPORT) md_main();
+    else if (cmd == MOD_HTML_EXPORT) html_main();
     else rtf_main();
 #endif
     doc_built();

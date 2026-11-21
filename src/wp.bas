@@ -8,7 +8,7 @@
 ' document, lays it out and draws the 640 x 400 screen; BASIC calls it with
 ' SYS {name}, a and reads results with RREG.
 '
-' Modules (.OVL files: MARKDOWN.OVL, RTF.OVL, LIST.OVL, DEFAULT0.OVL) are loaded only when they
+' Modules (.OVL files: MARKDOWN.OVL, RTF.OVL, HTML.OVL, LIST.OVL, DEFAULT0.OVL) are loaded only when they
 ' are on the disk (below).
 '
 ' Build: make  (basic45 --link src/api.c ... src/wp.bas -o build/writer.prg)
@@ -37,20 +37,19 @@
 
 #define GET_DIRTY 0
 #define GET_PACK 2
-#define GET_EXPORT 3
 #define GET_UNPACK 4
 #define GET_SEL 5
 #define GET_PREP 6
 #define GET_IMPORT 7
-#define GET_MDEXPORT 8
 #define GET_MDIMPORT 9
 #define GET_LISTOK 10
-#define GET_RTFEXPORT 11
 #define GET_RTFBEGIN 12
 #define GET_RTFCHUNK 13
 #define GET_RTFEND 14
 #define GET_FONTS 15
 #define GET_KIND 16
+' + the file's kind (fk): the document exported, as text, Markdown, RTF, HTML
+#define GET_XEXPORT 17
 
 #define FIND_FWD 2
 #define FIND_SETF 5
@@ -294,10 +293,11 @@ proc importtext
   if yes then
     a$ = ""
     call ask(MSG_IMPORT)
+    ' (HTML: export only)
+    if ok and a$ <> "" then call ftype : if fk = 3 then sys {wp_say}, MSG_NOHTMLIN : ok = 0
     if ok and a$ <> "" then dopen#2, (a$) : e$ = ds$ : dclose#2 : if val(e$) then call sp(MSG_NOTIMP, e$) : ok = 0
     if ok and a$ <> "" then
       call sp(MSG_IMPORTING, a$)
-      call ftype
       ml = 1 : lo = 0 : hi = 0
       if fk = 2 then
         call rtfin
@@ -353,13 +353,9 @@ proc exporttext
   if ok and a$ <> "" then
     call ftype
     ml = 1 : lo = 0 : hi = 0
-    if fk then
-      call loadmod
-      if ml then sys {wp_get}, GET_MDEXPORT + (fk - 1) * (GET_RTFEXPORT - GET_MDEXPORT) : rreg lo, hi
-      call loadlist
-    else
-      sys {wp_get}, GET_EXPORT : rreg lo, hi
-    endif
+    if fk then call loadmod
+    if ml then sys {wp_get}, GET_XEXPORT + fk : rreg lo, hi
+    if fk then call loadlist
     n = lo + 256 * hi
     call modsaid
     if ok and n = 0 then sys {wp_say}, MSG_TOOLONG + fk : ok = 0
@@ -415,13 +411,14 @@ proc modsaid
 endproc
 
 ' fk: what a$ is by its end (either case): 0 text, 1 .md (Markdown), 2 .rtf
-' (RTF); mf$: its module's file
+' (RTF), 3 .htm or .html (HTML); mf$: its module's file
 proc ftype
   fk = 0
   b$ = right$(a$, 3)
   if b$ = p".md" or b$ = p".MD" then fk = 1 : mf$ = "markdown.ovl"
   b$ = right$(a$, 4)
   if b$ = p".rtf" or b$ = p".RTF" then fk = 2 : mf$ = "rtf.ovl"
+  if b$ = p".htm" or b$ = p".HTM" or b$ = p"html" or b$ = p"HTML" then fk = 3 : mf$ = "html.ovl"
 endproc
 
 proc showdir

@@ -776,7 +776,7 @@ int main(void) {
     CHECK(strcmp(buf, " defabc\r") == 0);
 
     /* export */
-    n = wp_get(3);
+    n = wp_get(17);           /* GET_XEXPORT: text */
     CHECK(n == doc_len);
     CHECK(MEM[SCRATCH_LIN + 1] == 0x44);     /* 'd' in PETSCII */
 
@@ -797,6 +797,41 @@ int main(void) {
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "Hello\rworld\r") == 0);
         CHECK(n == 11);         /* (the final CR not counted) */
+    }
+
+    /* ---- HTML (HTML.OVL): the help (build/help.html, for a look) ---- */
+    {
+        static char h[40000];
+        doc_load_help();
+        n = mod_run(MOD_HTML_EXPORT);
+        CHECK(n > 0);
+        memcpy(h, MEM + SCRATCH_LIN, n);
+        h[n] = 0;
+        {
+            FILE *f = fopen("build/help.html", "wb");
+            if (f) {
+                fwrite(h, 1, n, f);
+                fclose(f);
+            }
+        }
+        CHECK(strncmp(h, "<!DOCTYPE html>\n", 16) == 0);
+        CHECK(strstr(h, "<h1 style=\"text-align: center\">MEGA65 Writer</h1>") != NULL);
+        CHECK(strstr(h, "This is the help, shown in <b>page layout</b> view") != NULL);
+        CHECK(strstr(h, "<u>underlined</u>") != NULL);
+        CHECK(strstr(h, "<pre><code>Typing     inserts; RETURN: a new paragraph\nDEL / INST") != NULL);
+        CHECK(strstr(h, "<code>Mono</code>") != NULL);
+        CHECK(strstr(h, "style=\"text-align: justify\"") != NULL);
+        CHECK(strstr(h, "<ul>\n<li>") != NULL && strstr(h, "<ol>\n<li>") != NULL);
+        CHECK(strcmp(h + n - 16, "</body>\n</html>\n") == 0);
+        /* & < > and Latin-1 */
+        doc_new();
+        type("a < b & c > d");
+        doc_type(0xE9);
+        n = mod_run(MOD_HTML_EXPORT);
+        memcpy(h, MEM + SCRATCH_LIN, n);
+        h[n] = 0;
+        CHECK(strstr(h, "<p>a &lt; b &amp; c &gt; d\xC3\xA9</p>") != NULL);
+        gap_close();            /* (doc_load_help writes the text as it is) */
     }
 
     /* ---- Markdown ---- */
