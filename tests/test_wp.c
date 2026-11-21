@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "wp.h"
+#include "msg.h"
 
 void wp_init(void);
 u8 wp_key(u8 k);
@@ -14,7 +15,7 @@ u16 wp_find(u8 op);
 void wp_cmd(u8 c);
 u16 wp_get(u8 w);
 void wp_panel(u8 n);
-void wp_setmsg(void);
+void wp_say(u8 n);
 static int fails;
 static int oplog[8], opn;
 static void logop(int v) { oplog[opn++ & 7] = v; }
@@ -572,13 +573,21 @@ int main(void) {
             wp_cmd(21);
             CHECK(!list_on);
             CHECK(memcmp(off, MEM + BITMAP_LIN, sizeof off) == 0);
-            strcpy(menu_text[0], "Menu:");
-            strcpy(menu_text[1], "File");
-            strcpy(msg, "View");
             wp_panel(PANEL_ROWS);
+            CHECK(strncmp(msg, "View:  R)edraw  T)List on", 25) == 0);
             CHECK(memcmp(off, MEM + BITMAP_LIN, sizeof off) != 0);
             wp_panel(0);
             CHECK(memcmp(off, MEM + BITMAP_LIN, sizeof off) == 0);
+            /* a message's place holders: @ a field (to a comma), % the rest
+             * (msg as BASIC pokes it: PETSCII) */
+            strcpy(msg, "NAME,12");
+            wp_say(MSG_SAVED);
+            CHECK(strcmp(msg, "Saved name (12 bytes).") == 0);
+            strcpy(msg, "62,FILE NOT FOUND,00,00");
+            wp_say(MSG_NOTIMP);
+            CHECK(strcmp(msg, "Not imported: 62,file not found,00,00") == 0);
+            wp_say(MSG_NONE);
+            CHECK(msg[0] == 0);
             CHECK(memcmp(cr, host_colram(), sizeof cr) == 0);
             wp_cmd(7);
         }

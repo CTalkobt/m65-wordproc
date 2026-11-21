@@ -7,6 +7,7 @@
  * baseline, underline a row two below the baseline.
  */
 #include "wp.h"
+#include "msg.h"                /* MSG_MENU (made by tools/mkmsg.py) */
 #ifdef __cc45__
 #include "buildid.h"             /* BUILD_ID (made by the Makefile) */
 #endif
@@ -390,7 +391,7 @@ void render_bars(void) {
     put_str(kind_names[cur_kind()]);
     while (sn < BOX_HI - 2) sb[sn++] = ' ';
     put_str("v  MEGA65 Writer  ");
-    put_str(fname);
+    put_str(fname[0] ? fname : "untitled");
     if (dirty) put_str(" *");
     ln = sn;
     if (list_on && list_ok) put_str("LIST  ");
@@ -402,7 +403,7 @@ void render_bars(void) {
         for (ln = 0; ln < PANEL_ROWS; ln++) {
             sn = 0;
             put_str(" ");
-            put_str(menu_text[ln]);
+            put_str(msg_get((u8)(MSG_MENU + ln)));
             bar((u8)(2 + ln), sn, (u16)(VIEW_TOP + VIEW_H - (PANEL_ROWS - ln) * RAW_H));
             bar_colour((u8)((VIEW_TOP + VIEW_H - (PANEL_ROWS - ln) * RAW_H) >> 3));
         }

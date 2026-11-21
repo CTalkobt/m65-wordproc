@@ -62,10 +62,15 @@
 ' the file image's place: bank 5, $0000 (SCRATCH_LIN in wp.h)
 #define IMG 0
 
+' the messages' numbers (MSG_...) and MSG_TAB, from src/messages.txt
+' (tools/mkmsg.py)
+#include "msg.h"
+
 start:
   print chr$(14);
-  ' (the import and export prompts' end, once)
-  ft$ = p" (name.md: Markdown, name.rtf: RTF): "
+  ' the messages (WRITER.MSG) to free RAM below the program, each time:
+  ' after the Writer it could be the graphics commands' buffers
+  bload "writer.msg", b0, p(MSG_TAB)
   ' the fonts' glyphs, once: to the scratch area, then the C half copies
   ' codes 32-128 to bank 4 (FONT_LIN in wp.h) and the Latin-1 ones and the
   ' compose table to colour RAM (HI_LIN)
@@ -88,7 +93,7 @@ wpinit:
   trap
   sys {wp_init}
   if wl = 2 then sys {wp_get}, GET_UNPACK
-  fi$ = p"untitled" : am = 16
+  am = 16
   call loadlist
 
 mainloop:
@@ -109,7 +114,7 @@ waitkey:
 
 proc copysel
   sys {wp_cmd}, CMD_COPY
-  call say(p"Copied.")
+  sys {wp_say}, MSG_COPIED
 endproc
 
 proc redraw
@@ -125,18 +130,9 @@ proc listmode
   if lv then sys {wp_cmd}, CMD_LIST
 endproc
 
-' ---- the menu (ESC): a panel of three rows at the bottom, the commands
-' grouped (List only when LIST.OVL is loaded) ----
+' ---- the menu (ESC): a panel of three rows at the bottom (MSG_MENU, the
+' commands grouped; List only when LIST.OVL is loaded) ----
 proc menu
-  b$ = ""
-  if lv then
-    bank 0 : lq = peek({list_on}) : bank 128
-    b$ = p"  T)List on"
-    if lq then b$ = p"  T)List off"
-  endif
-  call setstr(p"Menu:", {mod_area})
-  call setstr(p"File:  N)ew  L)oad  S)ave  I)mport  E)xport  D)ir", {mod_area} + 81)
-  call setstr(p"View:  R)edraw" + b$ + p"    H)elp  Q)uit    ESC: back", {msg})
   sys {wp_panel}, 2
   getkey m$
   sys {wp_panel}, 0
@@ -171,10 +167,11 @@ proc setstr(s$, sa)
   bank 128
 endproc
 
-' ---- the bottom bar's message: m$ poked into the C half's msg ----
-proc say(m$)
+' ---- the bottom bar's message: MSG_... m, its place holders filled from
+' m$ (poked into the C half's msg; fields apart by commas) ----
+proc sp(m, m$)
   call setstr(m$, {msg})
-  sys {wp_setmsg}
+  sys {wp_say}, m
 endproc
 
 ' the document's name in the top bar
@@ -183,13 +180,13 @@ proc setname
   sys {wp_setname}
 endproc
 
-' a line typed into a$ (starting as it is), at most am characters (16: a
-' file name, without spaces, quotes, commas or colons); ok = 1 when RETURN
-' ended it
-proc ask(q$)
+' a line typed into a$ (starting as it is) after the prompt MSG_... q, at
+' most am characters (16: a file name, without spaces, quotes, commas or
+' colons); ok = 1 when RETURN ended it
+proc ask(q)
   ok = 0
 .again:
-  call say(q$ + a$ + "_")
+  call sp(q, a$ + "_")
   getkey c$
   c = asc(c$)
   if c = 13 then ok = 1 : goto .done
@@ -199,22 +196,14 @@ proc ask(q$)
   goto .again
 .done:
   am = 16
-  call say("")
+  sys {wp_say}, MSG_NONE
 endproc
 
-' y or n; yes is true for y
-proc confirm(q$)
-  call say(q$ + p" (Y/N)")
-  getkey c$
-  yes = (asc(c$) and 127) = 89
-  call say("")
-endproc
-
-' unsaved changes: yes when they may be lost
+' unsaved changes: yes when they may be lost (asked: true for y)
 proc discard
   yes = -1
   sys {wp_get}, GET_DIRTY : rreg dt
-  if dt then call confirm(p"Discard the unsaved changes?")
+  if dt then sys {wp_say}, MSG_DISCARD : getkey c$ : yes = (asc(c$) and 127) = 89 : sys {wp_say}, MSG_NONE
 endproc
 
 ' ---- the commands ----
@@ -222,27 +211,27 @@ proc newdoc
   call discard
   if yes then
     sys {wp_cmd}, CMD_NEW
-    fi$ = p"untitled" : call setname
+    fi$ = "" : call setname
   endif
 endproc
 
-' (CTRL+W, ka 8: under the document's name, asking only when it has none)
+' (CTRL+W, ka 8: under the document's name, fi$, asking only when it has
+' none: "")
 proc savedoc
   a$ = fi$
-  if a$ = p"untitled" then a$ = ""
-  if ka = 8 and a$ <> "" then ok = 1 : else call ask(p"Save as: ")
+  if ka = 8 and a$ <> "" then ok = 1 : else call ask(MSG_SAVEAS)
   if ok and a$ <> "" then
-    call say(p"Saving " + a$ + "...")
+    call sp(MSG_SAVING, a$)
     sys {wp_get}, GET_PACK : rreg lo, hi
     n = lo + 256 * hi
     scratch (a$)
     bsave (a$), b5, p(IMG) to p(IMG + n)
     sys {wp_video}, 1
     if ds then
-      call say(p"Not saved: " + ds$)
+      call sp(MSG_NOTSAVED, ds$)
     else
       fi$ = a$ : sys {wp_cmd}, CMD_CLEAN : call setname
-      call say(p"Saved " + a$ + " (" + mid$(str$(n), 2) + p" bytes).")
+      call sp(MSG_SAVED, a$ + "," + mid$(str$(n), 2))
     endif
   endif
 endproc
@@ -252,7 +241,7 @@ endproc
 proc dofind
   f = 0
   a$ = fs$ : am = 40
-  call ask(p"Find: ")
+  call ask(MSG_FIND)
   if ok and a$ <> "" then fs$ = a$ : call setstr(a$, {msg}) : sys {wp_find}, FIND_SETF : sys {wp_find}, FIND_FWD : rreg f
 endproc
 
@@ -264,7 +253,7 @@ proc doreplace
   call dofind
   if f then
     a$ = rs$ : am = 40
-    call ask(p"Replace with: ")
+    call ask(MSG_REPLWITH)
     if ok then
       rs$ = a$ : call setstr(a$, {msg}) : sys {wp_find}, FIND_SETR
       do while f
@@ -281,17 +270,17 @@ proc loaddoc
   call discard
   if yes then
     a$ = ""
-    call ask(p"Load: ")
+    call ask(MSG_LOAD)
     if ok and a$ <> "" then
-      call say(p"Loading " + a$ + "...")
+      call sp(MSG_LOADING, a$)
       bload (a$), b5, p(IMG)
       sys {wp_video}, 1
       sys {wp_get}, GET_UNPACK : rreg r
       if r then
-        call say(a$ + p" is not a Writer document (try I)mport).")
+        call sp(MSG_NOTWP, a$)
       else
         fi$ = a$ : call setname
-        call say(p"Loaded " + a$ + ".")
+        call sp(MSG_LOADED, a$)
       endif
     endif
   endif
@@ -304,10 +293,10 @@ proc importtext
   call discard
   if yes then
     a$ = ""
-    call ask(p"Import" + ft$)
-    if ok and a$ <> "" then dopen#2, (a$) : e$ = ds$ : dclose#2 : if val(e$) then call say(p"Not imported: " + e$) : ok = 0
+    call ask(MSG_IMPORT)
+    if ok and a$ <> "" then dopen#2, (a$) : e$ = ds$ : dclose#2 : if val(e$) then call sp(MSG_NOTIMP, e$) : ok = 0
     if ok and a$ <> "" then
-      call say(p"Importing " + a$ + "...")
+      call sp(MSG_IMPORTING, a$)
       call ftype
       ml = 1 : lo = 0 : hi = 0
       if fk = 2 then
@@ -332,8 +321,8 @@ proc importtext
       if fk then call loadlist
       call modsaid
       if ok then
-        fi$ = p"untitled" : call setname
-        call say(p"Imported " + mid$(str$(lo + 256 * hi), 2) + p" characters.")
+        fi$ = "" : call setname
+        call sp(MSG_IMPORTED, mid$(str$(lo + 256 * hi), 2))
       endif
     endif
   endif
@@ -360,7 +349,7 @@ endproc
 
 proc exporttext
   a$ = ""
-  call ask(p"Export as" + ft$)
+  call ask(MSG_EXPORT)
   if ok and a$ <> "" then
     call ftype
     ml = 1 : lo = 0 : hi = 0
@@ -373,14 +362,14 @@ proc exporttext
     endif
     n = lo + 256 * hi
     call modsaid
-    if ok and n = 0 then call say(p"Too long for " + mn$ + p" (more than 59 KB).") : ok = 0
+    if ok and n = 0 then sys {wp_say}, MSG_TOOLONG + fk : ok = 0
     if ok then
       scratch (a$)
       dopen#2, (a$), w
       fwrite#2, $50000, n
       dclose#2
       sys {wp_video}, 1
-      call say(p"Exported " + mid$(str$(n), 2) + p" bytes to " + a$ + ".")
+      call sp(MSG_EXPORTED, mid$(str$(n), 2) + "," + a$)
     endif
   endif
 endproc
@@ -417,21 +406,22 @@ mdback:
 endproc
 
 ' after a module's run: ok 0 when it said why there was none (ml, and
-' lo / hi 255: the module from another build of Writer)
+' lo / hi 255: the module from another build of Writer; the messages by
+' fk, 1 or 2)
 proc modsaid
   ok = 1
-  if ml = 0 then call say(mn$ + p" needs " + mu$ + p" on the disk.") : ok = 0
-  if lo = 255 and hi = 255 then call say(mu$ + p" is from another version of Writer.") : ok = 0
+  if ml = 0 then sys {wp_say}, MSG_NEEDS + fk - 1 : ok = 0
+  if lo = 255 and hi = 255 then sys {wp_say}, MSG_OTHERVER + fk - 1 : ok = 0
 endproc
 
 ' fk: what a$ is by its end (either case): 0 text, 1 .md (Markdown), 2 .rtf
-' (RTF); mf$: its module's file, mu$ its name shown, mn$ the format's
+' (RTF); mf$: its module's file
 proc ftype
   fk = 0
   b$ = right$(a$, 3)
-  if b$ = p".md" or b$ = p".MD" then fk = 1 : mf$ = "markdown.ovl" : mu$ = p"MARKDOWN.OVL" : mn$ = p"Markdown"
+  if b$ = p".md" or b$ = p".MD" then fk = 1 : mf$ = "markdown.ovl"
   b$ = right$(a$, 4)
-  if b$ = p".rtf" or b$ = p".RTF" then fk = 2 : mf$ = "rtf.ovl" : mu$ = p"RTF.OVL" : mn$ = p"RTF"
+  if b$ = p".rtf" or b$ = p".RTF" then fk = 2 : mf$ = "rtf.ovl"
 endproc
 
 proc showdir
@@ -453,14 +443,14 @@ proc quit
     print p"MEGA65 Writer: bye. RUN starts it again with the document kept."
     end
   endif
-  call say("")
+  sys {wp_say}, MSG_NONE
 endproc
 
 ' ---- the help: WRITER.HELP, a Writer document on the disk ----
 proc loadhelp
   call discard
   if yes then
-    call say(p"Loading the help...")
+    sys {wp_say}, MSG_HELPLOAD
     hl = 0
     trap nohelp
     bload "writer.help", b5, p(IMG)
@@ -470,10 +460,10 @@ helpback:
     sys {wp_video}, 1
     if hl then
       sys {wp_get}, GET_UNPACK
-      fi$ = p"untitled" : call setname
-      call say(p"The help. ESC N starts a new document.")
+      fi$ = "" : call setname
+      sys {wp_say}, MSG_HELP
     else
-      call say(p"No help: WRITER.HELP is not on the disk.")
+      sys {wp_say}, MSG_NOHELP
     endif
   endif
 endproc
@@ -505,5 +495,5 @@ helperr:
 errh:
   dclose
   sys {wp_video}, 1
-  call say(p"Error: " + err$(er))
+  call sp(MSG_ERROR, err$(er))
   resume mainloop

@@ -1,0 +1,51 @@
+# messages.txt — the Writer's messages, menu and prompts (ASCII)
+#
+# tools/mkmsg.py makes of them build/writer.msg (WRITER.MSG on the disk:
+# the strings one after another, each ended by a 0), which the BASIC
+# program BLOADs at the start to MSG_TAB ($1800, in the RAM BASIC 65 leaves
+# free below the program: the graphics kernel's buffers, which Writer does
+# not use), and build/msg.h, their numbers (MSG_<name>) for the BASIC
+# program and the C half. Their numbers are their order here.
+#
+# In a message, @ is a field of what BASIC gave (up to a comma) and % all
+# the rest of it (BASIC: call sp(MSG_..., a$ + "," + b$); api.c's wp_say).
+
+NONE      ""
+COPIED    "Copied."
+# the menu (ESC): the panel's two rows, then the bottom bar's (% : LIST
+# below, when LIST.OVL is loaded: on, off)
+MENU      "Menu:"
+MENU2     "File:  N)ew  L)oad  S)ave  I)mport  E)xport  D)ir"
+VIEW      "View:  R)edraw%    H)elp  Q)uit    ESC: back"
+LISTON    "  T)List on"
+LISTOFF   "  T)List off"
+DISCARD   "Discard the unsaved changes? (Y/N)"
+SAVEAS    "Save as: %"
+SAVING    "Saving %..."
+NOTSAVED  "Not saved: %"
+SAVED     "Saved @ (% bytes)."
+FIND      "Find: %"
+REPLWITH  "Replace with: %"
+LOAD      "Load: %"
+LOADING   "Loading %..."
+NOTWP     "% is not a Writer document (try I)mport)."
+LOADED    "Loaded %."
+IMPORT    "Import (name.md: Markdown, name.rtf: RTF): %"
+NOTIMP    "Not imported: %"
+IMPORTING "Importing %..."
+IMPORTED  "Imported % characters."
+EXPORT    "Export as (name.md: Markdown, name.rtf: RTF): %"
+EXPORTED  "Exported @ bytes to %."
+# by the file's kind (BASIC's fk: 0 text, 1 Markdown, 2 RTF)
+TOOLONG   "Too long (more than 59 KB)."
+TOOLONG1  "Too long for Markdown (more than 59 KB)."
+TOOLONG2  "Too long for RTF (more than 59 KB)."
+# by the module (fk 1, 2)
+NEEDS     "Markdown needs MARKDOWN.OVL on the disk."
+NEEDS2    "RTF needs RTF.OVL on the disk."
+OTHERVER  "MARKDOWN.OVL is from another version of Writer."
+OTHERVER2 "RTF.OVL is from another version of Writer."
+HELPLOAD  "Loading the help..."
+HELP      "The help. ESC N starts a new document."
+NOHELP    "No help: WRITER.HELP is not on the disk."
+ERROR     "Error: %"

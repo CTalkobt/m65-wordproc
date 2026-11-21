@@ -145,17 +145,24 @@ u8 ed_ok = 1;                   /* (the host: edit.c linked in) */
 u8 ed_busy;
 u16 ed_a, ed_b;
 
+/* the drawing's caches: mod_area.r past its buffers (MOD_SCRATCH), not
+ * all of it up to EDIT_SIZE, which is more than CACHE_LIN has room for */
+#define CACHE_SIZE (sizeof mod_area.r - MOD_SCRATCH)
+#ifdef __cc45__
+typedef char cache_fits[CACHE_SIZE <= EDIT_LIN - CACHE_LIN ? 1 : -1];
+#endif
+
 u16 edit_run(u8 cmd) {
     mod_ret = 0xFFFF;
     if (!ed_ok || ed_busy) return mod_ret;
     ed_busy = 1;
     mod_cmd = cmd;
 #ifdef __cc45__
-    mem_copy(CACHE_LIN, (u32)(u16)(mod_area.m + MOD_SCRATCH), EDIT_SIZE - MOD_SCRATCH);
+    mem_copy(CACHE_LIN, (u32)(u16)(mod_area.m + MOD_SCRATCH), CACHE_SIZE);
     mem_copy((u32)(u16)mod_area.m, EDIT_LIN, EDIT_SIZE);
     mod_entry();
     mod_area.m[0] = 0;          /* (the drawing overwrites it: not kept again) */
-    mem_copy((u32)(u16)(mod_area.m + MOD_SCRATCH), CACHE_LIN, EDIT_SIZE - MOD_SCRATCH);
+    mem_copy((u32)(u16)(mod_area.m + MOD_SCRATCH), CACHE_LIN, CACHE_SIZE);
 #else
     edit_main();
 #endif

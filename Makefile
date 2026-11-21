@@ -24,7 +24,7 @@ CC45      = $(CC45_ROOT)/bin/cc45
 DISK45    = $(CC45_ROOT)/bin/disk45
 
 HOSTCC    ?= cc
-HOSTFLAGS = -std=c99 -Wall -Wextra -O1 -g -Isrc
+HOSTFLAGS = -std=c99 -Wall -Wextra -O1 -g -Isrc -I$(BUILD)
 
 BUILD  = build
 TARGET = $(BUILD)/writer.prg
@@ -64,6 +64,16 @@ SMALL   = api conv doc layout
 NOZP    = conv
 OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45) $(BUILD)/obj/modcall.o45 $(BUILD)/obj/gap.o45 $(BUILD)/obj/gapmove.o45 $(BUILD)/obj/lowmem.o45
 CCQUIET = 2>&1 | grep -v 'note:\|^ *[0-9]* |\|^ *|' || true
+
+# The messages (src/messages.txt): WRITER.MSG, BLOADed by the BASIC program
+# to $1800 (below it, free RAM), their numbers (msg.h: the BASIC program and
+# the C half), and the table for the host build
+MSGS = $(BUILD)/writer.msg $(BUILD)/msg.h $(BUILD)/msgtab.c
+$(MSGS) &: src/messages.txt tools/mkmsg.py
+	@mkdir -p $(BUILD)
+	python3 tools/mkmsg.py src/messages.txt $(MSGS)
+
+$(BUILD)/obj/api.o45 $(BUILD)/obj/render.o45: $(BUILD)/msg.h
 
 $(BUILD)/obj/%.o45: src/%.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
@@ -134,15 +144,16 @@ $(BUILD)/default0.ovl: $(TARGET) $(BUILD)/obj/edit_mod.o45 $(BUILD)/obj/edit_und
 
 all: $(DISK)
 
-$(TARGET): src/wp.bas $(OBJS)
+$(TARGET): src/wp.bas $(OBJS) $(BUILD)/msg.h
 	@mkdir -p $(BUILD)
-	$(BASIC45) $(foreach f,$(OBJS),--link $(f)) --map $(MAP) $(BASFLAGS) $(STACKFLAGS) --report src/wp.bas -o $@
+	$(BASIC45) -I $(BUILD) $(foreach f,$(OBJS),--link $(f)) --map $(MAP) $(BASFLAGS) $(STACKFLAGS) --report src/wp.bas -o $@
 
-$(DISK): $(TARGET) src/writer.fnt $(BUILD)/help.prg $(MODS)
+$(DISK): $(TARGET) src/writer.fnt $(BUILD)/writer.msg $(BUILD)/help.prg $(MODS)
 	rm -f $@
 	$(DISK45) create $@ -n "WRITER" -i "65"
 	$(DISK45) add $@ $(TARGET) "WRITER"
 	$(DISK45) add $@ src/writer.fnt "WRITER.FNT"
+	$(DISK45) add $@ $(BUILD)/writer.msg "WRITER.MSG"
 	$(DISK45) add $@ $(BUILD)/help.prg "WRITER.HELP"
 	$(DISK45) add $@ $(BUILD)/markdown.ovl "MARKDOWN.OVL"
 	$(DISK45) add $@ $(BUILD)/rtf.ovl "RTF.OVL"
@@ -150,9 +161,9 @@ $(DISK): $(TARGET) src/writer.fnt $(BUILD)/help.prg $(MODS)
 	$(DISK45) add $@ $(BUILD)/default0.ovl "DEFAULT0.OVL"
 
 # the document shown at the start, made on the host by the C half itself
-$(BUILD)/mkhelp: tools/mkhelp.c tools/helpdoc.c tests/host.c $(PORTABLE) $(HEADERS)
+$(BUILD)/mkhelp: tools/mkhelp.c tools/helpdoc.c tests/host.c $(PORTABLE) $(HEADERS) $(MSGS)
 	@mkdir -p $(BUILD)
-	$(HOSTCC) $(HOSTFLAGS) -o $@ tools/mkhelp.c tools/helpdoc.c tests/host.c $(PORTABLE)
+	$(HOSTCC) $(HOSTFLAGS) -o $@ tools/mkhelp.c tools/helpdoc.c tests/host.c $(PORTABLE) $(BUILD)/msgtab.c
 
 $(BUILD)/help.prg: $(BUILD)/mkhelp
 	$(BUILD)/mkhelp $@
@@ -163,9 +174,9 @@ run: $(DISK)
 shot: $(DISK)
 	python3 tools/xemu_run.py $(TARGET) $(DISK) $(BUILD)/writer.png wait:8
 
-$(BUILD)/test_wp: tests/test_wp.c tests/host.c tools/helpdoc.c $(PORTABLE) $(HEADERS)
+$(BUILD)/test_wp: tests/test_wp.c tests/host.c tools/helpdoc.c $(PORTABLE) $(HEADERS) $(MSGS)
 	@mkdir -p $(BUILD)
-	$(HOSTCC) $(HOSTFLAGS) -fsanitize=address,undefined -o $@ tests/test_wp.c tests/host.c tools/helpdoc.c $(PORTABLE)
+	$(HOSTCC) $(HOSTFLAGS) -fsanitize=address,undefined -o $@ tests/test_wp.c tests/host.c tools/helpdoc.c $(PORTABLE) $(BUILD)/msgtab.c
 
 test: $(BUILD)/test_wp
 	$(BUILD)/test_wp

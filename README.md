@@ -33,7 +33,9 @@ make test       # the C half on the host (gcc): editing, layout, files; build/*.
 
 On a MEGA65: copy `build/writer.d81` to the SD card, mount it, then
 `DLOAD "WRITER"` and `RUN`. The disk holds `WRITER` (the program),
-`WRITER.FNT` (the fonts' glyphs, loaded by the program), `WRITER.HELP` (the
+`WRITER.FNT` (the fonts' glyphs, loaded by the program), `WRITER.MSG` (the
+messages, menu and prompts, from `src/messages.txt`: loaded by the program
+at each start to `$1800`), `WRITER.HELP` (the
 help: a Writer document shown when the program starts and again with F8 / HELP;
 without it the program starts with an empty document), `MARKDOWN.OVL`
 (Markdown import and export, a module: without it the rest works, and a
@@ -532,7 +534,19 @@ can be.
   `$1700`-`$17FF` (`basic45 --stack-page=0x17`; BASIC's own page-1 stack,
   `--stack-page=basic`, hung a session now and then in xemu, the ROM's
   Ctrl-S pause flag set), so the C data ends at `$BC39`: 967 bytes free
-  below `$C000`. (The BASIC program's
+  below `$C000`. Then the BASIC program's messages, prompts and menu text
+  (58 strings) went into a table on the disk, `WRITER.MSG` (made from
+  `src/messages.txt` by `tools/mkmsg.py`, with their numbers, `msg.h`,
+  `#include`d by both halves), loaded at each start to `$1800`, the RAM
+  the graphics kernel uses for BASIC's graphics commands (which the
+  Writer does not use): BASIC calls `SYS wp_say, MSG_...` with any
+  file name or number poked into `msg` (`@` a field to a comma, `%` the
+  rest). The BASIC program went from 4861 to 3945 bytes, so the C half
+  starts at `$3000`; the C grew 233 bytes, and the C data ends at
+  `$BA1F`: 1504 bytes free. (The drawing's caches, saved in colour RAM
+  while `DEFAULT0.OVL` runs, are now saved alone, not the whole of
+  `mod_area` past its buffers up to `EDIT_SIZE`, which with the menu's
+  text gone from it would not fit there.) (The BASIC program's
   two `poke`s of `$D1` / `$F7` are written in decimal: `--minify` turns
   `poke $d1` into a variable,
   [M65Compiler #603](https://github.com/CTalkobt/M65Compiler/issues/603).)

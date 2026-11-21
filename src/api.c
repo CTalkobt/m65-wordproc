@@ -10,14 +10,27 @@
  *                    image, plain text or Markdown at SCRATCH_LIN; Markdown
  *                    by the module MARKDOWN.OVL, RTF by RTF.OVL: 65535
  *                    when it is not loaded)
- *   wp_setmsg        msg (poked by BASIC as PETSCII) shown in the bottom bar
+ *   wp_say(n)        message n of the table (WRITER.MSG, at MSG_TAB) shown in
+ *                    the bottom bar, with what BASIC poked into msg (PETSCII)
+ *                    in its place holders
  *   wp_setname       fname (PETSCII) as the document's name
- *   wp_panel(n)      the menu: n rows of menu_text above the bottom bar (msg);
- *                    0 closes it
+ *   wp_panel(n)      the menu: n rows (MSG_MENU, ...) above the bottom bar
+ *                    (MSG_VIEW); 0 closes it
  *   wp_video(on)     1: the graphics screen (again, after the disk or text
  *                    screen); 0: BASIC's text screen back
  */
 #include "wp.h"
+#include "msg.h"                /* MSG_... (made by tools/mkmsg.py) */
+
+/* the messages: src/messages.txt, BLOADed by BASIC to MSG_TAB (free RAM
+ * below the program, as the base page and stack: lowmem.s45) */
+#ifdef __cc45__
+#define msg_tab ((const char *)MSG_TAB)
+#define msg_parm ((char *)MSG_PARM)
+#else
+extern const char msg_tab[];    /* (the host: build/msgtab.c) */
+static char msg_parm[81];
+#endif
 
 #define CMD_BOLD 1
 #define CMD_ITALIC 2
@@ -89,10 +102,6 @@ void wp_init(void) {
     video_on();
     render_invalidate();
     if (!started) {
-        u8 i;
-        const char *n = "untitled";
-        for (i = 0; n[i]; i++) fname[i] = n[i];
-        fname[i] = 0;
         view_mode = VIEW_PAGE;
         doc_new();
         started = 1;
@@ -469,20 +478,45 @@ u16 wp_find(u8 op) {
     return r;
 }
 
-void wp_setmsg(void) {
+/* message n of the table */
+const char *msg_get(u8 n) {
+    const char *s = msg_tab;
+    while (n--)
+        while (*s++) {}
+    return s;
+}
+
+/* msg: message n, its place holders filled from p: 1 a field of p (up to
+ * a comma), 2 all the rest */
+static void msg_fill(u8 n, const char *p) {
+    const char *t = msg_get(n);
+    u8 i = 0;
+    char c;
+    while ((c = *t++) != 0 && i < 78) {
+        if ((u8)c > 2) msg[i++] = c;
+        else {
+            while (*p && i < 78 && (c == 2 || *p != ',')) msg[i++] = *p++;
+            if (*p) p++;
+        }
+    }
+    msg[i] = 0;
+}
+
+void wp_say(u8 n) {
+    u8 i;
     to_ascii(msg, 78);
+    for (i = 0; (msg_parm[i] = msg[i]) != 0; i++) {}
+    msg_fill(n, msg_parm);
     render_bars();
 }
 
-/* the menu's panel above the bottom bar: n rows (0 or PANEL_ROWS) from
- * menu_text, the bar's from msg; closed (0): msg emptied, the view drawn
- * again under it */
+/* the menu's panel above the bottom bar: n rows (0 or PANEL_ROWS) of
+ * MSG_MENU, ..., the bar's MSG_VIEW (with List on / off when LIST.OVL is
+ * loaded); closed (0): msg emptied, the view drawn again under it */
 void wp_panel(u8 n) {
-    to_ascii(menu_text[0], 78);
-    to_ascii(menu_text[1], 78);
-    to_ascii(msg, 78);
     panel = n;
-    if (!n) msg[0] = 0;
+    if (n) msg_fill(MSG_VIEW, list_ok ? msg_get(MSG_LISTON + list_on) : "");
+    else msg[0] = 0;
     render();
 }
 

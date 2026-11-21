@@ -400,7 +400,7 @@ void scroll_to_cursor(void);
 u16 doc_height(void);
 
 /* ---- drawing (render.c) ---- */
-/* the menu's panel: panel rows (0 or 2) above the bottom bar, menu_text */
+/* the menu's panel: panel rows (0 or 2) above the bottom bar (MSG_MENU, ...) */
 #define PANEL_ROWS 2
 
 /* What was drawn where: a segment of the view (a line's band, blank page,
@@ -419,13 +419,12 @@ struct seg {
 #define TMP_LINES 32
 /* mod_area's first part, its buffers in use only while drawing (a struct
  * line is 12 bytes); DEFAULT0.OVL's room, up to LIST.OVL */
-#define MOD_SCRATCH (PANEL_ROWS * 81 + TMP_LINES * 12 + BAND_H * COLS + COLS + 2 + 48 + COLS + 48 + COLS + 1)
+#define MOD_SCRATCH (TMP_LINES * 12 + BAND_H * COLS + COLS + 2 + 48 + COLS + 48 + COLS + 1)
 #define EDIT_SIZE LIST_OFS
 union mod_area {
     struct {
         /* (in use only while the screen is drawn or laid out: DEFAULT0.OVL
          * runs here, EDIT_SIZE bytes) */
-        char menu_text[PANEL_ROWS][81]; /* (first: BASIC pokes it at mod_area) */
         struct line lay_tmp[TMP_LINES]; /* layout_update's new lines */
         u8 band[BAND_H * COLS];
         char bar_t[COLS + 2];          /* a bar's new text */
@@ -447,9 +446,9 @@ union mod_area {
 extern union mod_area mod_area;
 extern char msg[81];            /* the bottom bar's message ("": the status) */
 extern u8 panel;
-#define menu_text mod_area.r.menu_text
 void band_xor(u16 x0, u16 x1, u8 r0, u8 r1);    /* the band's pixels x0..x1-1, rows r0..r1-1, inverted */
-extern char fname[17];          /* the document's name */
+extern char fname[17];          /* the document's name ("": untitled) */
+const char *msg_get(u8 n);      /* message n of the table (WRITER.MSG: api.c) */
 void render(void);
 void render_bars(void);
 void render_invalidate(void);   /* the colours rewritten next time */
