@@ -42,11 +42,32 @@ u8 char_w(u8 c, u8 a) {
     return (u8)(w + ((a & A_BOLD) ? 1 : 0));
 }
 
-/* ---- raw view tags ---- */
+/* a third of each font's ascent (12, 12, 11, 18): a superscript's rise
+ * (a subscript's fall one less), a strikethrough's height */
+const u8 fx_third[NFONTS] = { 4, 4, 3, 6 };
+
+/* style a's baseline moved: superscript up, subscript down */
+s8 script_dy(u8 a) {
+    u8 t = fx_third[a & A_FONT];
+    if (a & A_SUP) return (s8)-t;
+    if (a & A_SUB) return (s8)(t - 1);
+    return 0;
+}
+
+/* ---- raw view tags: each with its effect (tag_fx: an opening tag shows
+ * it, [S] struck through, [A] raised ...; the others 0) ---- */
+static u8 tag_fx_now;
 static u8 tag_put(char *out, u8 n, const char *s) {
-    while (*s) out[n++] = *s++;
+    while (*s) {
+        mod_area.r.tag_fx[n] = tag_fx_now;
+        out[n++] = *s++;
+    }
     return n;
 }
+
+static const u8 fx_bit[6] = { A_BOLD, A_ITAL, A_UNDER, A_STRIKE, A_SUP, A_SUB };
+static const char *const fx_open[6] = { "[B]", "[I]", "[A]", "[S]", "[A]", "[A]" };
+static const char *const fx_close[6] = { "[/B]", "[/I]", "[/U]", "[/S]", "[/Sup]", "[/Sub]" };
 
 /* the style of the last character shown before i (not a CR / FF; 0 at the start) */
 u8 prev_style(u16 i) {
@@ -59,8 +80,9 @@ u8 prev_style(u16 i) {
 
 /* the tags shown before character i (into out, when not NULL); their length */
 u8 raw_tag(u16 i, char *out) {
-    u8 n = 0, prev, now, c = txt_at(i);
+    u8 n = 0, prev, now, c = txt_at(i), k;
     if (!out) out = mod_area.r.tag_buf;
+    tag_fx_now = 0;
     if (i == 0 || is_break(txt_at(i - 1))) {
         u8 pa = atr_at(para_end(i));
         n = tag_put(out, n, kind_tags[pa & A_KIND]);
@@ -75,17 +97,19 @@ u8 raw_tag(u16 i, char *out) {
     prev = prev_style(i);
     now = sty(atr_at(i));
     if (prev == now) return n;
-    if ((prev & A_BOLD) && !(now & A_BOLD)) n = tag_put(out, n, "[/B]");
-    if ((prev & A_ITAL) && !(now & A_ITAL)) n = tag_put(out, n, "[/I]");
-    if ((prev & A_UNDER) && !(now & A_UNDER)) n = tag_put(out, n, "[/U]");
+    for (k = 0; k < 6; k++)
+        if (prev & ~now & fx_bit[k]) n = tag_put(out, n, fx_close[k]);
     if ((prev & A_FONT) != (now & A_FONT)) {
-        out[n++] = '[';
+        n = tag_put(out, n, "[");
         n = tag_put(out, n, font_names[now & A_FONT]);
-        out[n++] = ']';
+        n = tag_put(out, n, "]");
     }
-    if (!(prev & A_BOLD) && (now & A_BOLD)) n = tag_put(out, n, "[B]");
-    if (!(prev & A_ITAL) && (now & A_ITAL)) n = tag_put(out, n, "[I]");
-    if (!(prev & A_UNDER) && (now & A_UNDER)) n = tag_put(out, n, "[U]");
+    for (k = 0; k < 6; k++)
+        if (now & ~prev & fx_bit[k]) {
+            tag_fx_now = fx_bit[k];
+            n = tag_put(out, n, fx_open[k]);
+            tag_fx_now = 0;
+        }
     return n;
 }
 
@@ -234,8 +258,15 @@ static u8 produce(struct lstate *st, struct line *L) {
             a = kind_attr[k & A_KIND];      /* (an empty paragraph: its kind's height) */
         }
         f = fonts[a & A_FONT];
-        if (f->ascent > asc) asc = f->ascent;
-        if (f->height - f->ascent > desc) desc = (u8)(f->height - f->ascent);
+        {
+            /* (a superscript's room above, a subscript's below) */
+            s8 dy = script_dy(a);
+            u8 up = f->ascent, dn = (u8)(f->height - f->ascent);
+            if (dy < 0) up = (u8)(up - dy);
+            else dn = (u8)(dn + dy);
+            if (up > asc) asc = up;
+            if (dn > desc) desc = dn;
+        }
         if (is_break(c)) continue;
         x = char_w(c, a);
         width += x;
@@ -267,6 +298,7 @@ static u8 produce(struct lstate *st, struct line *L) {
     }
     L->start = pos;
     L->y = (u16)(PAGE_GAP + st->page * PAGE_STRIDE + MARGIN_TOP + st->yin);
+    if (asc + desc > BAND_H) asc = (u8)(BAND_H - desc);     /* (a raised Head: its top cut) */
     L->h = (u8)(asc + desc);
     L->asc = asc;
     L->page = st->page;

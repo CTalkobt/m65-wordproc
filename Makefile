@@ -31,8 +31,8 @@ TARGET = $(BUILD)/writer.prg
 MAP    = $(BUILD)/writer.map
 DISK   = $(BUILD)/writer.d81
 
-CSRC    = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/m65.c src/fonts.c
-PORTABLE = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/rtf.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/fonts.c
+CSRC    = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/m65.c src/fonts.c
+PORTABLE = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/fonts.c
 HEADERS = src/wp.h
 
 # The C half is compiled here (basic45 --link takes the objects): -O2 for
@@ -90,7 +90,7 @@ $(BUILD)/obj/%.o45: src/%.s45
 # linked by tools/mkmod.py to run at the program's mod_area, against its
 # map (basic45 --map: M65Compiler #595, in master since 6a7dd256); the build's ID (of the sources and the tools) ties each to the
 # program it was linked with (render.c's mod_run refuses another's).
-MODS    = $(BUILD)/markdown.ovl $(BUILD)/rtf.ovl $(BUILD)/html.ovl $(BUILD)/htmlin.ovl $(BUILD)/list.ovl $(BUILD)/default0.ovl
+MODS    = $(BUILD)/markdown.ovl $(BUILD)/mdin.ovl $(BUILD)/rtf.ovl $(BUILD)/html.ovl $(BUILD)/htmlin.ovl $(BUILD)/list.ovl $(BUILD)/default0.ovl
 BUILD_ID := $(shell cat src/*.c src/*.h src/wp.bas tools/mkmod.py $(CC45) $(CC45_ROOT)/bin/ln45 2>/dev/null | cksum | awk '{print $$1 % 65536}')
 
 $(BUILD)/buildid.h: FORCE
@@ -100,13 +100,22 @@ $(BUILD)/buildid.h: FORCE
 
 $(BUILD)/obj/render.o45: $(BUILD)/buildid.h
 
-# MARKDOWN.OVL: Markdown import and export (md.c), a run-once module
+# MARKDOWN.OVL: Markdown export (md.c), a run-once module
 $(BUILD)/obj/md_mod.o45: src/md.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
 	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
 
 $(BUILD)/markdown.ovl: $(TARGET) $(BUILD)/obj/md_mod.o45 tools/mkmod.py
 	python3 tools/mkmod.py --entry _md_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/md_mod.o45
+
+# MDIN.OVL: Markdown import (mdin.c), apart from the export (together they
+# set MOD_SIZE)
+$(BUILD)/obj/mdin_mod.o45: src/mdin.c $(HEADERS)
+	@mkdir -p $(BUILD)/obj
+	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+
+$(BUILD)/mdin.ovl: $(TARGET) $(BUILD)/obj/mdin_mod.o45 tools/mkmod.py
+	python3 tools/mkmod.py --entry _mdin_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/mdin_mod.o45
 
 $(BUILD)/obj/rtf_mod.o45: src/rtf.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
@@ -176,6 +185,7 @@ $(DISK): $(TARGET) src/writer.fnt $(BUILD)/writer.msg $(BUILD)/help.prg $(MODS)
 	$(DISK45) add $@ $(BUILD)/writer.msg "WRITER.MSG"
 	$(DISK45) add $@ $(BUILD)/help.prg "WRITER.HELP"
 	$(DISK45) add $@ $(BUILD)/markdown.ovl "MARKDOWN.OVL"
+	$(DISK45) add $@ $(BUILD)/mdin.ovl "MDIN.OVL"
 	$(DISK45) add $@ $(BUILD)/rtf.ovl "RTF.OVL"
 	$(DISK45) add $@ $(BUILD)/html.ovl "HTML.OVL"
 	$(DISK45) add $@ $(BUILD)/htmlin.ovl "HTMLIN.OVL"

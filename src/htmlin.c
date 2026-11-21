@@ -15,7 +15,8 @@
  *                (code; its lines are paragraphs), <ul> / <ol> and <li>
  *                (nested: the level, up to 4)
  *   styles       <b> <strong>, <i> <em> <cite> <var> <dfn>, <u> <ins>,
- *                <code> <tt> <kbd> <samp> (Mono), <span class="s|r|h">
+ *                <code> <tt> <kbd> <samp> (Mono), <s> <strike> <del>,
+ *                <sup>, <sub>, <span class="s|r|h">
  *                (the export's Sans, Serif, Head)
  *   alignment    style="text-align: ...", align="...", <center>
  *   page break   style="page-break-after: always" (or break-before / -after)
@@ -53,7 +54,8 @@ static u8 popen, want_gap, no_gap;      /* a paragraph started; an empty one due
 static u8 pk, pal;                      /* the paragraph's kind (and level), alignment */
 static u8 hk, nq, npre, pre_first;      /* in a heading (its kind); quotes, pre open; just after <pre> */
 static u8 ld, lt[4];                    /* lists open; each one's kind (K_BULLET / K_NUMBER) */
-static u8 n_on[4];                       /* <b> <i> <u> <code> (and the like) open */
+static u8 n_on[7];                      /* <b> <i> <u> <code> <s> <sup> <sub> (and the like) open */
+static u8 scr;                          /* the script of the innermost <sup> / <sub> open */
 static u8 sd, sfont[8];                 /* <span>s open; each one's font (NONE: the kind's) */
 static u8 sp_n, sp_nl, sp_attr;         /* spaces held (to a paragraph's end: dropped); a line end among them; their style */
 static u8 u_need, u_lead;               /* UTF-8: continuation bytes due; the first byte */
@@ -67,7 +69,9 @@ static u8 attr(void) {
     if (n_on[0]) b |= A_BOLD;
     if (n_on[1]) b |= A_ITAL;
     if (n_on[2]) b |= A_UNDER;
-    return (u8)((b & (A_BOLD | A_ITAL | A_UNDER)) | f);
+    if (n_on[4]) b |= A_STRIKE;
+    b |= scr;
+    return (u8)((b & (u8)~A_FONT) | f);
 }
 
 /* a paragraph starts (if none has): the empty one due before it, its kind */
@@ -171,15 +175,18 @@ static u8 word_at(const char *w, const char *s) {
 }
 
 static const char tags[] =
-    "p h1 h2 h3 h4 h5 h6 blockquote pre ul ol li br b strong i em cite var dfn u ins code tt kbd samp span "
+    "p h1 h2 h3 h4 h5 h6 blockquote pre ul ol li br b strong i em cite var dfn u ins code tt kbd samp "
+    "s strike del sup sub span "
     "title script style svg template td th tr "
     "div center table hr dl dt dd section article header footer nav main aside figure figcaption address form "
     "fieldset details summary caption ";
 enum {
     T_P, T_H1, T_H6 = T_H1 + 5, T_QUOTE, T_PRE, T_UL, T_OL, T_LI, T_BR, T_BOLD, T_ITAL = T_BOLD + 2,
-    T_UNDER = T_ITAL + 5, T_MONO = T_UNDER + 2, T_SPAN = T_MONO + 4, T_SKIP, T_CELL = T_SKIP + 5, T_TR = T_CELL + 2,
+    T_UNDER = T_ITAL + 5, T_MONO = T_UNDER + 2, T_STRIKE = T_MONO + 4, T_SUP = T_STRIKE + 3, T_SUB, T_SPAN, T_SKIP, T_CELL = T_SKIP + 5, T_TR = T_CELL + 2,
     T_DIV, T_CENTER, T_NONE = 0xFF
 };
+/* (each style tag group's end: bold, italic, underline, Mono, strike, sup, sub) */
+static const u8 grp_end[7] = { T_ITAL, T_UNDER, T_MONO, T_STRIKE, T_SUP, T_SUB, T_SPAN };
 
 /* is s in the attribute's value? */
 static u8 has(const char *s) {
@@ -225,9 +232,10 @@ static void tag_end(void) {
         return;
     }
     if (t >= T_BOLD && t < T_SPAN) {
-        k = t < T_ITAL ? 0 : t < T_UNDER ? 1 : t < T_MONO ? 2 : 3;
+        for (k = 0; t >= grp_end[k]; k++) ;
         if (!closing) n_on[k]++;
         else if (n_on[k]) n_on[k]--;
+        if (k >= 5) scr = !closing ? (k == 5 ? A_SUP : A_SUB) : n_on[5] ? A_SUP : n_on[6] ? A_SUB : 0;
         return;
     }
     if (t == T_SPAN) {
@@ -461,10 +469,12 @@ static u8 feed(u8 c) {
 }
 
 static void html_begin(void) {
+    u8 k;
     build_start();
     st = S_TEXT;
     popen = want_gap = no_gap = pal = hk = nq = npre = ld = sd = sp_n = sp_nl = u_need = 0;
-    n_on[0] = n_on[1] = n_on[2] = n_on[3] = 0;
+    for (k = 0; k < sizeof n_on; k++) n_on[k] = 0;
+    scr = 0;
 }
 
 static void html_chunk(void) {

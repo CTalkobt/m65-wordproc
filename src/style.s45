@@ -23,7 +23,7 @@
 .weak cc45.icallinfo
 cc45.icallinfo = 1
 
-.global _sty, _sty_find, _sty_init, _sty_save, _sty_load, _sty_remap
+.global _sty, _sty_find, _sty_init, _sty_save, _sty_load, _sty_remap, _raw_fx
 .extern _st_n
 
 .segment "bss"
@@ -362,6 +362,115 @@ proc _sty_remap
     dec $10
     bra @loop
 @done:
+    rts
+    .func_flags zp_call
+endproc
+
+; void raw_fx(u8 *d, u8 fx): d at $10/$11 (a raw-view cell's top row in
+; the band, rows COLS = 80 apart), fx (a style's bits) at $12: the cell
+; drawn with that effect: bold (each row ORed with itself a pixel right),
+; italic (the top 7 rows a pixel right), underline (row 14), strikethrough
+; (row 8), superscript / subscript (3 rows up / down)
+.segment "bss"
+__g:    .res 16         ; the cell's rows
+__sh:   .res 1          ; the rows' shift
+.segment "code"
+proc _raw_fx
+    .zp_uses $10, $11, $12
+    .zp_clobbers $10, $11, $12, $14, $15, $16
+    .zp_release $10, $11, $12, $14, $15, $16
+    .reg_clobbers A, X, Y
+    .flag_clobbers C, N, Z, V
+    lda $10
+    sta $14
+    lda $11
+    sta $15
+    ldx #0
+@copy:
+    ldy #0
+    lda ($10),y
+    sta __g,x
+    jsr @down
+    inx
+    cpx #16
+    bne @copy
+    lda $14
+    sta $10
+    lda $15
+    sta $11
+    ldy #0                  ; the shift: superscript 3 (rows up), subscript -3
+    lda $12
+    and #$40
+    beq @nosup
+    ldy #3
+@nosup:
+    lda $12
+    and #$80
+    beq @nosub
+    ldy #$fd
+@nosub:
+    sty __sh
+    ldx #0
+@row:
+    txa
+    clc
+    adc __sh
+    cmp #16
+    bcs @blank
+    tay
+    lda __g,y
+    bra @have
+@blank:
+    lda #0
+@have:
+    sta $16
+    lda $12
+    and #$04                ; (A_BOLD)
+    beq @1
+    lda $16
+    lsr
+    ora $16
+    sta $16
+@1:
+    lda $12
+    and #$08                ; (A_ITAL)
+    beq @2
+    cpx #7
+    bcs @2
+    lsr $16
+@2:
+    lda $12
+    and #$10                ; (A_UNDER)
+    beq @3
+    cpx #14
+    bne @3
+    lda #$ff
+    sta $16
+@3:
+    lda $12
+    and #$20                ; (A_STRIKE)
+    beq @4
+    cpx #8
+    bne @4
+    lda #$ff
+    sta $16
+@4:
+    lda $16
+    ldy #0
+    sta ($10),y
+    jsr @down
+    inx
+    cpx #16
+    bne @row
+    rts
+@down:                      ; $10/$11: a row down
+    clc
+    lda $10
+    adc #80
+    sta $10
+    bcc @same
+    inc $11
+@same:
     rts
     .func_flags zp_call
 endproc

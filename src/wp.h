@@ -26,6 +26,7 @@
 
 #include <stdint.h>
 typedef uint8_t u8;
+typedef int8_t s8;
 typedef uint16_t u16;
 typedef uint32_t u32;
 
@@ -100,7 +101,11 @@ typedef uint32_t u32;
 #define A_BOLD  0x04
 #define A_ITAL  0x08
 #define A_UNDER 0x10
-#define A_STYLE 0x1F            /* a style: font, bold, italic, underline */
+#define A_STRIKE 0x20
+#define A_SUP   0x40            /* superscript, subscript: the script field (one or neither) */
+#define A_SUB   0x80
+#define A_SCRIPT 0xC0
+#define A_STYLE 0xFF            /* a style: font, bold, italic, underline, strikethrough, script */
 /* a character's attribute byte is not a style but an index into the style
  * table (sty: its style; sty_find: a style's index; conv.c, issue #5) */
 /* a paragraph's CR / FF carries the paragraph's properties instead: */
@@ -281,6 +286,7 @@ void doc_out(u16 d, u16 o, u16 i, u16 n);       /* n characters from i to SCRATC
 #define ED_ALIGN 11
 #define ED_LEVEL 12
 #define ED_STYLE 13
+#define ED_FX 14                /* the effect pop-up's item ed_a (CTRL+E: fonts 0-3, then bold ... subscript) */
 extern u16 u_pos, u_tail, u_n, ed_a, ed_b;
 extern u8 u_have, u_open, f_len, r_len, r_on, ed_ok, ed_busy;
 u16 edit_run(u8 cmd);           /* DEFAULT0.OVL's mod_cmd; its mod_ret (0xFFFF: not loaded) */
@@ -288,8 +294,8 @@ void edit_keep(void);           /* DEFAULT0.OVL, BLOADed to mod_area, kept in co
 void undo_note(u16 from, u16 to);
 u16 ed(u8 cmd, u16 a);          /* edit_run(cmd) with ed_a = a */
 /* the styles, a list item's level: DEFAULT0.OVL's */
-#define doc_toggle(bit) ed(ED_TOGGLE, bit)              /* bold / italic / underline (A_...) */
-#define doc_cycle_font() ed(ED_FONT, 0)
+#define doc_toggle(bit) ed(ED_TOGGLE, bit)              /* bold / italic / underline ... (A_...) */
+#define doc_cycle_font() ed(ED_FONT, 0xFF)
 #define doc_cycle_align() ed(ED_ALIGN, 0)
 #define doc_list_level(in) (ed(ED_LEVEL, in) == 1)     /* TAB / DEL, RETURN at a list item's start; 1: done */
 #define doc_style(k) ed(ED_STYLE, k)                    /* paragraph style k (K_...) */
@@ -349,10 +355,10 @@ void doc_built(void);           /* after build_end (b_done): doc_loaded(1) (mod_
 /* ---- modules (.OVL files, loaded by BASIC into mod_area: render.c) ----
  * A module is built apart (Makefile: linked at mod_area against the
  * program's map) and is at most MOD_SIZE bytes, code, data and variables. */
-#define MOD_SIZE 6784            /* (MARKDOWN.OVL: 6710, the largest module) */
+#define MOD_SIZE 6280            /* (LIST_OFS + LIST.OVL's room; the largest run-once module: RTF.OVL) */
 #define MOD_MORE 0x80                   /* (in a command: more calls follow, the module stays) */
 #define MOD_MD_EXPORT 0                 /* MARKDOWN.OVL: md_export */
-#define MOD_MD_IMPORT 1                 /* MARKDOWN.OVL: md_import */
+#define MOD_MD_IMPORT 1                 /* MDIN.OVL: md_import */
 #define MOD_RTF_EXPORT 2                /* RTF.OVL: the document as RTF at SCRATCH_LIN */
 #define MOD_RTF_BEGIN (MOD_MORE | 3)    /* RTF.OVL: an import starts */
 #define MOD_RTF_CHUNK (MOD_MORE | 4)    /* RTF.OVL: the next 1 KB of the file, at SCRATCH_LIN */
@@ -366,6 +372,7 @@ extern u16 mod_ret;                     /* its result */
 u8 mod_ok(const u8 *m);                 /* a module's header there, of this build */
 u16 mod_run(u8 cmd);                    /* run the module loaded; 0xFFFF: none */
 void md_main(void);                     /* MARKDOWN.OVL's entry (md.c) */
+void mdin_main(void);                   /* MDIN.OVL's entry (mdin.c) */
 void rtf_main(void);                    /* RTF.OVL's entry (rtf.c) */
 void html_main(void);                   /* HTML.OVL's entry (html.c) */
 void htmlin_main(void);                 /* HTMLIN.OVL's entry (htmlin.c) */
@@ -375,7 +382,7 @@ void htmlin_main(void);                 /* HTMLIN.OVL's entry (htmlin.c) */
  * bytes, past the drawing's buffers (mod_area.r: at most LIST_OFS bytes),
  * so it costs no memory of its own; a module run in mod_area (Markdown)
  * overwrites it, so list_ok is then 0 until BASIC has loaded it again. */
-#define LIST_OFS 4800           /* (wp.bas's too; DEFAULT0.OVL's room: EDIT_SIZE) */
+#define LIST_OFS 4560           /* (wp.bas's too; DEFAULT0.OVL's room: EDIT_SIZE) */
 #define LIST_SIZE (MOD_SIZE - LIST_OFS)
 extern u8 list_ok, list_on;             /* LIST.OVL loaded (and from this build); asked for */
 extern u16 hk_l;                        /* the line drawn (raw view: >= nlines, a row past the end) */
@@ -414,7 +421,10 @@ u8 just_w(u8 c, u8 a, struct just *j);  /* c's width, with a space's share of th
 u16 x_of(u16 l, u16 pos);       /* pos's x in line l (pixels from the text's left, or cells) */
 u16 pos_at_x(u16 l, u16 x);
 u8 char_w(u8 c, u8 a);          /* a character's advance, page view */
-u8 raw_tag(u16 i, char *out);
+u8 raw_tag(u16 i, char *out);   /* (each tag character's effect, a style's bits: mod_area.r.tag_fx) */
+s8 script_dy(u8 a);             /* style a's baseline moved: superscript up, subscript down */
+extern const u8 fx_third[NFONTS];       /* a third of each font's ascent */
+void raw_fx(u8 *d, u8 fx);      /* a raw-view cell (its top in the band) given a tag's effect (render.c; style.s45) */
 u8 prev_style(u16 i);           /* the style of the last character shown before i */   /* raw view: the tags before character i; their length */
 void scroll_to_cursor(void);
 u16 doc_height(void);
@@ -439,7 +449,8 @@ struct seg {
 #define TMP_LINES 32
 /* mod_area's first part, its buffers in use only while drawing (a struct
  * line is 12 bytes); DEFAULT0.OVL's room, up to LIST.OVL */
-#define MOD_SCRATCH (TMP_LINES * 12 + BAND_H * COLS + COLS + 2 + 48 + COLS + 48 + COLS + 1)
+#define TAG_MAX 56              /* (the most tags before a character: kind, level, alignment, 5 effects ended, a font, 1 begun: 48) */
+#define MOD_SCRATCH (TMP_LINES * 12 + BAND_H * COLS + COLS + 2 + 2 * TAG_MAX + COLS + 48 + COLS + 1)
 #define EDIT_SIZE LIST_OFS
 union mod_area {
     struct {
@@ -448,7 +459,8 @@ union mod_area {
         struct line lay_tmp[TMP_LINES]; /* layout_update's new lines */
         u8 band[BAND_H * COLS];
         char bar_t[COLS + 2];          /* a bar's new text */
-        char tag_buf[48];              /* raw_tag's tags, when not wanted */
+        char tag_buf[TAG_MAX];         /* raw_tag's tags, when not wanted */
+        u8 tag_fx[TAG_MAX];            /* raw_tag's: each tag character's effect (A_BOLD ...: an opening tag drawn so) */
         u8 cellcol[COLS];              /* raw view: the row's cells' colours */
         u8 gbuf[48];                   /* a glyph's rows, copied from bank 4 */
         char sb[COLS + 1];             /* a bar's text */

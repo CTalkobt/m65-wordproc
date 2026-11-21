@@ -50,20 +50,30 @@ static void restyle(u8 keep, u8 set) {
     layout_edit(lo, hi, 0);
 }
 
-/* bold / italic / underline: over the selection (all on unless the first
- * character has it already), else for what is typed next */
+/* bold / italic / underline / strikethrough / superscript / subscript:
+ * over the selection (all on unless the first character has it already),
+ * else for what is typed next (superscript and subscript: one or neither) */
 static void toggle(u8 bit) {
-    if (!sel_on) typing_attr = sty_find(sty(typing_attr) ^ bit);
-    else if (sty(atr_at(sel_lo())) & bit) restyle((u8)~bit, 0);
-    else restyle(0xFF, bit);
+    u8 clr = bit & A_SCRIPT ? A_SCRIPT : bit, a = sty(sel_on ? atr_at(sel_lo()) : typing_attr);
+    if (!sel_on) typing_attr = sty_find(a & bit ? (u8)(a & ~bit) : (u8)((a & ~clr) | bit));
+    else if (a & bit) restyle((u8)~bit, 0);
+    else restyle((u8)~clr, bit);
 }
 
-/* the next font: over the selection (after its first character's), else
- * for what is typed next */
-static void cycle_font(void) {
-    u8 a = sty(sel_on ? atr_at(sel_lo()) : typing_attr), f = (u8)((a + 1) & A_FONT);   /* (NFONTS: 4) */
+/* font f (0xFF: the next, after the selection's first character's):
+ * over the selection, else for what is typed next */
+static void set_font(u8 f) {
+    u8 a = sty(sel_on ? atr_at(sel_lo()) : typing_attr);
+    if (f >= NFONTS) f = (u8)((a + 1) & A_FONT);   /* (NFONTS: 4) */
     if (sel_on) restyle((u8)~A_FONT, f);
     else typing_attr = sty_find((u8)((a & ~A_FONT) | f));
+}
+
+/* the effect pop-up's item n (CTRL+E): a font, then an effect */
+static const u8 fx_bits[6] = { A_BOLD, A_ITAL, A_UNDER, A_STRIKE, A_SUP, A_SUB };
+static void fx(u8 n) {
+    if (n < NFONTS) set_font(n);
+    else toggle(fx_bits[n - NFONTS]);
 }
 
 /* the alignment of the paragraph(s) at the cursor / selection: left,
@@ -125,7 +135,7 @@ static void style(u8 k) {
         if (!sel_on || (lo <= p && hi >= e)) {
             a = kind_attr[atr_at(e) & A_KIND];
             of = a & A_FONT;
-            keep = (u8)(~a & (A_BOLD | A_ITAL | A_UNDER));
+            keep = (u8)(~a & (A_BOLD | A_ITAL | A_UNDER | A_STRIKE | A_SCRIPT));
             for (i = p; i < e; i++) {
                 a = sty(atr_at(i));
                 f = a & A_FONT;
@@ -250,7 +260,8 @@ void edit_main(void) {
     case ED_NOTE: note(ed_a, ed_b); return;
     case ED_UNDO: r = undo_swap(); goto out;
     case ED_TOGGLE: toggle(a); return;
-    case ED_FONT: cycle_font(); return;
+    case ED_FONT: set_font(a); return;
+    case ED_FX: fx(a); return;
     case ED_ALIGN: cycle_align(); return;
     case ED_LEVEL: r = list_level(a); goto out;
     case ED_STYLE: style(a); return;

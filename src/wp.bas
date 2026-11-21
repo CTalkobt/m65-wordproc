@@ -8,7 +8,7 @@
 ' document, lays it out and draws the 640 x 400 screen; BASIC calls it with
 ' SYS {name}, a and reads results with RREG.
 '
-' Modules (.OVL files: MARKDOWN.OVL, RTF.OVL, HTML.OVL, HTMLIN.OVL, LIST.OVL, DEFAULT0.OVL) are loaded only when they
+' Modules (.OVL files: MARKDOWN.OVL, MDIN.OVL, RTF.OVL, HTML.OVL, HTMLIN.OVL, LIST.OVL, DEFAULT0.OVL) are loaded only when they
 ' are on the disk (below).
 '
 ' Build: make  (basic45 --link src/api.c ... src/wp.bas -o build/writer.prg)
@@ -34,6 +34,7 @@
 #define CMD_CLEAN 20
 #define CMD_LIST 21
 #define CMD_STYLE 32
+#define CMD_FX 40
 
 #define GET_DIRTY 0
 #define GET_PACK 2
@@ -56,7 +57,7 @@
 #define FIND_SETR 6
 
 ' LIST.OVL's place: mod_area + LIST_OFS (wp.h)
-#define LIST_OFS 4800
+#define LIST_OFS 4560
 
 ' the file image's place: bank 5, $0000 (SCRATCH_LIN in wp.h)
 #define IMG 0
@@ -106,9 +107,9 @@ waitkey:
   ' commands among it) and leaves the rest here (ka, ACT_... in api.c): F8 /
   ' HELP the help, F10 copy, CTRL+D the style drop-down, CTRL+L the screen
   ' drawn again, ESC the menu (or the selection's end), CTRL+F find, CTRL+H
-  ' replace, CTRL+W save
+  ' replace, CTRL+W save, CTRL+E the font and effect pop-up
   sys {wp_key}, asc(k$) : rreg ka
-  on ka gosub loadhelp, copysel, stylemenu, redraw, escape, dofind, doreplace, savedoc
+  on ka gosub loadhelp, copysel, stylemenu, redraw, escape, dofind, doreplace, savedoc, fxmenu
   goto mainloop
 
 proc copysel
@@ -144,16 +145,29 @@ endproc
 ' selection), N 1 2 3 Q C B # at once, ESC leaves it ----
 proc stylemenu
   sys {wp_get}, GET_KIND : rreg sv
+  dk = 0 : dn = 8 : call dropdown
+  if m = 13 then sys {wp_cmd}, CMD_STYLE + sv
+endproc
+
+' ---- the font and effect pop-up (CTRL+E), where the drop-down is: RETURN
+' sets the font or turns the effect lit on or off (the selection's, or for
+' typing) ----
+proc fxmenu
+  sv = 0 : dk = 64 : dn = 10 : call dropdown
+  if m = 13 then sys {wp_cmd}, CMD_FX + sv
+endproc
+
+' (wp_drop's list dk, dn items, sv lit; m: RETURN or ESC)
+proc dropdown
   do
-    sys {wp_drop}, sv
+    sys {wp_drop}, dk + sv
     getkey m$ : m = asc(m$)
     ' (a comparison is -1 when true)
-    sv = mod(sv - (m = 17) + (m = 145) + 8, 8)
+    sv = mod(sv - (m = 17) + (m = 145) + dn, dn)
     i = instr(p"n123qcb#", m$)
-    if i then sv = i - 1 : m = 13
+    if i and dk = 0 then sv = i - 1 : m = 13
   loop until m = 13 or m = 27
   sys {wp_drop}, 255
-  if m = 13 then sys {wp_cmd}, CMD_STYLE + sv
 endproc
 
 ' s$ (PETSCII, at most 78 characters) poked at sa in bank 0, then a 0
@@ -293,7 +307,8 @@ proc importtext
   if yes then
     a$ = ""
     call ask(MSG_IMPORT)
-    if ok and a$ <> "" then call ftype : if fk = 3 then mf$ = "htmlin.ovl"
+    if ok and a$ <> "" then call ftype : if fk = 1 then mf$ = "mdin.ovl"
+    if fk = 3 then mf$ = "htmlin.ovl"
     if ok and a$ <> "" then dopen#2, (a$) : e$ = ds$ : dclose#2 : if val(e$) then call sp(MSG_NOTIMP, e$) : ok = 0
     if ok and a$ <> "" then
       call sp(MSG_IMPORTING, a$)

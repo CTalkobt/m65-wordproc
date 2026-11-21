@@ -26,10 +26,10 @@ void atr_put(u16 i, u8 a) { ATR[gmap(i)] = a; }
 #endif
 
 /* ==== the style table (issue #5): a character's attribute byte is an
- * index into it; an entry is the style (now A_FONT | A_BOLD | A_ITAL |
- * A_UNDER: ST_SIZE bytes). Entries 0-31 are those 32 styles, each at its
- * own bits (so a document of before the table, or a style built from the
- * bits, is the same index); others are added as styles are used (sty_find)
+ * index into it; an entry is the style (A_FONT, A_BOLD, A_ITAL, A_UNDER,
+ * A_STRIKE, A_SCRIPT: ST_SIZE bytes). Entries 0-31 are the first 32 styles,
+ * each at its own bits (so a document of before the table, or a style
+ * built from those bits, is the same index); others are added as styles are used (sty_find)
  * and kept for the session: the clipboard, undo and each document loaded
  * use the same table (doc_unpack: a file's entries merged into it). The
  * host's tests with STY_SCRAMBLE put 0-31 in another order (index 0 still

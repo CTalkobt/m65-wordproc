@@ -55,6 +55,8 @@ static char msg_parm[81];
 #define CMD_LIST 21
 #define CMD_UNDO 22
 #define CMD_STYLE 32             /* + a kind (K_...): doc_style */
+#define CMD_FX 40                /* + the effect pop-up's item (CTRL+E): ED_FX */
+#define NFX 10
 
 #define GET_DIRTY 0
 #define GET_LEN 1
@@ -85,6 +87,7 @@ static char msg_parm[81];
 #define ACT_FIND 6                 /* CTRL+F */
 #define ACT_REPLACE 7              /* CTRL+H */
 #define ACT_SAVE 8                 /* CTRL+W: save, asking only for a new name */
+#define ACT_FX 9                   /* CTRL+E: the font and effect pop-up */
 
 static u8 started;
 u8 mod_cmd;
@@ -213,13 +216,15 @@ u16 wp_find(u8 op);
  * underline, undo; CTRL+F / H / W find, replace, save; F1 view, F3 / F5 /
  * F7 bold / italic / underline, F2 font, F4 align, F6 page break, F9 mark,
  * F11 cut, F12 paste, F13 / F14 page up / down; F8, HELP the help, F10
- * copy, CTRL+D the style drop-down, CTRL+L redraw, ESC the menu.
+ * copy, CTRL+D the style drop-down, CTRL+E the font and effect pop-up,
+ * CTRL+L redraw, ESC the menu.
  * (SHIFT+CTRL+F / B: the next match, the one before.) */
 #define K_CTRL 0x40
 #define K_BAS 0x80
 static const u8 keys[] = {
     2, K_CTRL | CMD_BOLD, 9, K_CTRL | CMD_ITALIC, 0x15, K_CTRL | CMD_UNDER, 0x1A, K_CTRL | CMD_UNDO,
     6, K_CTRL | K_BAS | ACT_FIND, 8, K_CTRL | K_BAS | ACT_REPLACE, 0x17, K_CTRL | K_BAS | ACT_SAVE,
+    5, K_CTRL | K_BAS | ACT_FX,
     0x85, CMD_VIEW, 0x86, CMD_BOLD, 0x87, CMD_ITALIC, 0x88, CMD_UNDER, 0x89, CMD_FONT, 0x8A, CMD_ALIGN,
     0x8B, CMD_PAGEBREAK, 0x10, CMD_MARK, 0x16, CMD_CUT, 0x17, CMD_PASTE, 0x19, CMD_PGUP, 0x1A, CMD_PGDN,
     0x8C, K_BAS | ACT_HELP, 0x84, K_BAS | ACT_HELP, 0x15, K_BAS | ACT_COPY, 0x04, K_BAS | ACT_STYLE,
@@ -403,8 +408,9 @@ void wp_cmd(u8 c) {
         relayout = 0;
         break;
     default:
-        if ((u8)(c - CMD_STYLE) >= NKINDS) return;
-        doc_style((u8)(c - CMD_STYLE));
+        if ((u8)(c - CMD_FX) < NFX) ed(ED_FX, (u8)(c - CMD_FX));
+        else if ((u8)(c - CMD_STYLE) < NKINDS) doc_style((u8)(c - CMD_STYLE));
+        else return;
         break;
     }
     refresh(relayout);

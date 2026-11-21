@@ -119,7 +119,8 @@ u16 mod_run(u8 cmd) {
     list_ok = 0;                /* (LIST.OVL overwritten: loaded again by BASIC) */
 #else
     mod_cmd = cmd;
-    if (cmd <= MOD_MD_IMPORT) md_main();
+    if (cmd == MOD_MD_EXPORT) md_main();
+    else if (cmd == MOD_MD_IMPORT) mdin_main();
     else if (cmd == MOD_HTML_EXPORT) html_main();
     else if ((cmd & ~MOD_MORE) > MOD_HTML_EXPORT) htmlin_main();
     else rtf_main();
@@ -255,8 +256,19 @@ static void band_hline(u16 x0, u16 x1, u8 r) {
     for (x = x0; x < x1; x++) d[x >> 3] |= (u8)(0x80 >> (x & 7));
 }
 
+static void draw_glyph(const struct font *f, u8 c, u16 x, u8 top, u8 style);
 
-/* glyph c of font f, its cell's top at band row top, at pixel x */
+/* character c in style a at x (its advance w), the line's baseline at row
+ * base: its glyph (raised or lowered: superscript, subscript), underline,
+ * strikethrough (a third of the ascent up: mid x-height) */
+static void draw_char(u8 c, u16 x, u8 w, u8 base, u8 a) {
+    const struct font *f = fonts[a & A_FONT];
+    base = (u8)(base + script_dy(a));
+    if (c != ' ') draw_glyph(f, c, x, (u8)(base - f->ascent), a);
+    if (a & A_UNDER) band_hline(x, x + w, (u8)(base + 2));
+    if (a & A_STRIKE) band_hline(x, x + w, (u8)(base - fx_third[a & A_FONT]));
+}
+
 static void draw_glyph(const struct font *f, u8 c, u16 x, u8 top, u8 style) {
     const u8 *g = gbuf;
     u8 r, w, two, h = f->height, asc = f->ascent, e[3];
@@ -310,6 +322,25 @@ static void raw_cell(u8 col, u8 c, u8 inv) {
         d += COLS;
     }
 }
+
+/* a tag's cell (d: its top row in the band) drawn with its effect
+ * (raw_tag's tag_fx): bold, slanted, underlined, struck through, raised,
+ * lowered (on the MEGA65 style.s45's, in assembly: a third of the size) */
+#ifndef __cc45__
+void raw_fx(u8 *d, u8 fx) {
+    u8 r, b, g[RAW_H];
+    u8 sh = fx & A_SUP ? 3 : fx & A_SUB ? (u8)-3 : 0;
+    for (r = 0; r < RAW_H; r++) g[r] = d[r * COLS];
+    for (r = 0; r < RAW_H; r++) {
+        b = (u8)(r + sh) < RAW_H ? g[(u8)(r + sh)] : 0;
+        if (fx & A_BOLD) b |= (u8)(b >> 1);
+        if ((fx & A_ITAL) && r < 7) b >>= 1;
+        if ((fx & A_UNDER) && r == 14) b = 0xFF;
+        if ((fx & A_STRIKE) && r == 8) b = 0xFF;
+        d[r * COLS] = b;
+    }
+}
+#endif
 
 static void raw_invert_cell(u8 col) {
     u8 r, *d = band + col;
@@ -503,15 +534,13 @@ static void draw_line(u16 l, const struct line *L) {
     x = (u16)(TEXT_X + L->x);
     for (; i < e; i++) {
         u8 c = txt_at(i), a = sty(atr_at(i)), w;
-        const struct font *f = fonts[a & A_FONT];
         if (i == cur) cx = x;
         if (c == CH_CR || c == CH_FF) {
             if (sel_on && i >= lo && i < hi) band_xor(x, x + 4, 0, h);
             continue;
         }
         w = just_w(c, a, &j);
-        if (c != ' ') draw_glyph(f, c, x, (u8)(asc - f->ascent), a);
-        if (a & A_UNDER) band_hline(x, x + w, (u8)(asc + 2));
+        draw_char(c, x, w, asc, a);
         if (sel_on && i >= lo && i < hi) band_xor(x, x + w, 0, h);
         x += w;
     }
@@ -603,29 +632,40 @@ static void render_page(void) {
 /* ---- the style drop-down (BASIC's CTRL+D: wp_drop with the one lit,
  * as the cursor keys move it; then 0xFF, and the screen drawn again) ----
  * Each kind's name in its own font and style, in a box at the screen's
- * left under the top bar's style field. */
+ * left under the top bar's style field. With 64 added: the font and
+ * effect pop-up (CTRL+E), each item drawn so. */
 #define DROP_W 20               /* cells */
 #define DROP_H 24               /* rows an item */
 #define DROP_ASC 18             /* its baseline */
+static const u8 fx_attr[10] = { F_SANS, F_SERIF, F_MONO, F_HEAD, A_BOLD, A_ITAL, A_UNDER, A_STRIKE, A_SUP, A_SUB };
+
 void wp_drop(u8 k) {
-    u8 n, r, a, *d;
+    u8 n, r, a, w, cnt = NKINDS, cs = 0, fxm = k & 0x40, *d;
     u16 x, sy = BAR_H;
     const char *s;
-    const struct font *f;
     if (k == 0xFF) {
         render_invalidate();
         render();
         return;
     }
-    for (n = 0; n < NKINDS; n++) {
-        a = kind_attr[n];
-        f = fonts[a & A_FONT];
+    if (fxm) {
+        /* (CTRL+E: the fonts and effects, those of the typing style or the
+         * selection's start marked) */
+        cnt = 10;
+        k &= 0x3F;
+        cs = sty(sel_on ? atr_at(sel_lo()) : typing_attr);
+    }
+    for (n = 0; n < cnt; n++) {
+        a = fxm ? fx_attr[n] : kind_attr[n];
+        s = fxm ? msg_get((u8)(MSG_SANS + n)) : kind_names[n];
         band_fill(DROP_H, row_blank);
-        x = 12;
-        for (s = kind_names[n]; *s; s++) {
-            draw_glyph(f, (u8)*s, x, (u8)(DROP_ASC - f->ascent), a);
-            x += char_w((u8)*s, a);
+        for (x = 12; *s; s++) {
+            w = char_w((u8)*s, a);
+            draw_char((u8)*s, x, w, DROP_ASC, a);
+            x += w;
         }
+        if (fxm && (n < NFONTS ? (cs & A_FONT) == n : (cs & a)))
+            band_xor(3, 8, DROP_ASC - 8, DROP_ASC - 3);
         if (n == k) band_xor(0, DROP_W * 8, 0, DROP_H);
         for (r = 0, d = band; r < DROP_H; r++, d += COLS) {
             d[0] |= 0x80;
@@ -641,10 +681,9 @@ void wp_drop(u8 k) {
 }
 
 /* ---- raw view ---- */
-static u8 tag_colour(const char *t) {
-    /* t: the tag's text after '[' */
-    if (*t == '/') t++;
-    if ((t[0] == 'B' || t[0] == 'I' || t[0] == 'U') && t[1] == ']') return C_BLUE;
+static u8 tag_colour(const char *t, u8 fx) {
+    /* t: the tag's text after '['; fx: its effect (raw_tag's tag_fx) */
+    if (*t == '/' || fx) return C_BLUE;         /* an effect (only effects are ended) */
     if (t[0] == 'Q' || t[0] == 'L' || t[0] == 'N' || (t[0] == 'H' && t[1] < 'A') || (t[0] == 'C' && t[1] == 'o'))
         return C_GREEN;                 /* a kind */
     if (t[0] == 'C' || t[0] == 'R' || t[0] == 'J' || t[0] == 'P') return C_RED;
@@ -654,7 +693,7 @@ static u8 tag_colour(const char *t) {
 static void render_raw(void) {
     u8 vr, col, r;
     u16 l = view_y / RAW_H, lo = 0, hi = 0;
-    char tags[48];
+    char tags[TAG_MAX];
     struct line L;
     new_frame();
     if (sel_on) {
@@ -674,8 +713,9 @@ static void render_raw(void) {
             for (; i < e && col < COLS; i++) {
                 u8 c = txt_at(i), n = raw_tag(i, tags), k, tc = C_BLUE;
                 for (k = 0; k < n && col < COLS; k++) {
-                    if (tags[k] == '[') tc = tag_colour(tags + k + 1);
+                    if (tags[k] == '[') tc = tag_colour(tags + k + 1, mod_area.r.tag_fx[k]);
                     raw_cell(col, (u8)tags[k], 0);
+                    if (mod_area.r.tag_fx[k]) raw_fx(band + col, mod_area.r.tag_fx[k]);
                     cellcol[col] = tc;
                     if (c == CH_FF && i == cur && k == n - 1) raw_invert_cell(col);
                     col++;

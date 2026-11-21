@@ -12,7 +12,8 @@
  *                           a line a paragraph; list items: <li> in <ul> or
  *                           <ol> (start="N" when it starts past 1), nested
  *                           by their level inside the item before
- *   bold, italic, underline <b>, <i>, <u> (where they add to the paragraph
+ *   bold, italic, underline <b>, <i>, <u>, strikethrough <s>, superscript
+ *   and subscript           <sup>, <sub> (where they add to the paragraph
  *                           kind's own style: a heading's bold is not
  *                           written)
  *   another font in part    Mono <code>, Serif, Sans and Head a <span> (the
@@ -52,37 +53,40 @@ static void out_num(u16 v) {
 }
 
 /* ---- the inline markup: a character's style as markers open, outermost
- * first: its font (H_FONT and the font in bits 5-6, when it is not the
- * paragraph kind's own), underline, bold, italic ---- */
-#define H_FONT 0x80
-#define H_FMASK 0xE0
-static const u8 mark_mask[4] = { H_FMASK, A_UNDER, A_BOLD, A_ITAL };
-static const char *const mark_open[4] = { 0, "<u>", "<b>", "<i>" };
-static const char *const mark_close[4] = { 0, "</u>", "</b>", "</i>" };
+ * first: its font (H_FONT and the font in bits 9-10, when it is not the
+ * paragraph kind's own), underline, superscript, subscript, strikethrough,
+ * bold, italic ---- */
+#define NM 7
+#define H_FONT 0x100
+#define H_FMASK 0x700
+static const u16 mark_mask[NM] = { H_FMASK, A_UNDER, A_SUP, A_SUB, A_STRIKE, A_BOLD, A_ITAL };
+static const char *const mark_open[NM] = { 0, "<u>", "<sup>", "<sub>", "<s>", "<b>", "<i>" };
+static const char *const mark_close[NM] = { 0, "</u>", "</sup>", "</sub>", "</s>", "</b>", "</i>" };
 static const char *const font_open[4] = { "<span class=\"s\">", "<span class=\"r\">", "<code>", "<span class=\"h\">" };
 static u8 base;                 /* the paragraph kind's own style (kind_attr) */
-static u8 open_st;
+static u16 open_st;
 
-static u8 h_style(u16 i) {
-    u8 a = sty(atr_at(i)), s = a & (A_UNDER | A_BOLD | A_ITAL) & ~base, f = a & A_FONT;
-    if (f != (base & A_FONT)) s |= (u8)(H_FONT | (f << 5));
+static u16 h_style(u16 i) {
+    u8 a = sty(atr_at(i)), f = a & A_FONT;
+    u16 s = a & (A_UNDER | A_BOLD | A_ITAL | A_STRIKE | A_SCRIPT) & ~base;
+    if (f != (base & A_FONT)) s |= (u16)(H_FONT | (f << 9));
     return s;
 }
 
 /* from the markers open to style t: the inner ones closed back to the
  * first that changes, then t's opened from there */
-static void restyle_to(u8 t) {
+static void restyle_to(u16 t) {
     u8 k = 0, m;
-    while (k < 4 && ((open_st ^ t) & mark_mask[k]) == 0) k++;
-    if (k == 4) return;
-    for (m = 4; m-- > k;) {
+    while (k < NM && ((open_st ^ t) & mark_mask[k]) == 0) k++;
+    if (k == NM) return;
+    for (m = NM; m-- > k;) {
         if (!(open_st & mark_mask[m])) continue;
         if (m) outs(mark_close[m]);
-        else outs(((open_st >> 5) & A_FONT) == F_MONO ? "</code>" : "</span>");
+        else outs(((open_st >> 9) & A_FONT) == F_MONO ? "</code>" : "</span>");
     }
-    for (m = k; m < 4; m++) {
+    for (m = k; m < NM; m++) {
         if (!(t & mark_mask[m])) continue;
-        outs(m ? mark_open[m] : font_open[(t >> 5) & A_FONT]);
+        outs(m ? mark_open[m] : font_open[(t >> 9) & A_FONT]);
     }
     open_st = t;
 }

@@ -152,6 +152,8 @@ u16 ed_a, ed_b;
  * table's 1 KB before colour RAM's end) */
 typedef char edit_fits[EDIT_LIN + EDIT_SIZE <= ST_LIN && ST_LIN + 1024 <= HI_LIN + 0x5000 ? 1 : -1];
 #ifdef __cc45__
+/* (the drawing's buffers below LIST.OVL) */
+typedef char draw_fits[sizeof mod_area.r <= LIST_OFS ? 1 : -1];
 typedef char cache_fits[CACHE_SIZE <= EDIT_LIN - CACHE_LIN ? 1 : -1];
 #endif
 

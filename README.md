@@ -2,7 +2,8 @@
 
 A graphical word processor for the MEGA65, written in **BASIC 65 and C**.
 Text is shown on a 640 × 400 bitmap in proportional fonts, so fonts, **bold**,
-*italic* and underline appear as they will print. Two views:
+*italic*, underline, ~~strikethrough~~, superscript and subscript appear as
+they will print. Two views:
 
 - **Page layout** — WYSIWYG: each character in its font and style, words
   wrapped, paragraphs aligned (left, centre, right, justified), pages of
@@ -10,7 +11,9 @@ Text is shown on a 640 × 400 bitmap in proportional fonts, so fonts, **bold**,
   numbers, on a grey desk.
 - **Raw** — the text in one plain 8 × 13 font, 80 columns, with the
   formatting codes revealed as coloured tags (`[B]` … `[/B]`, `[Serif]`,
-  `[Center]`, `[Page]`) and paragraph marks (¶). You can edit in either view.
+  `[Center]`, `[Page]`; an effect's opening tag drawn with it: `[S]` struck
+  through, `[A]` underlined, raised or lowered) and paragraph marks (¶). You
+  can edit in either view.
 
 It needs a MEGA65 with attic RAM (the 8 MB HyperRAM at `$8000000`), where
 the document is kept; without it, it stops at the start with "No attic
@@ -37,9 +40,10 @@ On a MEGA65: copy `build/writer.d81` to the SD card, mount it, then
 messages, menu and prompts, from `src/messages.txt`: loaded by the program
 at each start to `$1800`), `WRITER.HELP` (the
 help: a Writer document shown when the program starts and again with F8 / HELP;
-without it the program starts with an empty document), `MARKDOWN.OVL`
-(Markdown import and export, a module: without it the rest works, and a
-`.md` name gets "Markdown needs MARKDOWN.OVL on the disk"),
+without it the program starts with an empty document), `MARKDOWN.OVL` and
+`MDIN.OVL` (Markdown export and import, modules: without them the rest
+works, and a `.md` name gets "Markdown needs MARKDOWN.OVL and MDIN.OVL on
+the disk"),
 `RTF.OVL` (RTF import and export, the same for `.rtf`), `HTML.OVL` and
 `HTMLIN.OVL` (HTML export and import, the same for `.htm` and `.html`), `LIST.OVL`
 (list mode, a module: without it the menu does not offer it) and
@@ -76,6 +80,7 @@ keyboard buffer and saves a screenshot, e.g.
 | F8 or HELP | the help (`WRITER.HELP`) as the document (after asking about unsaved changes) |
 | ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text; Markdown for a name ending in `.md`, RTF for `.rtf`, HTML for `.htm` or `.html`), Directory; Redraw, List on / off (with `LIST.OVL`), Help, Quit (ESC also ends a selection) |
 | CTRL+D | the style drop-down (below) |
+| CTRL+E | the font and effect pop-up: Sans, Serif, Mono, Head, Bold, Italic, Underline, Strikethrough, Superscript, Subscript, each drawn so and those on marked; the cursor keys move it, RETURN sets the font or turns the effect on or off (the selection's, or for what is typed next; superscript and subscript are one or neither), ESC leaves it |
 | CTRL+L | redraw the whole screen |
 | CTRL+A | Compose: the next two characters make an accented one (below) |
 
@@ -166,7 +171,7 @@ letter with its accent), in `WRITER.FNT`.
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
 | `src/m65.c` | C | the VIC-IV screen mode, DMA and colour RAM |
 | `src/conv.c` | C | what the converters share (below): output to the scratch area, a walk over the document for export, a builder for import, Unicode as the document's characters |
-| `src/md.c` | C | Markdown export and import (below): the module `MARKDOWN.OVL` |
+| `src/md.c`, `src/mdin.c` | C | Markdown export and import (below): the modules `MARKDOWN.OVL` and `MDIN.OVL` |
 | `src/rtf.c` | C | RTF export and (streamed) import: the module `RTF.OVL` |
 | `src/html.c` | C | HTML export (below): the module `HTML.OVL` |
 | `src/htmlin.c` | C | HTML (streamed) import: the module `HTMLIN.OVL` |
@@ -191,9 +196,8 @@ has no use for one leaves it off the disk and the program does not need
 the room for it. Two kinds:
 
 - **Run once** (as one job over the document), loaded just before it runs:
-  Markdown (`MARKDOWN.OVL`, from `src/md.c`: the largest module, 6710
-  bytes, so it sets `MOD_SIZE`), RTF (`RTF.OVL`, from
-  `src/rtf.c`), HTML (`HTML.OVL`, from `src/html.c`, and `HTMLIN.OVL`, from
+  Markdown (`MARKDOWN.OVL` and `MDIN.OVL`, from `src/md.c` and
+  `src/mdin.c`), RTF (`RTF.OVL`, from `src/rtf.c`: the largest, 5.7 KB), HTML (`HTML.OVL`, from `src/html.c`, and `HTMLIN.OVL`, from
   `src/htmlin.c`: together more than `MOD_SIZE`); PETSCII graphics, PDF export, find and replace or a word
   count would fit the same way. One can also be called several times in a
   row (a command with `MOD_MORE`: `mod_run` then leaves it and the drawing's
@@ -356,10 +360,10 @@ A document (`S`ave / `L`oad) is a PRG file: `"WP"`, version 3, the length
 characters; CR ends a paragraph, FF a page), the attributes, then the
 style table: its entry size (1), its count (2 bytes), its entries. A
 character's attribute byte is an index into the style table (issue #5),
-whose entry is its style: bits 0-1 font, 2 bold, 3 italic, 4 underline.
-Entries 0-31 are those 32 styles at their own bits; others are added as
-styles are used (none yet: room for strikethrough, superscript and
-subscript, more fonts, named styles). The table belongs to the session,
+whose entry is its style: bits 0-1 font, 2 bold, 3 italic, 4 underline,
+5 strikethrough, 6-7 superscript (1) or subscript (2). Entries 0-31 are
+the first 32 styles at their own bits; others are added as styles are
+used. The table belongs to the session,
 so the clipboard and undo keep their meaning across documents: a file's
 entries are merged into it when it loads, and its characters' indexes
 changed where they differ. Version 2 files (before the table: a
@@ -385,6 +389,7 @@ from elsewhere.
 | Code | a fenced code block, a line a paragraph (empty ones too) |
 | list items | `- ` or `N. ` (its number), four spaces before it a level; items one after another are one list (import: `-`, `*`, `+`, `N.` or `N)`; an item deeper than the one before is a level in, else at the level whose indent it has; a blank line between items keeps the list going, as a loose list; the marker is not kept as text) |
 | bold, italic, underline | `**…**`, `*…*`, `<u>…</u>`, where they differ from the paragraph style's own (a heading's bold is not written) |
+| strikethrough, superscript, subscript | `~~…~~`, `<sup>…</sup>`, `<sub>…</sub>` (import: also `<s>`, `<del>`, `<strike>`) |
 | Mono inside a paragraph | `` `…` `` |
 | centre, right, justify | `<div align="center">` … `</div>` around the block |
 | page break | `<div style="page-break-after: always"></div>` |
@@ -417,8 +422,8 @@ export groups them: `<p>` (paragraphs with no empty one between them, of
 the same alignment: one, with `<br>`), `<h1>`-`<h3>`, `<blockquote>`,
 `<pre><code>` (a line a paragraph), and list items as `<li>` in `<ul>` /
 `<ol>` (`start="N"` past 1), each level's list inside the item before it.
-Bold, italic and underline (where the kind's own style lacks them) are
-`<b>` `<i>` `<u>`; another font in part is `<code>` (Mono) or a `<span>`
+Bold, italic, underline, strikethrough, superscript and subscript (where
+the kind's own style lacks them) are `<b>` `<i>` `<u>` `<s>` `<sup>` `<sub>`; another font in part is `<code>` (Mono) or a `<span>`
 (Serif, Sans, Head); alignment is `text-align`, a page break a `<div>`
 with `page-break-after: always`.
 
@@ -434,6 +439,7 @@ elsewhere:
 | `<h1>`-`<h3>` (`<h4>`-`<h6>`: Heading 3), `<blockquote>`, `<pre>` | the kinds; each line of a `<pre>` a Code paragraph |
 | `<ul>`, `<ol>`, `<li>` | Bullet, Numbered, nested: the level (up to 4) |
 | `<b>` `<strong>`, `<i>` `<em>` `<cite>`, `<u>` `<ins>`, `<code>` `<tt>` `<kbd>` `<samp>` | bold, italic, underline, Mono |
+| `<s>` `<strike>` `<del>`, `<sup>`, `<sub>` | strikethrough, superscript, subscript (nested: the innermost script) |
 | `<span class="s">` / `"r"` / `"h"` (the export's) | Sans, Serif, Head |
 | `style="text-align: ..."`, `align="..."`, `<center>` | alignment |
 | `style="page-break-after: always"` (or `break-before` / `break-after`) | a page break |
@@ -457,7 +463,7 @@ again on the MEGA65, are byte for byte what the host makes.
 Export (`src/rtf.c`, in the module `RTF.OVL`) is lossless for Writer's
 documents: a font table (`\f0` Sans `\fswiss`, `\f1` Serif `\froman`,
 `\f2` Mono `\fmodern`, `\f3` Head `\fswiss` at `\fs36`), `\b` `\i` `\ul`
-where they change, a stylesheet (`\s0` Normal, `\s1`-`\s3` heading 1-3
+`\strike` and `\super` / `\sub` / `\nosupersub` where they change, a stylesheet (`\s0` Normal, `\s1`-`\s3` heading 1-3
 with `\outlinelevel`, `\s4` Quote and `\s5` Code with an indent, `\li`,
 `\s6` List Bullet and `\s7` List Number), each paragraph as `\pard`, its
 style with those properties (readers take them from the paragraph; a list
@@ -471,7 +477,8 @@ Import reads the file 1 KB at a time (BASIC streams it to the module, so
 it may be larger than the scratch area): control words, control symbols,
 groups (which keep the character formatting) and text. Fonts map by their
 family in `\fonttbl` (`\froman` Serif, `\fmodern` Mono, others Sans), a
-size of 14 pt or more is Head; `\b`, `\i`, the underlines, `\plain`,
+size of 14 pt or more is Head; `\b`, `\i`, the underlines, `\strike`
+(`\striked`), `\super`, `\sub`, `\nosupersub`, `\plain`,
 `\pard`, alignment; a paragraph's kind from `\outlinelevelN` (heading N+1,
 from 3 on heading 3) or from its `\sN`, by the style's name in the
 `\stylesheet` ("heading N" as its level, "Title" Heading 1, a name with
@@ -621,7 +628,16 @@ can be.
   the C data ends at `$BCA9`, 854 bytes free. `LIST_OFS` went from 4288
   to 4800, so `DEFAULT0.OVL` has 4800 bytes (it used 4270) and `LIST.OVL`
   1984 (it uses 1667), at no cost in bank 0; the style table moved up to
-  `$FF87C00`, past `DEFAULT0.OVL`'s copy in colour RAM. (The BASIC program's
+  `$FF87C00`, past `DEFAULT0.OVL`'s copy in colour RAM. Strikethrough,
+  superscript and subscript (#5's step 2: their drawing, the raw view's
+  tags drawn with their effect, the CTRL+E pop-up) cost 815 bytes of bank
+  0: 693 of C (the raw view's cell effect in assembly, `raw_fx`: 155
+  bytes, in C 305; the pop-up's names in `WRITER.MSG`) and 122 of BASIC.
+  To make room, Markdown became two modules again, `MARKDOWN.OVL` (export,
+  1.9 KB) and `MDIN.OVL` (import, 5.3 KB), so the largest run-once module
+  is now `RTF.OVL` (5.7 KB); `LIST_OFS` went to 4560 (`DEFAULT0.OVL` uses
+  4387) and `MOD_SIZE` from 6784 to 6280 (`LIST_OFS` and `LIST.OVL`'s 1720):
+  the C data ends at `$BDE0`, 543 bytes free. (The BASIC program's
   two `poke`s of `$D1` / `$F7` are written in decimal: `--minify` turns
   `poke $d1` into a variable,
   [M65Compiler #603](https://github.com/CTalkobt/M65Compiler/issues/603).)

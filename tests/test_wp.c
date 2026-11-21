@@ -89,6 +89,14 @@ static void sput(u16 i, u8 a) {
     atr_put(i, c == CH_CR || c == CH_FF ? a : sty_find(a));
 }
 
+/* a random style: font, bold, italic, underline; strikethrough, a script
+ * now and then */
+static u8 rnd_style(void) {
+    u8 a = (u8)(rand() % 32), k = (u8)(rand() % 6);
+    if (rand() % 4 == 0) a |= A_STRIKE;
+    return (u8)(a | (k == 0 ? A_SUP : k == 1 ? A_SUB : 0));
+}
+
 static void type(const char *s) {
     /* as GET gives them: lower case letters $41-$5A, capitals $C1-$DA */
     for (; *s; s++) {
@@ -825,6 +833,86 @@ int main(void) {
         CHECK(n == 11);         /* (the final CR not counted) */
     }
 
+    /* ---- strikethrough, superscript, subscript (#5): the pop-up's
+     * commands (CMD_FX + its item: fonts 0-3, bold, italic, underline,
+     * strike, superscript, subscript), raw view, layout, the converters ---- */
+    {
+        static char m[4000], h2[4000];
+        u16 k;
+        wp_cmd(13);
+        type("a");
+        wp_cmd(40 + 7);
+        type("b");
+        wp_cmd(40 + 7);
+        wp_cmd(40 + 8);
+        type("c");
+        wp_cmd(40 + 9);                 /* (subscript: superscript off) */
+        type("d");
+        wp_cmd(40 + 9);
+        wp_cmd(40 + 2);                 /* (Mono) */
+        type("e");
+        CHECK(sa(0) == 0 && sa(1) == A_STRIKE && sa(2) == A_SUP && sa(3) == A_SUB && sa(4) == F_MONO);
+        CHECK(raw_tag(1, buf) == 3 && !memcmp(buf, "[S]", 3) && mod_area.r.tag_fx[0] == A_STRIKE &&
+              mod_area.r.tag_fx[2] == A_STRIKE);
+        CHECK(raw_tag(2, buf) == 7 && !memcmp(buf, "[/S][A]", 7) && mod_area.r.tag_fx[3] == 0 &&
+              mod_area.r.tag_fx[4] == A_SUP);
+        CHECK(raw_tag(3, buf) == 9 && !memcmp(buf, "[/Sup][A]", 9) && mod_area.r.tag_fx[8] == A_SUB);
+        CHECK(raw_tag(4, buf) == 12 && !memcmp(buf, "[/Sub][Mono]", 12) && mod_area.r.tag_fx[7] == 0);
+        /* the line: room above for the superscript (12 + 4), below for the
+         * subscript (3 + 3) */
+        layout_all();
+        CHECK(LINES[0].asc == 16 && LINES[0].h == 22);
+        /* the converters */
+        n = md_out(m);
+        CHECK(strncmp(m, "a~~b~~<sup>c</sup><sub>d</sub>`e`\n", 34) == 0);
+        md_fixed_point(m, h2, "effects");
+        CHECK(sa(1) == A_STRIKE && sa(2) == A_SUP && sa(3) == A_SUB);
+        md_in("x ~~gone~~ ~~ y <s>s</s><del>d</del> E=mc<sup>2</sup> H<sub>2</sub>O\n");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "x gone ~~ y sd E=mc2 H2O\r") == 0 && sa(2) == A_STRIKE && sa(5) == A_STRIKE &&
+              sa(6) == 0 && sa(12) == A_STRIKE && sa(13) == A_STRIKE && sa(19) == A_SUP && sa(22) == A_SUB &&
+              sa(23) == 0);
+        type("");
+        wp_cmd(13);
+        type("a");
+        wp_cmd(40 + 7);
+        type("b");
+        wp_cmd(40 + 7);
+        wp_cmd(40 + 8);
+        type("c");
+        wp_cmd(40 + 9);
+        type("d");
+        n = mod_run(MOD_HTML_EXPORT);
+        memcpy(m, MEM + SCRATCH_LIN, n);
+        m[n] = 0;
+        CHECK(strstr(m, "<p>a<s>b</s><sup>c</sup><sub>d</sub></p>") != NULL);
+        html_in(m);
+        CHECK(sa(1) == A_STRIKE && sa(2) == A_SUP && sa(3) == A_SUB);
+        html_in("<p><strike>a</strike>b<sup>c<sub>d</sub></sup></p>");
+        CHECK(sa(0) == A_STRIKE && sa(1) == 0 && sa(2) == A_SUP && sa(3) == A_SUB);
+        n = rtf_out(m);
+        CHECK(strstr(m, "\\strike") && strstr(m, "\\super") && strstr(m, "\\sub") && strstr(m, "\\nosupersub"));
+        rtf_round("effects");
+        rtf_in("{\\rtf1\\ansi a{\\strike b}\\striked1 c\\striked0 d\\super e\\sub f\\nosupersub g\\par}");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "abcdefg\r") == 0 && sa(0) == 0 && sa(1) == A_STRIKE && sa(2) == A_STRIKE && sa(3) == 0 &&
+              sa(4) == A_SUP && sa(5) == A_SUB && sa(6) == 0);
+        /* a selection: superscript, then subscript (superscript off),
+         * then subscript again (off) */
+        wp_cmd(18);
+        wp_cmd(40 + 8);
+        for (k = 0, n = 1; k < 7; k++) n &= (sa(k) & A_SCRIPT) == A_SUP;
+        CHECK(n);
+        wp_cmd(40 + 9);
+        for (k = 0, n = 1; k < 7; k++) n &= (sa(k) & A_SCRIPT) == A_SUB;
+        CHECK(n);
+        wp_cmd(40 + 9);
+        for (k = 0, n = 1; k < 7; k++) n &= (sa(k) & A_SCRIPT) == 0;
+        CHECK(n && sa(1) == A_STRIKE);
+        wp_cmd(9);
+        gap_close();
+    }
+
     /* ---- HTML (HTML.OVL): the help (build/help.html, for a look) ---- */
     {
         static char h[40000];
@@ -1006,7 +1094,7 @@ int main(void) {
             doc_len = 0;
             for (q = 0; q < nw; q++) {
                 const char *t = w[rand() % 24];
-                u8 a = (u8)(rand() % 4 == 0 ? rand() % 32 : 0), r = (u8)(rand() % 14);
+                u8 a = (u8)(rand() % 4 == 0 ? rnd_style() : 0), r = (u8)(rand() % 14);
                 for (; *t; t++) {
                     txt_put(doc_len, (u8)*t);
                     sput(doc_len++, a);
@@ -1040,7 +1128,7 @@ int main(void) {
         wp_cmd(13);
         for (k = 0; k < 40; k++) {
             txt_put(k, (u8)("a{b}c\\d e  f\rg\f\fh  \ri j\rk\r"[k % 20]));
-            sput(k, (u8)(txt_at(k) == CH_CR || txt_at(k) == CH_FF ? (k % 4) << A_ALIGN_SHIFT : k % 32));
+            sput(k, (u8)(txt_at(k) == CH_CR || txt_at(k) == CH_FF ? (k % 4) << A_ALIGN_SHIFT : k % 32 | (k % 3) << 6));
         }
         txt_put(40, CH_CR);
         atr_put(40, 0);
@@ -1054,7 +1142,7 @@ int main(void) {
                 int r2 = rand() % 40;
                 txt_put(k, (u8)(r2 == 0 ? CH_CR : r2 == 1 ? CH_FF : r2 < 8 ? ' ' : r2 < 12 ? 0xA0 + rand() % 96 : 32 + rand() % 95));
                 sput(k, (u8)(txt_at(k) == CH_CR || txt_at(k) == CH_FF ? (rand() % 4) << A_ALIGN_SHIFT
-                                                                 : rand() % 3 ? sa(k ? k - 1 : 0) & A_STYLE : rand() % 32));
+                                                                 : rand() % 3 ? sa(k ? k - 1 : 0) & A_STYLE : rnd_style()));
             }
             txt_put(len, CH_CR);
             atr_put(len, 0);
