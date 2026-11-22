@@ -31,8 +31,8 @@ TARGET = $(BUILD)/writer.prg
 MAP    = $(BUILD)/writer.map
 DISK   = $(BUILD)/writer.d81
 
-CSRC    = src/cold.c src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/m65.c src/fonts.c
-PORTABLE = src/cold.c src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/fonts.c
+CSRC    = src/cold.c src/petfont.c src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/rtfin.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/m65.c src/fonts.c
+PORTABLE = src/cold.c src/petfont.c src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/rtfin.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/fonts.c
 HEADERS = src/wp.h src/petuni.h
 
 # The C half is compiled here (basic45 --link takes the objects): -O2 for
@@ -54,12 +54,12 @@ CC45FLAGS = -fno-tail-call-optimization -I$(CC45_ROOT)/lib/include -Isrc -I$(BUI
 # main since c6006fdd)
 BASFLAGS ?= --minify --link-align=1
 # Code overlays (M65Compiler #685): cold.c's code is the overlay "cold",
-# kept in bank 4's free $4D000-$4FFFF (after writer.fnt's first part, from
-# $4A000) as WRITER.OV1, which the first SYS loads, and copied for each
+# kept in bank 4's free $4D000-$4DFFF (after writer.fnt's first part, from
+# $4A000; the C64 fonts are from $4E000: wp.h's PET_LIN) as WRITER.OV1, which the first SYS loads, and copied for each
 # call into mod_area's first MOD_SCRATCH bytes, the drawing's buffers
 # (OVL_ROOM: cold.c checks it is MOD_SCRATCH)
 OVL_ROOM = 2707
-OVLFLAGS = --overlay-store=0x4D000-0x4FFFF --overlay-region=_mod_area+$(OVL_ROOM)
+OVLFLAGS = --overlay-store=0x4D000-0x4DFFF --overlay-region=_mod_area+$(OVL_ROOM)
 # the C half's CPU stack: a page of its own, $1700-$17FF (it never goes
 # deeper than 32 bytes), next to its base page (src/lowmem.s45's $1600),
 # not 512 bytes at the end of bank 0 (ln45 --stack-page, M65Compiler
@@ -68,7 +68,7 @@ OVLFLAGS = --overlay-store=0x4D000-0x4FFFF --overlay-region=_mod_area+$(OVL_ROOM
 # set. (0x17, not $17: the shell would take $1 as an argument)
 STACKFLAGS = --stack-page=0x17
 FAST    = render m65 fonts
-SMALL   = api conv doc layout cold
+SMALL   = api conv doc layout cold petfont
 # (conv.c is called by the modules, whose base-page blocks start at $80:
 # its functions keep their variables out of the base page)
 NOZP    = conv
@@ -97,7 +97,7 @@ $(BUILD)/obj/%.o45: src/%.s45
 # linked by tools/mkmod.py to run at the program's mod_area, against its
 # map (basic45 --map: M65Compiler #595, in master since 6a7dd256); the build's ID (of the sources and the tools) ties each to the
 # program it was linked with (render.c's mod_run refuses another's).
-MODS    = $(BUILD)/markdown.ovl $(BUILD)/mdin.ovl $(BUILD)/rtf.ovl $(BUILD)/html.ovl $(BUILD)/htmlin.ovl $(BUILD)/list.ovl $(BUILD)/default0.ovl
+MODS    = $(BUILD)/markdown.ovl $(BUILD)/mdin.ovl $(BUILD)/rtf.ovl $(BUILD)/rtfin.ovl $(BUILD)/html.ovl $(BUILD)/htmlin.ovl $(BUILD)/list.ovl $(BUILD)/default0.ovl
 BUILD_ID := $(shell cat src/*.c src/*.h src/wp.bas tools/mkmod.py $(CC45) $(CC45_ROOT)/bin/ln45 2>/dev/null | cksum | awk '{print $$1 % 65536}')
 
 $(BUILD)/buildid.h: FORCE
@@ -130,6 +130,15 @@ $(BUILD)/obj/rtf_mod.o45: src/rtf.c $(HEADERS)
 
 $(BUILD)/rtf.ovl: $(TARGET) $(BUILD)/obj/rtf_mod.o45 tools/mkmod.py
 	python3 tools/mkmod.py --entry _rtf_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/rtf_mod.o45
+
+# RTFIN.OVL: RTF import (rtfin.c), streamed; apart from the export (together
+# more than MOD_SIZE)
+$(BUILD)/obj/rtfin_mod.o45: src/rtfin.c $(HEADERS)
+	@mkdir -p $(BUILD)/obj
+	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+
+$(BUILD)/rtfin.ovl: $(TARGET) $(BUILD)/obj/rtfin_mod.o45 tools/mkmod.py
+	python3 tools/mkmod.py --entry _rtfin_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/rtfin_mod.o45
 
 # HTML.OVL: HTML export (html.c), a run-once module
 $(BUILD)/obj/html_mod.o45: src/html.c $(HEADERS)
@@ -195,6 +204,7 @@ $(DISK): $(TARGET) src/writer.fnt $(BUILD)/writer.msg $(BUILD)/help.prg $(MODS)
 	$(DISK45) add $@ $(BUILD)/markdown.ovl "MARKDOWN.OVL"
 	$(DISK45) add $@ $(BUILD)/mdin.ovl "MDIN.OVL"
 	$(DISK45) add $@ $(BUILD)/rtf.ovl "RTF.OVL"
+	$(DISK45) add $@ $(BUILD)/rtfin.ovl "RTFIN.OVL"
 	$(DISK45) add $@ $(BUILD)/html.ovl "HTML.OVL"
 	$(DISK45) add $@ $(BUILD)/htmlin.ovl "HTMLIN.OVL"
 	$(DISK45) add $@ $(BUILD)/list.ovl "LIST.OVL"

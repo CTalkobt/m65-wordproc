@@ -60,6 +60,7 @@ void video_on(void) {
     if (fread(MEM + SCRATCH_LIN, 1, SCRATCH_MAX, f) == 0) perror("src/writer.fnt");
     fclose(f);
     font_install();
+    pet_fonts();
     loaded = 1;
 }
 void video_off(void) {}

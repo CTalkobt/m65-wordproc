@@ -48,9 +48,11 @@ static const struct run help[] = {
     { 1, "Serif" },
     { 0, ", " },
     { MONO, "Mono" },
-    { 0, " and " },
+    { 0, ", " },
     { HEAD, "Heading" },
-    { 0, ".\r" },
+    { 0, " and " },
+    { S_PETF, "PETSCII" },
+    { 0, ", the C64's (PETSCII.FNT when it is on the disk, else the MEGA65's own).\r" },
     { 0, "\r" },
     { 1 | A_ITAL, "This paragraph is centred, in the serif font." },
     { CENTRE, "\r" },
@@ -58,7 +60,7 @@ static const struct run help[] = {
     { 0, "This paragraph is right aligned." },
     { RIGHT, "\r" },
     { 0, "\r" },
-    { QUOTE, "A quote: indented, with a bar beside it. Paragraph styles (CTRL+D) are Normal, Heading 1 to 3, Quote, Code and lists:" },
+    { QUOTE, "A quote: indented, with a bar beside it. Paragraph styles (CTRL+D) are Normal, Heading 1 to 3, Quote, Code, PETSCII lines and lists:" },
     { K_QUOTE, "\r" },
     { 0, "\r" },
     { 0, "Bulleted and numbered (their marks drawn, the numbers counted)" },
@@ -69,6 +71,15 @@ static const struct run help[] = {
     { K_NUMBER | 1 << A_LEVEL_SHIFT, "\r" },
     { 0, "RETURN on an empty item ends the list" },
     { K_BULLET, "\r" },
+    { 0, "\r" },
+    { 0, "A PETSCII line (CTRL+D) holds the C64's graphics as typed (SHIFT and C= with a key), broken at a character, not a word:" },
+    { 0, "\r" },
+    { MONO, "\xb0\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xae" },
+    { K_CODE | A_PET, "\r" },
+    { MONO, "\xdd \x2a\x2a\x2a\x2a MEGA65 \xdd" },
+    { K_CODE | A_PET, "\r" },
+    { MONO, "\xad\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xbd" },
+    { K_CODE | A_PET, "\r" },
     { 0, "\r" },
     { 0, "And this one is justified: the spaces between its words are stretched so that each line but the last fills the width of the text exactly, as in a book. Select text with F9 (or CTRL and the cursor keys), then press F3, F5 or F7 to style it, F2 to change its font or F4 to align its paragraph." },
     { JUST, "\r" },
@@ -91,7 +102,7 @@ static const struct run help[] = {
             "F4 paragraph: left, centre, right, justify\r"
             "F6 page break           F1 page / raw view\r"
             "CTRL+D     style: the drop-down at the top left\r"
-            "CTRL+E     font, strikethrough, super/subscript\r"
+            "CTRL+E     font (PETSCII too), strike, sup/sub\r"
             "TAB / DEL  at a list item's start: in / out\r" },
     { 0, "A style applies to the paragraphs the selection holds whole, or the cursor's; "
          "to the rest of the selection as a character style (Normal: plain). In the "

@@ -65,12 +65,20 @@ u8 doc_unpack(void) {
     return 0;
 }
 
-/* the text as PETSCII (lower-case set) for a SEQ file; the size */
+/* the text as PETSCII (lower-case set) for a SEQ file (a PETSCII line's
+ * as it is); the size */
 u16 doc_export(void) {
     u16 i;
+    u8 pet = 0, c;
     o_start();
     for (i = 0; i < doc_len; i++) {
-        u8 c = as_ascii(txt_at(i));
+        c = txt_at(i);
+        if (i == 0 || txt_at(i - 1) == CH_CR || txt_at(i - 1) == CH_FF) pet = atr_at(para_end(i)) & A_PET;
+        if (pet && c != CH_CR && c != CH_FF) {
+            o_put(c);
+            continue;
+        }
+        c = as_ascii(c);
         if (c >= 'a' && c <= 'z') c = (u8)(c - 32);
         else if (c >= 'A' && c <= 'Z') c = (u8)(c + 128);
         else if (c == CH_FF) c = CH_CR;
@@ -128,6 +136,13 @@ u8 petscii_to_ascii(u8 c) {
     if (c == 0xDE) return '~';
     if (c == 0xBA) return '`';          /* SHIFT + @ */
     return 0;
+}
+
+/* key k (its PETSCII code) as the cursor's paragraph has it: in a PETSCII
+ * line the code as it is (but a control code), else as ASCII; 0: none */
+u8 key_char(u8 k) {
+    if (atr_at(para_end(cur)) & A_PET) return (k & 0x7F) < 0x20 ? 0 : k;
+    return petscii_to_ascii(k);
 }
 
 /* s (PETSCII, at most max characters) as ASCII, in place ("?": none) */

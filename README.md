@@ -48,12 +48,15 @@ without it the program starts with an empty document), `MARKDOWN.OVL` and
 `MDIN.OVL` (Markdown export and import, modules: without them the rest
 works, and a `.md` name gets "Markdown needs MARKDOWN.OVL and MDIN.OVL on
 the disk"),
-`RTF.OVL` (RTF import and export, the same for `.rtf`), `HTML.OVL` and
+`RTF.OVL` and `RTFIN.OVL` (RTF export and import, the same for `.rtf`), `HTML.OVL` and
 `HTMLIN.OVL` (HTML export and import, the same for `.htm` and `.html`), `LIST.OVL`
 (list mode, a module: without it the menu does not offer it) and
 `DEFAULT0.OVL` (undo, find and replace, and the styles; a required module,
 named so that it is not taken for an optional one: without it those do
-nothing, or say "No DEFAULT0.OVL.").
+nothing, or say "No DEFAULT0.OVL."). A `PETSCII.FNT` added to the disk (a C64
+character set, as a PRG file: a 2-byte load address, then the upper-case /
+graphics set and perhaps the lower-case set, 2 KB each) gives the PETSCII
+font and PETSCII lines its glyphs; without it they are the MEGA65's own.
 
 `tools/xemu_run.py` runs it headless in xemu, types keys into the KERNAL's
 keyboard buffer and saves a screenshot, e.g.
@@ -70,7 +73,7 @@ keyboard buffer and saves a screenshot, e.g.
 | F13 / F14 | page up / down |
 | F1 | page layout / raw view |
 | F3 / F5 / F7, or CTRL+B / CTRL+I / CTRL+U | bold / italic / underline |
-| F2 | font: Sans, Serif, Mono, Head |
+| F2 | font: Sans, Serif, Mono, Head, PETSCII |
 | F4 | paragraph alignment: left, centre, right, justify |
 | F6 | page break |
 | F9 | start / end a selection (move the cursor to extend it) |
@@ -84,7 +87,7 @@ keyboard buffer and saves a screenshot, e.g.
 | F8 or HELP | the help (`WRITER.HELP`) as the document (after asking about unsaved changes) |
 | ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text; Markdown for a name ending in `.md`, RTF for `.rtf`, HTML for `.htm` or `.html`), Directory; Redraw, List on / off (with `LIST.OVL`), Help, Quit (ESC also ends a selection) |
 | CTRL+D | the style drop-down (below) |
-| CTRL+E | the font and effect pop-up: Sans, Serif, Mono, Head, Bold, Italic, Underline, Strikethrough, Superscript, Subscript, each drawn so and those on marked; the cursor keys move it, RETURN sets the font or turns the effect on or off (the selection's, or for what is typed next; superscript and subscript are one or neither), ESC leaves it |
+| CTRL+E | the font and effect pop-up: Sans, Serif, Mono, Head, PETSCII, Bold, Italic, Underline, Strikethrough, Superscript, Subscript, each drawn so and those on marked; the cursor keys move it, RETURN sets the font or turns the effect on or off (the selection's, or for what is typed next; superscript and subscript are one or neither), ESC leaves it |
 | CTRL+L | redraw the whole screen |
 | CTRL+A | Compose: the next two characters make an accented one (below) |
 
@@ -92,10 +95,10 @@ Styles and fonts apply to the selection, or to what you type next.
 
 **Paragraph styles** ([#4](https://github.com/CTalkobt/m65-wordproc/issues/4)):
 the top bar's left end shows the style of the cursor's paragraph: Normal,
-Heading 1, Heading 2, Heading 3, Quote, Code, Bullet or Numbered. CTRL+D
-drops the list down under it, each style in its own look; the cursor keys
-move through it and RETURN applies the one lit (or N 1 2 3 Q C B # at once;
-ESC leaves it).
+Heading 1, Heading 2, Heading 3, Quote, Code, Bullet, Numbered or PETSCII
+(a PETSCII line). CTRL+D drops the list down under it, each style in its
+own look; the cursor keys move through it and RETURN applies the one lit
+(or N 1 2 3 Q C B # P at once; ESC leaves it).
 
 - A paragraph the selection holds whole (all its text), or with no
   selection the cursor's, becomes that kind. Its characters in the old
@@ -112,15 +115,32 @@ ESC leaves it).
   paragraph; the raw view shows a kind as a green tag (`[H1]`, `[Quote]`,
   `[Code]`, `[List]`, `[Num2]`: a list item's level from the second on)
   at the paragraph's start.
-- **PETSCII lines** (issue #11, under way): a code paragraph whose mark
-  has bit 7 (`A_PET`) holds PETSCII codes as typed, for the C64 character
-  set's graphics. The converters carry them now (below: Markdown
-  ```` ```petscii ````, HTML `<pre class="petscii">`, RTF a `PETSCII Code`
-  style), their characters as Unicode by Unicode's own map
-  (`src/petuni.h`: box drawing, block elements and Symbols for Legacy
-  Computing); RETURN in one starts another. Drawing them in the C64 font,
-  typing graphics into them and a raw-view tag wait for room in bank 0;
-  until then they show as code.
+- **PETSCII lines** (issue #11): the PETSCII style (CTRL+D, P) makes a
+  paragraph a PETSCII line: a code paragraph whose mark has bit 7
+  (`A_PET`), holding PETSCII codes as typed, drawn in the C64's
+  upper-case / graphics set (8 x 16: the C64's 8 x 8 glyphs with each row
+  twice, as the C128's 80 columns look), so SHIFT and C= with a key type
+  its graphics; control codes (colours, ...) are not typed. Its text is
+  made PETSCII that looks as it did (a-z as A-Z, what the set lacks `?`);
+  made another style again, its graphics become `?`. A long one is broken
+  at a character, not a word, and keeps its spaces; RETURN in one starts
+  another. The raw view shows `[PETSCII line]` and its characters' C64
+  glyphs. The converters carry them (below: Markdown ```` ```petscii ````,
+  HTML `<pre class="petscii">`, RTF a `PETSCII Code` style), their
+  characters as Unicode by Unicode's own map (`src/petuni.h`: box
+  drawing, block elements and Symbols for Legacy Computing); the plain
+  text export writes their codes as they are.
+- **The PETSCII font** (issue #5): a font of the text, the fifth (F2,
+  CTRL+E): Latin-1 drawn with the C64's glyphs (its lower-case set; what
+  it lacks, accents among them, `?`). It is a style whose two script bits
+  are both set (no script has both), over Mono's font bits, so what does
+  not know it takes it for Mono; bold, italic, underline and strikethrough
+  keep it, a font or a script set leaves it. Its glyphs and PETSCII
+  lines' are made at the start (`src/petfont.c`, `pet_fonts`) from
+  `PETSCII.FNT` when it is on the disk, else from the character set in
+  use (the character ROM at `$FF7E000`), into bank 4. Markdown writes it
+  as Mono (a code span), HTML as `<span class="p">`, RTF as `\f4`, a font
+  named PETSCII (both read back).
 - **Lists**: a bulleted or numbered item is a paragraph, indented by its
   level (four levels). Its bullet (a square, hollow at the second and
   fourth levels) or number is drawn in the indent, not stored as text: a
@@ -186,7 +206,8 @@ letter with its accent), in `WRITER.FNT`.
 | `src/m65.c` | C | the VIC-IV screen mode, DMA and colour RAM |
 | `src/conv.c` | C | what the converters share (below): output to the scratch area, a walk over the document for export, a builder for import, Unicode as the document's characters |
 | `src/md.c`, `src/mdin.c` | C | Markdown export and import (below): the modules `MARKDOWN.OVL` and `MDIN.OVL` |
-| `src/rtf.c` | C | RTF export and (streamed) import: the module `RTF.OVL` |
+| `src/rtf.c`, `src/rtfin.c` | C | RTF export and (streamed) import: the modules `RTF.OVL` and `RTFIN.OVL` |
+| `src/petfont.c` | C | the C64 fonts made at the start (PETSCII lines', the PETSCII font): the code overlay `fonts` |
 | `src/html.c` | C | HTML export (below): the module `HTML.OVL` |
 | `src/htmlin.c` | C | HTML (streamed) import: the module `HTMLIN.OVL` |
 | `src/list.c` | C | list mode's markers: the module `LIST.OVL` |
@@ -211,9 +232,9 @@ the room for it. Two kinds:
 
 - **Run once** (as one job over the document), loaded just before it runs:
   Markdown (`MARKDOWN.OVL` and `MDIN.OVL`, from `src/md.c` and
-  `src/mdin.c`), RTF (`RTF.OVL`, from `src/rtf.c`: the largest, 6.1 KB, all but
-  17 bytes of `MOD_SIZE`), HTML (`HTML.OVL`, from `src/html.c`, and `HTMLIN.OVL`, from
-  `src/htmlin.c`: together more than `MOD_SIZE`); PETSCII graphics, PDF export, find and replace or a word
+  `src/mdin.c`: the largest, 6 KB), RTF (`RTF.OVL`, from `src/rtf.c`, and
+  `RTFIN.OVL`, from `src/rtfin.c`: together more than `MOD_SIZE`), HTML (`HTML.OVL`, from `src/html.c`, and `HTMLIN.OVL`, from
+  `src/htmlin.c`: the same); PDF export, find and replace or a word
   count would fit the same way. One can also be called several times in a
   row (a command with `MOD_MORE`: `mod_run` then leaves it and the drawing's
   caches alone, as they share its memory): RTF import is streamed that way,
@@ -244,10 +265,11 @@ the room for it. Two kinds:
   functions that note nothing (`del_raw`, `room`): it notes its own
   changes, and must not call back into itself.
 
-- **The code overlay** (`cold`, from `src/cold.c` and
-  `src/stylecold.s45`; 2.1 KB): code the program runs seldom, or at most
-  once a key, linked by ln45 as a copied code overlay (M65Compiler #685)
-  rather than by mkmod.py. Its code is `WRITER.OV1`, which the
+- **The code overlays** (`cold`, from `src/cold.c` and
+  `src/stylecold.s45`, 2.3 KB; `fonts`, from `src/petfont.c`, 1 KB): code
+  the program runs seldom, or at most once a key, linked by ln45 as copied
+  code overlays (M65Compiler #685) rather than by mkmod.py. Their code is
+  `WRITER.OV1`, which the
   program's first `SYS` into C loads into bank 4 (`$4D000`); a call into
   it goes through a resident stub that copies it by DMA into `mod_area`'s
   first `MOD_SCRATCH` bytes, the drawing's buffers (`ln45
@@ -258,8 +280,11 @@ the room for it. Two kinds:
   writes `mod_area`. Its variables stay in bank 0. Bank 0 gains 581
   bytes: 2.1 KB of code leaves it, while the overlay runtime (its loader,
   calls, stubs and tables: 1.3 KB, and 250 bytes of variables) stays.
+  The PETSCII font and PETSCII lines (#5, #11) then cost 620 bytes of it
+  in the drawing, the layout and the menus, and 140 more for `DEFAULT0.OVL`'s
+  room (`LIST_OFS` 4560 to 4700: their style commands): 365 bytes free.
 
-- **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6280 bytes in
+- **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6420 bytes in
   bank 0), which is also where the drawing keeps its buffers and caches
   (the band, the redraw cache, the bars' text, the row patterns, and the
   layout's buffer of new lines and the menu's text: 4.3 KB),
@@ -375,7 +400,8 @@ the C64's. Each cell has its own colour (text, desk, tags, bars).
 | `$40000` | 32000 | the bitmap |
 | `$48000` | 8000 | the screen (16-bit cells) |
 | `$4A000` | 12 KB | `WRITER.FNT`'s first part: Head's glyphs and records, the raw font, the compose table |
-| `$4D000` | 12 KB | the code overlay (`WRITER.OV1`, 2.1 KB), copied from here into `mod_area` for each call |
+| `$4D000` | 4 KB | the code overlays (`WRITER.OV1`, 3.3 KB), copied from here into `mod_area` for each call |
+| `$4E000` | 3.8 KB | the C64 fonts (PETSCII lines', the PETSCII font): their records (2 x 672 bytes), then their glyphs (the upper-case set's 128 and a-z, 8 x 16) |
 | `$50000` | 59 KB | scratch (to the clipboard): the gap's bounce buffer, file image, text and Markdown files; from `$57530` (`DOC_MAX`) what undo puts back while it swaps; its last 15000 bytes (`$5B168`) undo's copy of what the last edit replaced |
 | `$5EC00` | 5 KB | clipboard |
 | `$8000000` | 64 KB | attic RAM: document text (up to 30000 characters) and the gap |
@@ -392,7 +418,10 @@ characters; CR ends a paragraph, FF a page), the attributes, then the
 style table: its entry size (1), its count (2 bytes), its entries. A
 character's attribute byte is an index into the style table (issue #5),
 whose entry is its style: bits 0-1 font, 2 bold, 3 italic, 4 underline,
-5 strikethrough, 6-7 superscript (1) or subscript (2). Entries 0-31 are
+5 strikethrough, 6-7 superscript (1) or subscript (2), or (3, with Mono's
+font bits) the PETSCII font. A paragraph's CR / FF has its kind (bits
+0-2), a list item's level (3-4), its alignment (5-6) and, with the kind
+Code, bit 7 for a PETSCII line. Entries 0-31 are
 the first 32 styles at their own bits; others are added as styles are
 used. The table belongs to the session,
 so the clipboard and undo keep their meaning across documents: a file's
@@ -426,6 +455,7 @@ from elsewhere.
 | centre, right, justify | `<div align="center">` … `</div>` around the block |
 | page break | `<div style="page-break-after: always"></div>` |
 | Serif; Head inside a paragraph | (nothing in Markdown: plain text) |
+| the PETSCII font | as Mono (a code span) |
 
 Markup characters in the text are escaped with `\` (only where Markdown
 would read them: `*`, `_`, `` ` ``, `[`, `]`, `\`, `~` everywhere; `#`, `>`, `-`,
@@ -473,7 +503,7 @@ elsewhere:
 | `<ul>`, `<ol>`, `<li>` | Bullet, Numbered, nested: the level (up to 4) |
 | `<b>` `<strong>`, `<i>` `<em>` `<cite>`, `<u>` `<ins>`, `<code>` `<tt>` `<kbd>` `<samp>` | bold, italic, underline, Mono |
 | `<s>` `<strike>` `<del>`, `<sup>`, `<sub>` | strikethrough, superscript, subscript (nested: the innermost script) |
-| `<span class="s">` / `"r"` / `"h"` (the export's) | Sans, Serif, Head |
+| `<span class="s">` / `"r"` / `"h"` / `"p"` (the export's) | Sans, Serif, Head, the PETSCII font |
 | `style="text-align: ..."`, `align="..."`, `<center>` | alignment |
 | `style="page-break-after: always"` (or `break-before` / `break-after`) | a page break |
 | table rows, cells | a paragraph a row, two spaces between cells |
@@ -494,9 +524,10 @@ again on the MEGA65, are byte for byte what the host makes.
 ### RTF
 
 Export (`src/rtf.c`, in the module `RTF.OVL`) is lossless for Writer's
-documents (but for PETSCII lines: a `\s8` `PETSCII Code` style, their
-characters as `\uN`, which the import reads as Code with `?` for the graphics): a font table (`\f0` Sans `\fswiss`, `\f1` Serif `\froman`,
-`\f2` Mono `\fmodern`, `\f3` Head `\fswiss` at `\fs36`), `\b` `\i` `\ul`
+documents (PETSCII lines too: a `\s8` `PETSCII Code` style, their
+characters as `\uN`, a UTF-16 pair for U+1FBxx, which the import, `RTFIN.OVL`, reads
+back): a font table (`\f0` Sans `\fswiss`, `\f1` Serif `\froman`,
+`\f2` Mono `\fmodern`, `\f3` Head `\fswiss` at `\fs36`, `\f4` PETSCII `\fmodern`, the PETSCII font), `\b` `\i` `\ul`
 `\strike` and `\super` / `\sub` / `\nosupersub` where they change, a stylesheet (`\s0` Normal, `\s1`-`\s3` heading 1-3
 with `\outlinelevel`, `\s4` Quote and `\s5` Code with an indent, `\li`,
 `\s6` List Bullet and `\s7` List Number), each paragraph as `\pard`, its
@@ -510,14 +541,15 @@ accented characters as `\'hh` (`\ansicpg1252`, which has Latin-1's).
 Import reads the file 1 KB at a time (BASIC streams it to the module, so
 it may be larger than the scratch area): control words, control symbols,
 groups (which keep the character formatting) and text. Fonts map by their
-family in `\fonttbl` (`\froman` Serif, `\fmodern` Mono, others Sans), a
+family in `\fonttbl` (`\froman` Serif, `\fmodern` Mono, others Sans; one named
+PETSCII the PETSCII font), a
 size of 14 pt or more is Head; `\b`, `\i`, the underlines, `\strike`
 (`\striked`), `\super`, `\sub`, `\nosupersub`, `\upN` / `\dnN` (raised,
 lowered: superscript, subscript), `\plain`,
 `\pard`, alignment; a paragraph's kind from `\outlinelevelN` (heading N+1,
 from 3 on heading 3) or from its `\sN`, by the style's name in the
 `\stylesheet` ("heading N" as its level, "Title" Heading 1, a name with
-"quot" Quote, with "code", "preformatted" or "source" Code, with
+"quot" Quote, with "petscii" a PETSCII line, with "code", "preformatted" or "source" Code, with
 "bullet" or "number" a list); a list item from `{\listtext ...}` (as Word
 writes it, before the paragraph's `\pard`: a digit in it makes a numbered
 item, else bulleted; its text left out) and its level from `\ilvlN`; `\par`, `\line` and `\row` end a paragraph, `\page`

@@ -18,8 +18,8 @@
  *   and subscript           <sup>, <sub> (where they add to the paragraph
  *                           kind's own style: a heading's bold is not
  *                           written)
- *   another font in part    Mono <code>, Serif, Sans and Head a <span> (the
- *                           style sheet's classes r, s, h)
+ *   another font in part    Mono <code>, Serif, Sans, Head and PETSCII a
+ *                           <span> (the style sheet's classes r, s, h, p)
  *   centre, right, justify  style="text-align: ..." on the paragraph
  *   page break              <div style="page-break-after: always"></div>
  * & < > are entities; Latin-1 characters are UTF-8. Empty paragraphs
@@ -63,17 +63,19 @@ static void out_num(u16 v) {
  * bold, italic ---- */
 #define NM 7
 #define H_FONT 0x100
-#define H_FMASK 0x700
+#define H_FMASK 0xF00                   /* (H_FONT and the font, 0-4: font_id) */
 static const u16 mark_mask[NM] = { H_FMASK, A_UNDER, A_SUP, A_SUB, A_STRIKE, A_BOLD, A_ITAL };
 static const char *const mark_open[NM] = { 0, "<u>", "<sup>", "<sub>", "<s>", "<b>", "<i>" };
 static const char *const mark_close[NM] = { 0, "</u>", "</sup>", "</sub>", "</s>", "</b>", "</i>" };
-static const char *const font_open[4] = { "<span class=\"s\">", "<span class=\"r\">", "<code>", "<span class=\"h\">" };
+static const char *const font_open[NFACES] = { "<span class=\"s\">", "<span class=\"r\">", "<code>", "<span class=\"h\">",
+                                               "<span class=\"p\">" };
 static u8 base;                 /* the paragraph kind's own style (kind_attr) */
 static u16 open_st;
 
 static u16 h_style(u16 i) {
-    u8 a = sty(atr_at(i)), f = a & A_FONT;
-    u16 s = a & (A_UNDER | A_BOLD | A_ITAL | A_STRIKE | A_SCRIPT) & ~base;
+    u8 a = sty(atr_at(i)), f = font_id(a);
+    u16 s = (a & A_FX) | SCRIPT(a);
+    s &= ~base;
     if (f != (base & A_FONT)) s |= (u16)(H_FONT | (f << 9));
     return s;
 }
@@ -87,11 +89,11 @@ static void restyle_to(u16 t) {
     for (m = NM; m-- > k;) {
         if (!(open_st & mark_mask[m])) continue;
         if (m) outs(mark_close[m]);
-        else outs(((open_st >> 9) & A_FONT) == F_MONO ? "</code>" : "</span>");
+        else outs(((open_st >> 9) & 7) == F_MONO ? "</code>" : "</span>");
     }
     for (m = k; m < NM; m++) {
         if (!(t & mark_mask[m])) continue;
-        outs(m ? mark_open[m] : font_open[(t >> 9) & A_FONT]);
+        outs(m ? mark_open[m] : font_open[(t >> 9) & 7]);
     }
     open_st = t;
 }
@@ -203,6 +205,7 @@ static const char style[] =
     "blockquote { font-family: serif; font-style: italic; }\n"
     ".s { font-family: sans-serif; }\n"
     ".h { font-size: larger; font-weight: bold; }\n"
+    ".p { font-family: \"C64 Pro Mono\", monospace; }\n"
     "</style>\n</head>\n<body>\n";
 
 /* the document as HTML at SCRATCH_LIN; its size (0: more than fits) */

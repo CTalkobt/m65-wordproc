@@ -106,6 +106,19 @@ typedef uint32_t u32;
 #define A_SUB   0x80
 #define A_SCRIPT 0xC0
 #define A_STYLE 0xFF            /* a style: font, bold, italic, underline, strikethrough, script */
+#define A_FX (A_BOLD | A_ITAL | A_UNDER | A_STRIKE)
+/* Both script bits (no script has them) select a C64 font instead (issue
+ * #5's PETSCII font, #11): with F_MONO (its fallback, for whatever does not
+ * know them) the PETSCII font, a style of the text: Latin-1 drawn with the
+ * C64's glyphs; with F_SANS a PETSCII line's characters, which are PETSCII
+ * codes (the layout and the drawing give them that style; never in the
+ * style table) */
+#define S_PETF (A_SCRIPT | F_MONO)
+#define S_PETL (A_SCRIPT | F_SANS)
+#define IS_C64(a) (((a) & A_SCRIPT) == A_SCRIPT)
+#define SCRIPT(a) (IS_C64(a) ? 0 : (a) & A_SCRIPT)     /* its script (A_SUP, A_SUB or 0) */
+#define F_PET 4                 /* the PETSCII font's number (font_id; after the 4 others) */
+#define NFACES 5                /* the fonts a style can have */
 /* a character's attribute byte is not a style but an index into the style
  * table (sty: its style; sty_find: a style's index; conv.c, issue #5) */
 /* a paragraph's CR / FF carries the paragraph's properties instead: */
@@ -133,8 +146,12 @@ typedef uint32_t u32;
  * text: a number counts the items before it at its level (item_num). */
 enum { K_NORMAL, K_H1, K_H2, K_H3, K_QUOTE, K_CODE, K_BULLET, K_NUMBER, NKINDS };
 #define KIND_TAB NKINDS
-extern const u8 kind_attr[KIND_TAB];    /* (layout.c) the characters' style */
-extern const char *const kind_names[KIND_TAB];
+/* the paragraph styles offered (CTRL+D): the kinds, then a PETSCII line
+ * (K_CODE with A_PET) */
+#define K_PET NKINDS
+#define NSTYLES (NKINDS + 1)
+extern const u8 kind_attr[NSTYLES];     /* (layout.c) the characters' style */
+extern const char *const kind_names[NSTYLES];
 
 /* ---- screen geometry ---- */
 #define SCR_W 640
@@ -187,6 +204,22 @@ struct font {
     u32 bits;                   /* the glyphs: rows of 1 byte (width <= 8) or 2 */
 };
 extern const struct font font_sans, font_serif, font_mono, font_head;
+/* the C64's glyphs (8 x 8, rows doubled: 8 x 16), made at the start from
+ * PETSCII.FNT or the character ROM (pet_fonts, cold.c): PETSCII codes in
+ * the upper-case / graphics set (a PETSCII line's), and Latin-1 in the
+ * lower-case set (the PETSCII font) */
+extern const struct font font_petl, font_petf;
+#define PET_LIN     0x4E000UL   /* their records: font_petl's, font_petf's (672 bytes each) */
+#define PETG_LIN    (PET_LIN + 2 * 672)     /* their glyphs: upper-case set codes 0-127, then a-z (16 bytes each) */
+#ifdef __cc45__
+#define CHARROM_LIN 0xFF7E000UL /* the character set in use: upper case / graphics, then lower case */
+#else
+#define CHARROM_LIN 0x20000UL
+#endif
+#define PETFNT_OFS  0x6000u     /* PETSCII.FNT, BLOADed to the scratch area there (2 or 4 KB; 0s: none) */
+void pet_fonts(void);
+const struct font *font_of(u8 a);       /* a style's font */
+u8 font_id(u8 a);                       /* a style's font's number: F_SANS ... F_PET */
 extern const u32 font_raw_at;           /* the raw font's glyphs (8 x 13, 13 bytes each, codes 32-255) */
 extern const u32 compose_at;            /* the compose table: 2 characters (both orders), a code; 0 at the end */
 extern const u16 font_lo_size, font_hi_size;    /* writer.fnt's parts, for FONT_LIN and HI_LIN */
@@ -194,7 +227,7 @@ void font_install(void);                /* writer.fnt, BLOADed to SCRATCH_LIN, t
 u32 raw_at(u8 c);                       /* the raw font's glyph of c */
 #define NO_GLYPH(c) ((c) < FONT_FIRST || ((c) > FONT_LAST && (c) < FONT_HI))   /* drawn as "?" */
 extern const struct font *const fonts[NFONTS];
-extern const char *const font_names[NFONTS];
+extern const char *const font_names[NFACES];
 
 /* ---- the line table ---- */
 struct line {
@@ -205,6 +238,7 @@ struct line {
     u8 extra, nsp;              /* justify: pixels spread over nsp spaces */
     u8 page, kind;              /* (page view) its paragraph's kind and level (A_KIND | A_LEVEL), L_FIRST */
 #define L_FIRST 0x80            /* (in kind) the paragraph's first line */
+#define L_PET 0x40              /* (in kind) a PETSCII line's */
 };
 
 /* ---- platform (m65.c / tests/host.c) ---- */
@@ -317,6 +351,7 @@ void mod_entry(void);           /* (modcall.s45: a jump to the module in mod_are
 #define ovl_fresh() ((void)0)
 #endif
 void to_ascii(char *s, u8 max);         /* PETSCII s as ASCII, in place */
+u8 key_char(u8 k);                      /* a typed key as text (a PETSCII line's: as it is) */
 u8 compose_find(u8 a, u8 b);            /* Compose: a and b's character (0: none) */
 void msg_fill(u8 n, const char *p);     /* msg: message n, its place holders from p */
 void stopvec(u8 on);                    /* RUN/STOP ignored (1) or not */
@@ -374,7 +409,7 @@ void doc_built(void);           /* after build_end (b_done): doc_loaded(1) (mod_
 /* ---- modules (.OVL files, loaded by BASIC into mod_area: render.c) ----
  * A module is built apart (Makefile: linked at mod_area against the
  * program's map) and is at most MOD_SIZE bytes, code, data and variables. */
-#define MOD_SIZE 6280            /* (LIST_OFS + LIST.OVL's room; the largest run-once module: RTF.OVL) */
+#define MOD_SIZE 6420            /* (LIST_OFS + LIST.OVL's room; more than the largest run-once module, MDIN.OVL) */
 #define MOD_MORE 0x80                   /* (in a command: more calls follow, the module stays) */
 #define MOD_MD_EXPORT 0                 /* MARKDOWN.OVL: md_export */
 #define MOD_MD_IMPORT 1                 /* MDIN.OVL: md_import */
@@ -393,6 +428,7 @@ u16 mod_run(u8 cmd);                    /* run the module loaded; 0xFFFF: none *
 void md_main(void);                     /* MARKDOWN.OVL's entry (md.c) */
 void mdin_main(void);                   /* MDIN.OVL's entry (mdin.c) */
 void rtf_main(void);                    /* RTF.OVL's entry (rtf.c) */
+void rtfin_main(void);                  /* RTFIN.OVL's entry (rtfin.c) */
 void html_main(void);                   /* HTML.OVL's entry (html.c) */
 void htmlin_main(void);                 /* HTMLIN.OVL's entry (htmlin.c) */
 /* LIST.OVL (list.c), list mode: resident, it draws its markers over each
@@ -401,7 +437,7 @@ void htmlin_main(void);                 /* HTMLIN.OVL's entry (htmlin.c) */
  * bytes, past the drawing's buffers (mod_area.r: at most LIST_OFS bytes),
  * so it costs no memory of its own; a module run in mod_area (Markdown)
  * overwrites it, so list_ok is then 0 until BASIC has loaded it again. */
-#define LIST_OFS 4560           /* (wp.bas's too; DEFAULT0.OVL's room: EDIT_SIZE) */
+#define LIST_OFS 4700           /* (wp.bas's too; DEFAULT0.OVL's room: EDIT_SIZE) */
 #define LIST_SIZE (MOD_SIZE - LIST_OFS)
 extern u8 list_ok, list_on;             /* LIST.OVL loaded (and from this build); asked for */
 extern u16 hk_l;                        /* the line drawn (raw view: >= nlines, a row past the end) */
@@ -433,8 +469,10 @@ u16 line_end(u16 l);            /* its end (the next line's start) */
 void get_line(u16 l, struct line *L);   /* line l of the table (in bank 4) */
 u16 line_start(u16 l);          /* its first character */
 struct just {                   /* walking along a line: its justification */
-    u8 extra, nsp, k;
+    u8 extra, nsp, k, pet;      /* (pet: a PETSCII line's) */
 };
+/* style a as a PETSCII line's character is drawn: its effects, in font_petl */
+#define PET_STYLE(a) ((u8)(((a) & A_FX) | S_PETL))
 void just_init(struct just *j, const struct line *L);
 u8 just_w(u8 c, u8 a, struct just *j);  /* c's width, with a space's share of the justification */
 u16 x_of(u16 l, u16 pos);       /* pos's x in line l (pixels from the text's left, or cells) */

@@ -16,6 +16,7 @@ void wp_cmd(u8 c);
 u16 wp_get(u8 w);
 void wp_panel(u8 n);
 void wp_say(u8 n);
+#define CMD_FX 48                /* (api.c's) */
 static int fails;
 static int oplog[8], opn;
 static void logop(int v) { oplog[opn++ & 7] = v; }
@@ -834,22 +835,22 @@ int main(void) {
     }
 
     /* ---- strikethrough, superscript, subscript (#5): the pop-up's
-     * commands (CMD_FX + its item: fonts 0-3, bold, italic, underline,
+     * commands (CMD_FX + its item: fonts 0-4, bold, italic, underline,
      * strike, superscript, subscript), raw view, layout, the converters ---- */
     {
         static char m[4000], h2[4000];
         u16 k;
         wp_cmd(13);
         type("a");
-        wp_cmd(40 + 7);
+        wp_cmd(CMD_FX + 8);
         type("b");
-        wp_cmd(40 + 7);
-        wp_cmd(40 + 8);
+        wp_cmd(CMD_FX + 8);
+        wp_cmd(CMD_FX + 9);
         type("c");
-        wp_cmd(40 + 9);                 /* (subscript: superscript off) */
+        wp_cmd(CMD_FX + 10);                 /* (subscript: superscript off) */
         type("d");
-        wp_cmd(40 + 9);
-        wp_cmd(40 + 2);                 /* (Mono) */
+        wp_cmd(CMD_FX + 10);
+        wp_cmd(CMD_FX + 2);                 /* (Mono) */
         type("e");
         CHECK(sa(0) == 0 && sa(1) == A_STRIKE && sa(2) == A_SUP && sa(3) == A_SUB && sa(4) == F_MONO);
         CHECK(raw_tag(1, buf) == 3 && !memcmp(buf, "[S]", 3) && mod_area.r.tag_fx[0] == A_STRIKE &&
@@ -879,12 +880,12 @@ int main(void) {
         type("");
         wp_cmd(13);
         type("a");
-        wp_cmd(40 + 7);
+        wp_cmd(CMD_FX + 8);
         type("b");
-        wp_cmd(40 + 7);
-        wp_cmd(40 + 8);
+        wp_cmd(CMD_FX + 8);
+        wp_cmd(CMD_FX + 9);
         type("c");
-        wp_cmd(40 + 9);
+        wp_cmd(CMD_FX + 10);
         type("d");
         n = mod_run(MOD_HTML_EXPORT);
         memcpy(m, MEM + SCRATCH_LIN, n);
@@ -928,6 +929,112 @@ int main(void) {
             md_in(pm);
             rtf_out(m);
             CHECK(strstr(m, "PETSCII Code;}") && strstr(m, "\\pard\\s8\\li360\\ql\\f2\\fs24 \\u9472?\\u9824?AB\\u-10178?\\u-8334?\\u163?\\u9612?\\par"));
+            /* (RTFIN.OVL reads it back: the style's name, the \u pairs) */
+            rtf_round("PETSCII lines");
+        }
+        {
+            /* the C64 fonts (pet_fonts, #5 #11): from a character set at
+             * CHARROM_LIN whose upper-case glyph s has rows s + r, its
+             * lower-case one 0x80 ^ (s + r); then PETSCII.FNT's */
+            u16 g;
+            u8 r, ok = 1;
+            for (g = 0; g < 256; g++)
+                for (r = 0; r < 8; r++) {
+                    MEM[CHARROM_LIN + g * 8 + r] = (u8)(g + r);
+                    MEM[CHARROM_LIN + 2048 + g * 8 + r] = (u8)(0x80 ^ (g + r));
+                }
+            pet_fonts();
+#define PET_ROW(f, c, r) MEM[(f).bits + (MEM[(f).offs + ((c) - 32) * 3 + 1] | MEM[(f).offs + ((c) - 32) * 3 + 2] << 8) + (r)]
+            /* PETSCII codes: the upper-case set's screen codes, each row twice */
+            {
+                static const u8 code[] = { 0x41, 0xC1, 0x61, 0xA1, 0xE1, 0xFF, 0x90, 0x20 };
+                static const u8 scr[] = { 0x01, 0x41, 0x41, 0x61, 0x61, 0x5E, 0x20, 0x20 };
+                for (g = 0; g < sizeof code; g++)
+                    for (r = 0; r < 16; r++) ok &= PET_ROW(font_petl, code[g], r) == (u8)(scr[g] + (r >> 1));
+                CHECK(ok && MEM[font_petl.offs + (0xC1 - 32) * 3] == 8);
+            }
+            /* Latin-1: ASCII as the C64 has it, a-z the lower-case set's, the rest "?" */
+            CHECK(PET_ROW(font_petf, 'A', 2) == 2 && PET_ROW(font_petf, 'a', 2) == (0x80 ^ 2) &&
+                  PET_ROW(font_petf, 'z', 15) == (u8)(0x80 ^ (26 + 7)) && PET_ROW(font_petf, '\\', 0) == 0x1C &&
+                  PET_ROW(font_petf, 0xE9, 0) == '?' && PET_ROW(font_petf, '7', 0) == '7');
+            memset(MEM + SCRATCH_LIN + PETFNT_OFS, 0x55, 2048);     /* PETSCII.FNT: its upper-case set */
+            pet_fonts();
+            CHECK(PET_ROW(font_petl, 0xC1, 3) == 0x55 && PET_ROW(font_petf, 'a', 2) == (0x80 ^ 2));
+            memset(MEM + SCRATCH_LIN + PETFNT_OFS, 0, 4096);
+            pet_fonts();
+
+            /* a PETSCII line made (CTRL+D): its text as the C64 shows it */
+            wp_cmd(13);
+            type("Hello, 1+1");
+            wp_cmd(32 + K_PET);
+            text_of(buf, sizeof buf);
+            CHECK(strcmp(buf, "HELLO, 1+1\r") == 0 && sa(10) == (K_CODE | A_PET) && cur_kind() == K_PET);
+            CHECK(x_of(0, 5) - x_of(0, 0) == 40);
+            /* typed: the codes as they are (SHIFT+A a graphic), a colour code
+             * left out; RETURN: another PETSCII line */
+            wp_key(0xC1);
+            wp_key(0x90);
+            wp_key(13);
+            type("a");
+            text_of(buf, sizeof buf);
+            CHECK(strcmp(buf, "HELLO, 1+1\xc1\r\x41\r") == 0 && sa(11) == (K_CODE | A_PET) && sa(13) == (K_CODE | A_PET));
+            /* raw view: its tag */
+            view_mode = VIEW_RAW;
+            CHECK(raw_tag(0, buf) == 20 && !memcmp(buf, "[PETSCII line][Mono]", 20));    /* (its characters Code's) */
+            view_mode = VIEW_PAGE;
+            /* made Normal again: the graphic "?" */
+            wp_cmd(18);
+            wp_cmd(32 + K_NORMAL);
+            text_of(buf, sizeof buf);
+            CHECK(strcmp(buf, "HELLO, 1+1?\rA\r") == 0 && sa(11) == K_NORMAL);
+            /* a long one: broken at a character, its spaces kept */
+            wp_cmd(13);
+            wp_cmd(32 + K_PET);
+            for (g = 0; g < 90; g++) wp_key(g % 3 ? 0x41 : ' ');
+            layout_update();
+            CHECK(line_end(0) - LINES[0].start == (TEXT_W - 16) / 8 && txt_at(0) == ' ' && LINES[1].start == (TEXT_W - 16) / 8);
+            /* the plain text export: a PETSCII line's codes as they are */
+            wp_cmd(13);
+            type("x");
+            wp_key(13);
+            wp_cmd(32 + K_PET);
+            wp_key(0xC1);
+            n = doc_export();
+            CHECK(n == 4 && MEM[SCRATCH_LIN] == 'X' && MEM[SCRATCH_LIN + 2] == 0xC1);
+
+            /* the PETSCII font, a character style (CTRL+E's font 4) */
+            wp_cmd(13);
+            type("ab cd");
+            wp_cmd(18);
+            wp_cmd(CMD_FX + F_PET);
+            CHECK(sa(0) == S_PETF && sa(4) == S_PETF);
+            wp_cmd(CMD_FX + NFACES);            /* (bold: it stays) */
+            CHECK(sa(0) == (S_PETF | A_BOLD));
+            view_mode = VIEW_RAW;
+            CHECK(raw_tag(0, buf) == 12 && !memcmp(buf, "[PETSCII][B]", 12));
+            view_mode = VIEW_PAGE;
+            CHECK(char_w('a', S_PETF) == 8 && script_dy(S_PETF) == 0);
+            n = mod_run(MOD_HTML_EXPORT);
+            memcpy(m, MEM + SCRATCH_LIN, n);
+            m[n] = 0;
+            CHECK(strstr(m, "<p><span class=\"p\"><b>ab cd</b></span></p>") != NULL);
+            html_in(m);
+            CHECK(sa(0) == (S_PETF | A_BOLD) && sa(4) == (S_PETF | A_BOLD));
+            rtf_out(m);
+            CHECK(strstr(m, "{\\f4\\fmodern PETSCII;}") && strstr(m, "\\f4\\fs24\\b") && !strstr(m, "\\super"));
+            rtf_round("the PETSCII font");
+            md_out(m);
+            CHECK(strcmp(m, "**`ab cd`**\n\n") == 0);
+            /* superscript: no longer the PETSCII font (Mono); a font set,
+             * and cycled (F2): Head, PETSCII, Sans */
+            wp_cmd(18);
+            wp_cmd(CMD_FX + NFACES + 4);
+            CHECK(sa(0) == (F_MONO | A_BOLD | A_SUP));
+            wp_cmd(CMD_FX + F_HEAD);
+            wp_cmd(4);
+            CHECK(sa(0) == (S_PETF | A_BOLD));
+            wp_cmd(4);
+            CHECK(sa(0) == (F_SANS | A_BOLD));
         }
         rtf_in("{\\rtf1\\ansi a\\up6 b\\up0 c\\dn4 d\\dn0 e\\par}");
         CHECK(sa(1) == A_SUP && sa(2) == 0 && sa(3) == A_SUB && sa(4) == 0);
@@ -938,13 +1045,13 @@ int main(void) {
         /* a selection: superscript, then subscript (superscript off),
          * then subscript again (off) */
         wp_cmd(18);
-        wp_cmd(40 + 8);
+        wp_cmd(CMD_FX + 9);
         for (k = 0, n = 1; k < 7; k++) n &= (sa(k) & A_SCRIPT) == A_SUP;
         CHECK(n);
-        wp_cmd(40 + 9);
+        wp_cmd(CMD_FX + 10);
         for (k = 0, n = 1; k < 7; k++) n &= (sa(k) & A_SCRIPT) == A_SUB;
         CHECK(n);
-        wp_cmd(40 + 9);
+        wp_cmd(CMD_FX + 10);
         for (k = 0, n = 1; k < 7; k++) n &= (sa(k) & A_SCRIPT) == 0;
         CHECK(n && sa(1) == A_STRIKE);
         wp_cmd(9);
@@ -1032,6 +1139,10 @@ int main(void) {
         CHECK(strcmp(buf, "one\rtwo\ra\rb\r\rafter\r") == 0);
         CHECK(para_kind(0) == K_BULLET && para_kind(4) == K_BULLET && para_kind(8) == K_NUMBER &&
               (sa(9) & A_LEVEL) == 1 << A_LEVEL_SHIFT && item_num(10) == 2 && para_kind(13) == K_NORMAL);
+        /* (a <pre> whose first character is UTF-8: its first line end kept) */
+        html_in("<pre>\xc3\xa9\nb</pre>");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "\xe9\rb\r") == 0);
         html_in("<pre>\nint *p;\n\n  x &lt; 1\n</pre><blockquote><p>q1</p><p>q2<br>q3</p></blockquote>");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "int *p;\r\r  x < 1\r\rq1\r\rq2\rq3\r") == 0);
@@ -1180,7 +1291,8 @@ int main(void) {
                 int r2 = rand() % 40;
                 txt_put(k, (u8)(r2 == 0 ? CH_CR : r2 == 1 ? CH_FF : r2 < 8 ? ' ' : r2 < 12 ? 0xA0 + rand() % 96 : 32 + rand() % 95));
                 sput(k, (u8)(txt_at(k) == CH_CR || txt_at(k) == CH_FF ? (rand() % 4) << A_ALIGN_SHIFT
-                                                                 : rand() % 3 ? sa(k ? k - 1 : 0) & A_STYLE : rnd_style()));
+                                                                 : rand() % 3 ? sa(k ? k - 1 : 0) & A_STYLE
+                                                                 : rand() % 8 ? rnd_style() : (u8)(S_PETF | (rand() & A_FX))));
             }
             txt_put(len, CH_CR);
             atr_put(len, 0);

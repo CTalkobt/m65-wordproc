@@ -34,7 +34,7 @@
 #define CMD_CLEAN 20
 #define CMD_LIST 21
 #define CMD_STYLE 32
-#define CMD_FX 40
+#define CMD_FX 48
 
 #define GET_DIRTY 0
 #define GET_PACK 2
@@ -57,10 +57,12 @@
 #define FIND_SETR 6
 
 ' LIST.OVL's place: mod_area + LIST_OFS (wp.h)
-#define LIST_OFS 4560
+#define LIST_OFS 4700
 
 ' the file image's place: bank 5, $0000 (SCRATCH_LIN in wp.h)
 #define IMG 0
+' PETSCII.FNT's: bank 5, $6000 (PETFNT_OFS in wp.h)
+#define PETFNT_OFS $6000
 
 ' the messages' numbers (MSG_...) and MSG_TAB, from src/messages.txt
 ' (tools/mkmsg.py)
@@ -75,7 +77,12 @@ start:
   ' codes 32-128 to bank 4 (FONT_LIN in wp.h) and the Latin-1 ones and the
   ' compose table to colour RAM (HI_LIN)
   bank 0 : fl = peek({fonts_loaded}) : bank 128
-  if fl <> 165 then print p"Loading fonts..." : bload "writer.fnt", b5, p(IMG) : sys {wp_get}, GET_FONTS : rreg r : bank 0 : poke {fonts_loaded}, 165 : bank 128
+  ' (and PETSCII.FNT, a C64 character set, when it is on the disk: the C
+  ' half makes the PETSCII fonts of it, else of the character ROM's)
+  if fl <> 165 then print p"Loading fonts..." : bload "writer.fnt", b5, p(IMG) : edma 3, 4096, 0, $50000 + PETFNT_OFS : trap nopetfnt : bload "petscii.fnt", b5, p(PETFNT_OFS)
+petback:
+  trap
+  if fl <> 165 then sys {wp_get}, GET_FONTS : rreg r : bank 0 : poke {fonts_loaded}, 165 : bank 128
   ' (the text is in attic RAM: none, no Writer)
   if r then print p"No attic RAM." : end
   ' F-keys give their codes, not their KEY macros: the Editor's lock bit
@@ -142,10 +149,10 @@ endproc
 ' ---- the style drop-down (CTRL+D) under the top bar's style field: the
 ' cursor keys move it, RETURN applies the style lit (to the paragraphs
 ' selected whole, or the cursor's; as a character style to the rest of the
-' selection), N 1 2 3 Q C B # at once, ESC leaves it ----
+' selection), N 1 2 3 Q C B # P at once, ESC leaves it ----
 proc stylemenu
   sys {wp_get}, GET_KIND : rreg sv
-  dk = 0 : dn = 8 : call dropdown
+  dk = 0 : dn = 9 : call dropdown
   if m = 13 then sys {wp_cmd}, CMD_STYLE + sv
 endproc
 
@@ -153,7 +160,7 @@ endproc
 ' sets the font or turns the effect lit on or off (the selection's, or for
 ' typing) ----
 proc fxmenu
-  sv = 0 : dk = 64 : dn = 10 : call dropdown
+  sv = 0 : dk = 64 : dn = 11 : call dropdown
   if m = 13 then sys {wp_cmd}, CMD_FX + sv
 endproc
 
@@ -164,7 +171,7 @@ proc dropdown
     getkey m$ : m = asc(m$)
     ' (a comparison is -1 when true)
     sv = mod(sv - (m = 17) + (m = 145) + dn, dn)
-    i = instr(p"n123qcb#", m$)
+    i = instr(p"n123qcb#p", m$)
     if i and dk = 0 then sv = i - 1 : m = 13
   loop until m = 13 or m = 27
   sys {wp_drop}, 255
@@ -308,6 +315,7 @@ proc importtext
     a$ = ""
     call ask(MSG_IMPORT)
     if ok and a$ <> "" then call ftype : if fk = 1 then mf$ = "mdin.ovl"
+    if fk = 2 then mf$ = "rtfin.ovl"
     if fk = 3 then mf$ = "htmlin.ovl"
     if ok and a$ <> "" then dopen#2, (a$) : e$ = ds$ : dclose#2 : if val(e$) then call sp(MSG_NOTIMP, e$) : ok = 0
     if ok and a$ <> "" then
@@ -480,6 +488,10 @@ helpback:
     endif
   endif
 endproc
+
+' no PETSCII.FNT
+nopetfnt:
+  resume petback
 
 ' no LIST.OVL
 nolist:

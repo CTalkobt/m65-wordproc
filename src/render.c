@@ -123,7 +123,8 @@ u16 mod_run(u8 cmd) {
     else if (cmd == MOD_MD_IMPORT) mdin_main();
     else if (cmd == MOD_HTML_EXPORT) html_main();
     else if ((cmd & ~MOD_MORE) > MOD_HTML_EXPORT) htmlin_main();
-    else rtf_main();
+    else if (cmd == MOD_RTF_EXPORT) rtf_main();
+    else rtfin_main();
 #endif
     doc_built();
     /* (not while more calls follow: the caches written here are in the
@@ -262,7 +263,7 @@ static void draw_glyph(const struct font *f, u8 c, u16 x, u8 top, u8 style);
  * base: its glyph (raised or lowered: superscript, subscript), underline,
  * strikethrough (a third of the ascent up: mid x-height) */
 static void draw_char(u8 c, u16 x, u8 w, u8 base, u8 a) {
-    const struct font *f = fonts[a & A_FONT];
+    const struct font *f = font_of(a);
     base = (u8)(base + script_dy(a));
     if (c != ' ') draw_glyph(f, c, x, (u8)(base - f->ascent), a);
     if (a & A_UNDER) band_hline(x, x + w, (u8)(base + 2));
@@ -463,7 +464,7 @@ void render_bars(void) {
         put_str(" Col ");
         put_num((u16)(cur - L.start + 1));
         put_str("  ");
-        put_str(font_names[a & A_FONT]);
+        put_str(font_names[font_id(a)]);
         put_str((a & A_BOLD) ? " B" : " -");
         put_str((a & A_ITAL) ? "I" : "-");
         put_str((a & A_UNDER) ? "U " : "- ");
@@ -534,6 +535,7 @@ static void draw_line(u16 l, const struct line *L) {
     x = (u16)(TEXT_X + L->x);
     for (; i < e; i++) {
         u8 c = txt_at(i), a = sty(atr_at(i)), w;
+        if (j.pet) a = PET_STYLE(a);
         if (i == cur) cx = x;
         if (c == CH_CR || c == CH_FF) {
             if (sel_on && i >= lo && i < hi) band_xor(x, x + 4, 0, h);
@@ -637,10 +639,11 @@ static void render_page(void) {
 #define DROP_W 20               /* cells */
 #define DROP_H 24               /* rows an item */
 #define DROP_ASC 18             /* its baseline */
-static const u8 fx_attr[10] = { F_SANS, F_SERIF, F_MONO, F_HEAD, A_BOLD, A_ITAL, A_UNDER, A_STRIKE, A_SUP, A_SUB };
+#define NFX 11
+static const u8 fx_attr[NFX] = { F_SANS, F_SERIF, F_MONO, F_HEAD, S_PETF, A_BOLD, A_ITAL, A_UNDER, A_STRIKE, A_SUP, A_SUB };
 
 void wp_drop(u8 k) {
-    u8 n, r, a, w, cnt = NKINDS, cs = 0, fxm = k & 0x40, *d;
+    u8 n, r = 0, a, w, cnt = NSTYLES, cs = 0, fxm = k & 0x40, *d;
     u16 x, sy = BAR_H;
     const char *s;
     if (k == 0xFF) {
@@ -651,9 +654,11 @@ void wp_drop(u8 k) {
     if (fxm) {
         /* (CTRL+E: the fonts and effects, those of the typing style or the
          * selection's start marked) */
-        cnt = 10;
+        cnt = NFX;
         k &= 0x3F;
         cs = sty(sel_on ? atr_at(sel_lo()) : typing_attr);
+        r = font_id(cs);
+        if (IS_C64(cs)) cs &= (u8)~A_SCRIPT;
     }
     for (n = 0; n < cnt; n++) {
         a = fxm ? fx_attr[n] : kind_attr[n];
@@ -664,7 +669,7 @@ void wp_drop(u8 k) {
             draw_char((u8)*s, x, w, DROP_ASC, a);
             x += w;
         }
-        if (fxm && (n < NFONTS ? (cs & A_FONT) == n : (cs & a)))
+        if (fxm && (n < NFACES ? r == n : (cs & a)))
             band_xor(3, 8, DROP_ASC - 8, DROP_ASC - 3);
         if (n == k) band_xor(0, DROP_W * 8, 0, DROP_H);
         for (r = 0, d = band; r < DROP_H; r++, d += COLS) {
@@ -684,9 +689,10 @@ void wp_drop(u8 k) {
 static u8 tag_colour(const char *t, u8 fx) {
     /* t: the tag's text after '['; fx: its effect (raw_tag's tag_fx) */
     if (*t == '/' || fx) return C_BLUE;         /* an effect (only effects are ended) */
-    if (t[0] == 'Q' || t[0] == 'L' || t[0] == 'N' || (t[0] == 'H' && t[1] < 'A') || (t[0] == 'C' && t[1] == 'o'))
+    if (t[0] == 'Q' || t[0] == 'L' || t[0] == 'N' || (t[0] == 'H' && t[1] < 'A') || (t[0] == 'C' && t[1] == 'o') ||
+        (t[0] == 'P' && t[1] == 'E' && t[7] == ' '))     /* ([PETSCII line]; [PETSCII] the font) */
         return C_GREEN;                 /* a kind */
-    if (t[0] == 'C' || t[0] == 'R' || t[0] == 'J' || t[0] == 'P') return C_RED;
+    if (t[0] == 'C' || t[0] == 'R' || t[0] == 'J' || (t[0] == 'P' && t[1] == 'a')) return C_RED;
     return C_PURPLE;
 }
 
@@ -709,6 +715,7 @@ static void render_raw(void) {
         band_fill(RAW_H, row_blank);
         if (l < nlines) {
             u16 i = L.start, e = line_end(l);
+            u8 pet = atr_at(para_end(i)) & A_PET;
             col = 0;
             for (; i < e && col < COLS; i++) {
                 u8 c = txt_at(i), n = raw_tag(i, tags), k, tc = C_BLUE;
@@ -725,6 +732,8 @@ static void render_raw(void) {
                 if (c == CH_CR) {
                     raw_cell(col, G_PILCROW, 0);
                     cellcol[col] = C_GREY;
+                } else if (pet) {
+                    draw_glyph(&font_petl, c, (u16)col * 8, 0, 0);     /* (its C64 glyph, 8 x 16) */
                 } else {
                     raw_cell(col, c, 0);
                 }

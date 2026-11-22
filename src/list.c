@@ -107,7 +107,7 @@ static void page_marks(void) {
         }
         w = just_w(c, a, &j);
         if (c == ' ') {
-            fa = fonts[a & A_FONT]->ascent;
+            fa = font_of(a)->ascent;
             if (i >= tr) {
                 band_xor(x, (u16)(x + w), (u8)(asc - (fa >> 1)), (u8)(asc + 1));
             } else {

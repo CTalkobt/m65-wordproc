@@ -17,14 +17,24 @@ u16 view_y;
 u8 npages;
 
 const struct font *const fonts[NFONTS] = { &font_sans, &font_serif, &font_mono, &font_head };
-const char *const font_names[NFONTS] = { "Sans", "Serif", "Mono", "Head" };
+const char *const font_names[NFACES] = { "Sans", "Serif", "Mono", "Head", "PETSCII" };
+/* (their records and glyphs made at the start: cold.c's pet_fonts) */
+const struct font font_petl = { 16, 14, PET_LIN, PETG_LIN };
+const struct font font_petf = { 16, 14, PET_LIN + 672, PETG_LIN };
+
+const struct font *font_of(u8 a) {
+    if (IS_C64(a)) return a & A_FONT ? &font_petf : &font_petl;
+    return fonts[a & A_FONT];
+}
+
+u8 font_id(u8 a) { return IS_C64(a) ? F_PET : a & A_FONT; }
 static const char *const align_tags[4] = { "", "[Center]", "[Right]", "[Just]" };
 
 /* the paragraph kinds (wp.h): their characters' style, names, raw view tags */
-const u8 kind_attr[KIND_TAB] = { F_SANS, F_HEAD | A_BOLD, F_HEAD, F_SERIF | A_BOLD, F_SERIF | A_ITAL, F_MONO };
-const char *const kind_names[KIND_TAB] = { "Normal", "Heading 1", "Heading 2", "Heading 3", "Quote", "Code", "Bullet",
-                                           "Numbered" };
-static const char *const kind_tags[KIND_TAB] = { "", "[H1]", "[H2]", "[H3]", "[Quote]", "[Code]", "[List]", "[Num]" };
+const u8 kind_attr[NSTYLES] = { F_SANS, F_HEAD | A_BOLD, F_HEAD, F_SERIF | A_BOLD, F_SERIF | A_ITAL, F_MONO, 0, 0, S_PETF };
+const char *const kind_names[NSTYLES] = { "Normal", "Heading 1", "Heading 2", "Heading 3", "Quote", "Code", "Bullet",
+                                          "Numbered", "PETSCII" };
+static const char *const kind_tags[NSTYLES] = { "", "[H1]", "[H2]", "[H3]", "[Quote]", "[Code]", "[List]", "[Num]", "[PETSCII line]" };
 /* the indent of a quote, a code block */
 static const u8 kind_indent[KIND_TAB] = { 0, 0, 0, 0, 24, 16, 24, 24 };
 
@@ -34,7 +44,7 @@ u8 para_indent(u8 kl) { return (u8)(kind_indent[kl & A_KIND] + ((kl & A_LEVEL) >
 static u8 is_break(u8 c) { return c == CH_CR || c == CH_FF; }
 
 u8 char_w(u8 c, u8 a) {
-    const struct font *f = fonts[a & A_FONT];
+    const struct font *f = font_of(a);
     u8 w;
     if (is_break(c)) return 0;
     if (c < FONT_FIRST || (c > 126 && c < FONT_HI)) c = '?';
@@ -49,6 +59,7 @@ const u8 fx_third[NFONTS] = { 4, 4, 3, 6 };
 /* style a's baseline moved: superscript up, subscript down */
 s8 script_dy(u8 a) {
     u8 t = fx_third[a & A_FONT];
+    if (IS_C64(a)) return 0;
     if (a & A_SUP) return (s8)-t;
     if (a & A_SUB) return (s8)(t - 1);
     return 0;
@@ -80,12 +91,12 @@ u8 prev_style(u16 i) {
 
 /* the tags shown before character i (into out, when not NULL); their length */
 u8 raw_tag(u16 i, char *out) {
-    u8 n = 0, prev, now, c = txt_at(i), k;
+    u8 n = 0, prev, now, c = txt_at(i), k, fn, fp;
     if (!out) out = mod_area.r.tag_buf;
     tag_fx_now = 0;
     if (i == 0 || is_break(txt_at(i - 1))) {
         u8 pa = atr_at(para_end(i));
-        n = tag_put(out, n, kind_tags[pa & A_KIND]);
+        n = tag_put(out, n, kind_tags[pa & A_PET ? K_PET : pa & A_KIND]);
         if (pa & A_LEVEL) {             /* (a list item's level: [List2] ...) */
             out[n - 1] = (char)('1' + ((pa & A_LEVEL) >> A_LEVEL_SHIFT));
             out[n++] = ']';
@@ -97,11 +108,16 @@ u8 raw_tag(u16 i, char *out) {
     prev = prev_style(i);
     now = sty(atr_at(i));
     if (prev == now) return n;
+    fn = font_id(now);
+    fp = font_id(prev);
+    /* (the C64 fonts' script bits are no script) */
+    if (IS_C64(prev)) prev &= (u8)~A_SCRIPT;
+    if (IS_C64(now)) now &= (u8)~A_SCRIPT;
     for (k = 0; k < 6; k++)
         if (prev & ~now & fx_bit[k]) n = tag_put(out, n, fx_close[k]);
-    if ((prev & A_FONT) != (now & A_FONT)) {
+    if (fn != fp) {
         n = tag_put(out, n, "[");
-        n = tag_put(out, n, font_names[now & A_FONT]);
+        n = tag_put(out, n, font_names[fn]);
         n = tag_put(out, n, "]");
     }
     for (k = 0; k < 6; k++)
@@ -113,14 +129,18 @@ u8 raw_tag(u16 i, char *out) {
     return n;
 }
 
+/* the line being laid out a PETSCII line's (produce) */
+static u8 lay_pet;
+
 /* a character's width in the current view: pixels, or cells with its tags */
 static u8 tok_w(u16 i) {
-    u8 c = txt_at(i);
+    u8 c = txt_at(i), a;
     if (view_mode == VIEW_RAW) {
         if (c == CH_FF) return raw_tag(i, 0);
         return (u8)(raw_tag(i, 0) + 1);
     }
-    return char_w(c, sty(atr_at(i)));
+    a = sty(atr_at(i));
+    return char_w(c, lay_pet ? PET_STYLE(a) : a);
 }
 
 /* ---- breaking lines ----
@@ -177,7 +197,8 @@ static u16 break_line(u16 pos, u16 width, u8 *hard) {
         }
         w = tok_w(i);
         if (x + w > width && i > pos) {
-            if (c == ' ') {         /* spaces hang past the edge */
+            /* (a PETSCII line's: broken at a character, its spaces kept) */
+            if (c == ' ' && !lay_pet) {     /* spaces hang past the edge */
                 while (txt_at(i) == ' ') i++;
                 if (is_break(txt_at(i))) {
                     *hard = 1;
@@ -185,7 +206,7 @@ static u16 break_line(u16 pos, u16 width, u8 *hard) {
                 }
                 break;
             }
-            if (brk > pos) i = brk;
+            if (brk > pos && !lay_pet) i = brk;
             break;
         }
         x += w;
@@ -215,7 +236,7 @@ static void state_at(u16 l, struct lstate *st) {
     st->yin = (u16)(L.y - (PAGE_GAP + st->page * PAGE_STRIDE + MARGIN_TOP));
     st->para = (u8)(p == 0 || is_break(txt_at(p - 1)));
     st->al = para_al(p);
-    st->kind = L.kind & (A_KIND | A_LEVEL);
+    st->kind = L.kind & (A_KIND | A_LEVEL | L_PET);
 }
 
 /* the next line from st into *L, st moved past it; 0 at the document's end */
@@ -224,6 +245,7 @@ static u8 produce(struct lstate *st, struct line *L) {
     u8 hard, asc, desc, nsp, trail, x, ind, k;
     const struct font *f;
     if (pos >= doc_len) return 0;
+    lay_pet = 0;
     if (view_mode == VIEW_RAW) {
         end = break_line(pos, COLS, &hard);
         L->start = pos;
@@ -239,9 +261,10 @@ static u8 produce(struct lstate *st, struct line *L) {
     if (st->para) {
         k = atr_at(para_end(pos));
         st->al = (u8)((k & A_ALIGN) >> A_ALIGN_SHIFT);
-        st->kind = k & (A_KIND | A_LEVEL);
+        st->kind = (u8)((k & (A_KIND | A_LEVEL)) | (k & A_PET ? L_PET : 0));
     }
     k = st->kind;
+    lay_pet = k & L_PET;
     ind = para_indent(k);
     tmax = TEXT_W - ind;
     end = break_line(pos, tmax, &hard);
@@ -253,11 +276,12 @@ static u8 produce(struct lstate *st, struct line *L) {
     tw = 0;
     for (i = pos; i < end; i++) {
         u8 c = txt_at(i), a = sty(atr_at(i));
+        if (lay_pet) a = PET_STYLE(a);
         if (is_break(c)) {
             if (i > pos) continue;
-            a = kind_attr[k & A_KIND];      /* (an empty paragraph: its kind's height) */
+            a = lay_pet ? S_PETL : kind_attr[k & A_KIND];      /* (an empty paragraph: its kind's height) */
         }
-        f = fonts[a & A_FONT];
+        f = font_of(a);
         {
             /* (a superscript's room above, a subscript's below) */
             s8 dy = script_dy(a);
@@ -498,10 +522,11 @@ void just_init(struct just *j, const struct line *L) {
     j->extra = L->extra;
     j->nsp = L->nsp;
     j->k = 0;
+    j->pet = L->kind & L_PET;
 }
 
 u8 just_w(u8 c, u8 a, struct just *j) {
-    u8 w = char_w(c, a);
+    u8 w = char_w(c, j->pet ? PET_STYLE(a) : a);
     if (c == ' ' && j->k < j->nsp) w += just_share(j->extra, j->nsp, j->k++);
     return w;
 }

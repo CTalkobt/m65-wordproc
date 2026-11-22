@@ -24,7 +24,8 @@
  *   Mono in a paragraph     `...`
  *   centre, right, justify  <div align="center"> ... </div> around it
  *   page break              <div style="page-break-after: always"></div>
- *   Serif, Head in part     (no Markdown for them: plain text)
+ *   Serif, Head in part     (no Markdown for them: plain text; the PETSCII
+ *                           font as Mono)
  * Punctuation that Markdown reads (^ too: Pandoc's superscript) is escaped with "\"; spaces at a
  * paragraph's start are &nbsp;. Empty paragraphs are not written. Latin-1
  * characters are written as UTF-8.
@@ -50,7 +51,9 @@ static u8 base;                 /* the paragraph kind's own style (kind_attr) */
  * the paragraph's kind does not give it), and M_CODE for Mono in another
  * kind (never for a backtick, which a code span cannot hold) */
 static u8 raw_style(u16 i) {
-    u8 a = sty(atr_at(i)), s = a & M_FLAGS & ~base;
+    u8 a = sty(atr_at(i)), s;
+    if (IS_C64(a)) a &= (u8)~A_SCRIPT;  /* (the PETSCII font: as Mono, a code span) */
+    s = a & M_FLAGS & ~base;
     if ((a & A_FONT) == F_MONO && (base & A_FONT) != F_MONO && txt_at(i) != '`') s |= M_CODE;
     return s;
 }

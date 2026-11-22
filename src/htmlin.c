@@ -18,8 +18,8 @@
  *                (nested: the level, up to 4)
  *   styles       <b> <strong>, <i> <em> <cite> <var> <dfn>, <u> <ins>,
  *                <code> <tt> <kbd> <samp> (Mono), <s> <strike> <del>,
- *                <sup>, <sub>, <span class="s|r|h">
- *                (the export's Sans, Serif, Head)
+ *                <sup>, <sub>, <span class="s|r|h|p">
+ *                (the export's Sans, Serif, Head, PETSCII)
  *   alignment    style="text-align: ...", align="...", <center>
  *   page break   style="page-break-after: always" (or break-before / -after)
  *   tables       a row a paragraph, two spaces between cells
@@ -75,6 +75,7 @@ static u8 attr(void) {
     if (n_on[1]) b |= A_ITAL;
     if (n_on[2]) b |= A_UNDER;
     if (n_on[4]) b |= A_STRIKE;
+    if (f == F_PET) return (u8)((b & A_FX) | S_PETF);
     b |= scr;
     return (u8)((b & (u8)~A_FONT) | f);
 }
@@ -112,6 +113,7 @@ static void brk(u8 gap) {
 
 /* a character of the text (the spaces held before it) */
 static void ch(u16 u) {
+    pre_first = 0;              /* (a UTF-8 one too: a line end after it counts) */
     begin();
     if (sp_n) {
         b_attr = sp_attr;
@@ -218,7 +220,7 @@ static void attr_done(void) {
         t_align = align_of();
     } else if (k == 3) {
         if (has("petscii")) t_pet = 1;
-        if (avl == 1) t_font = av[0] == 's' ? F_SANS : av[0] == 'r' ? F_SERIF : av[0] == 'h' ? F_HEAD : NONE;
+        if (avl == 1) t_font = av[0] == 's' ? F_SANS : av[0] == 'r' ? F_SERIF : av[0] == 'h' ? F_HEAD : av[0] == 'p' ? F_PET : NONE;
     }
 }
 

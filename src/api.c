@@ -55,8 +55,8 @@ static char msg_parm[81];
 #define CMD_LIST 21
 #define CMD_UNDO 22
 #define CMD_STYLE 32             /* + a kind (K_...): doc_style */
-#define CMD_FX 40                /* + the effect pop-up's item (CTRL+E): ED_FX */
-#define NFX 10
+#define CMD_FX 48                /* + the effect pop-up's item (CTRL+E): ED_FX */
+#define NFX 11
 
 #define GET_DIRTY 0
 #define GET_LEN 1
@@ -299,7 +299,7 @@ u8 wp_key(u8 k) {
         relayout = 1;
         break;
     default:
-        c = petscii_to_ascii(k);
+        c = key_char(k);
         if (!c) return 0;
         typed(c);
         relayout = 1;
@@ -393,7 +393,7 @@ void wp_cmd(u8 c) {
         break;
     default:
         if ((u8)(c - CMD_FX) < NFX) ed(ED_FX, (u8)(c - CMD_FX));
-        else if ((u8)(c - CMD_STYLE) < NKINDS) doc_style((u8)(c - CMD_STYLE));
+        else if ((u8)(c - CMD_STYLE) < NSTYLES) doc_style((u8)(c - CMD_STYLE));
         else return;
         break;
     }
@@ -438,6 +438,7 @@ u16 wp_get(u8 w) {
         return list_check();
     case GET_FONTS:             /* (and whether there is attic RAM, the text's: 0 yes) */
         font_install();
+        pet_fonts();
         mem_put(TEXT_LIN, 0x5A);
         return mem_get(TEXT_LIN) ^ 0x5A;
     case GET_KIND: return cur_kind();

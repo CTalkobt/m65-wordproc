@@ -48,7 +48,10 @@ u8 para_al(u16 i) { return (u8)((atr_at(para_end(i)) & A_ALIGN) >> A_ALIGN_SHIFT
 /* its kind (K_...) */
 u8 para_kind(u16 i) { return atr_at(para_end(i)) & A_KIND; }
 
-u8 cur_kind(void) { return para_kind(sel_on ? sel_lo() : cur); }
+u8 cur_kind(void) {
+    u8 a = atr_at(para_end(sel_on ? sel_lo() : cur));
+    return a & A_PET ? K_PET : a & A_KIND;
+}
 
 static u8 is_break(u8 c) { return c == CH_CR || c == CH_FF; }
 

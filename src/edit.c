@@ -37,14 +37,25 @@ u8 undo_swap(void);
 /* ---- styles (F3 / F5 / F7, CTRL+B / I / U; F2; F4; CTRL+D), list levels ---- */
 static u8 is_brk(u8 c) { return c == CH_CR || c == CH_FF; }
 
-/* the selection's styles: (a & keep) | set (each character's entry in the
- * style table changed for that style's); then the typing style is its
- * first character's */
+/* style o as (o & keep) | set. The PETSCII font's script bits (wp.h:
+ * S_PETF) are its font, not a script: a font set, or a script turned on,
+ * leaves it; a script turned off leaves it as it is. */
+static u8 apply(u8 o, u8 keep, u8 set) {
+    if (IS_C64(o)) {
+        if ((~keep & A_FONT) || (~keep & A_SCRIPT) == A_SCRIPT) o &= (u8)~A_SCRIPT;
+        else keep |= A_SCRIPT;
+    }
+    return (u8)((o & keep) | set);
+}
+
+/* the selection's styles: apply(its, keep, set) (each character's entry
+ * in the style table changed for that style's); then the typing style is
+ * its first character's */
 static void restyle(u8 keep, u8 set) {
     u16 lo = sel_lo(), hi = sel_hi(), i;
     note(lo, hi);
     for (i = lo; i < hi; i++)
-        if (!is_brk(txt_at(i))) atr_put(i, sty_find((u8)((sty(atr_at(i)) & keep) | set)));
+        if (!is_brk(txt_at(i))) atr_put(i, sty_find(apply(sty(atr_at(i)), keep, set)));
     typing_attr = atr_at(lo);
     dirty = 1;
     layout_edit(lo, hi, 0);
@@ -53,27 +64,36 @@ static void restyle(u8 keep, u8 set) {
 /* bold / italic / underline / strikethrough / superscript / subscript:
  * over the selection (all on unless the first character has it already),
  * else for what is typed next (superscript and subscript: one or neither) */
-static void toggle(u8 bit) {
-    u8 clr = bit & A_SCRIPT ? A_SCRIPT : bit, a = sty(sel_on ? atr_at(sel_lo()) : typing_attr);
-    if (!sel_on) typing_attr = sty_find(a & bit ? (u8)(a & ~bit) : (u8)((a & ~clr) | bit));
-    else if (a & bit) restyle((u8)~bit, 0);
-    else restyle((u8)~clr, bit);
+/* over the selection, else for what is typed next: apply(keep, set) */
+static void restyle_or_typing(u8 a, u8 keep, u8 set) {
+    if (sel_on) restyle(keep, set);
+    else typing_attr = sty_find(apply(a, keep, set));
 }
 
-/* font f (0xFF: the next, after the selection's first character's):
- * over the selection, else for what is typed next */
+static void toggle(u8 bit) {
+    u8 clr = bit & A_SCRIPT ? A_SCRIPT : bit, a = sty(sel_on ? atr_at(sel_lo()) : typing_attr), b = a;
+    if (IS_C64(b)) b &= (u8)~A_SCRIPT;
+    if (b & bit) restyle_or_typing(a, (u8)~bit, 0);
+    else restyle_or_typing(a, (u8)~clr, bit);
+}
+
+/* font f (F_SANS ... F_PET; 0xFF: the next, after the selection's first
+ * character's): over the selection, else for what is typed next */
 static void set_font(u8 f) {
     u8 a = sty(sel_on ? atr_at(sel_lo()) : typing_attr);
-    if (f >= NFONTS) f = (u8)((a + 1) & A_FONT);   /* (NFONTS: 4) */
-    if (sel_on) restyle((u8)~A_FONT, f);
-    else typing_attr = sty_find((u8)((a & ~A_FONT) | f));
+    if (f >= NFACES) {
+        f = (u8)(font_id(a) + 1);
+        if (f == NFACES) f = 0;
+    }
+    if (f == F_PET) restyle_or_typing(a, A_FX, S_PETF);
+    else restyle_or_typing(a, (u8)~A_FONT, f);
 }
 
 /* the effect pop-up's item n (CTRL+E): a font, then an effect */
 static const u8 fx_bits[6] = { A_BOLD, A_ITAL, A_UNDER, A_STRIKE, A_SUP, A_SUB };
 static void fx(u8 n) {
-    if (n < NFONTS) set_font(n);
-    else toggle(fx_bits[n - NFONTS]);
+    if (n < NFACES) set_font(n);
+    else toggle(fx_bits[n - NFACES]);
 }
 
 /* the alignment of the paragraph(s) at the cursor / selection: left,
@@ -120,10 +140,14 @@ static u8 list_level(u8 in) {
  * its characters in k's font and style where they were in its old kind's
  * (others keep their font; bold, italic, underline added to the old kind's
  * stay); the selection's part of any other paragraph takes k's font and
- * style as they are (Normal: plain). */
+ * style as they are (Normal: plain). K_PET: a PETSCII line (K_CODE and
+ * A_PET), its text made PETSCII codes that look as it did (a-z as A-Z,
+ * what the C64's upper-case set lacks "?"); leaving one, its graphics are
+ * "?". In part of a paragraph: the PETSCII font. */
 static void style(u8 k) {
     u16 lo = cur, hi = cur, p, e, i, ps;
-    u8 a, f, of, keep, ka = kind_attr[k], kf = ka & A_FONT, kfl = ka & ~A_FONT;
+    u8 kk = k == K_PET ? K_CODE : k, pet = k == K_PET ? A_PET : 0;
+    u8 a, f, of, keep, c, conv, ka = kind_attr[kk], kf = ka & A_FONT, kfl = ka & ~A_FONT;
     if (sel_on) {
         lo = sel_lo();
         hi = sel_hi();
@@ -136,15 +160,22 @@ static void style(u8 k) {
             a = kind_attr[atr_at(e) & A_KIND];
             of = a & A_FONT;
             keep = (u8)(~a & (A_BOLD | A_ITAL | A_UNDER | A_STRIKE | A_SCRIPT));
+            conv = (u8)(pet ^ (atr_at(e) & A_PET));
             for (i = p; i < e; i++) {
                 a = sty(atr_at(i));
                 f = a & A_FONT;
                 if (f == of) f = kf;
                 atr_put(i, sty_find((u8)(f | (a & keep) | kfl)));
+                if (conv) {
+                    c = txt_at(i);
+                    if (pet && (u8)(c - 'a') < 26) c = (u8)(c - 32);
+                    else if (c >= 0x60) c = '?';
+                    txt_put(i, c);
+                }
             }
-            atr_put(e, (u8)((atr_at(e) & (k >= K_BULLET ? ~A_KIND : A_ALIGN)) | k));    /* (a list keeps its level) */
+            atr_put(e, (u8)((atr_at(e) & (kk >= K_BULLET ? ~(A_KIND | A_PET) : A_ALIGN)) | kk | pet));    /* (a list keeps its level) */
         } else {
-            for (i = lo > p ? lo : p; i < e && i < hi; i++) atr_put(i, sty_find(ka));
+            for (i = lo > p ? lo : p; i < e && i < hi; i++) atr_put(i, sty_find(kind_attr[k]));
         }
         if (!sel_on || e + 1 >= hi || e >= doc_len - 1) break;
         p = (u16)(e + 1);
