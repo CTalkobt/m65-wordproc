@@ -31,8 +31,8 @@ TARGET = $(BUILD)/writer.prg
 MAP    = $(BUILD)/writer.map
 DISK   = $(BUILD)/writer.d81
 
-CSRC    = src/cold.c src/petfont.c src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/rtfin.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/m65.c src/fonts.c
-PORTABLE = src/cold.c src/petfont.c src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/rtfin.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/fonts.c
+CSRC    = src/cold.c src/petfont.c src/names.c src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/rtfin.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/m65.c src/fonts.c
+PORTABLE = src/cold.c src/petfont.c src/names.c src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/rtfin.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/fonts.c
 HEADERS = src/wp.h src/petuni.h
 
 # The C half is compiled here (basic45 --link takes the objects): -O2 for
@@ -62,7 +62,7 @@ BASFLAGS ?= --minify --link-align=1
 # them never nest (an overlay calls only resident code): a return stack 2
 # deep (M65Compiler #689)
 OVL_ROOM = 2707
-OVLFLAGS = --overlay-store=0x4D000-0x4DFFF --overlay-region=_mod_area+$(OVL_ROOM) --overlay-no-load --overlay-depth=2
+OVLFLAGS = --overlay-store=0x4D000-0x4EFFF --overlay-region=_mod_area+$(OVL_ROOM) --overlay-no-load --overlay-depth=2
 # the C half's CPU stack: a page of its own, $1700-$17FF (it never goes
 # deeper than 32 bytes), next to its base page (src/lowmem.s45's $1600),
 # not 512 bytes at the end of bank 0 (ln45 --stack-page, M65Compiler
@@ -71,10 +71,10 @@ OVLFLAGS = --overlay-store=0x4D000-0x4DFFF --overlay-region=_mod_area+$(OVL_ROOM
 # set. (0x17, not $17: the shell would take $1 as an argument)
 STACKFLAGS = --stack-page=0x17
 FAST    = render m65 fonts
-SMALL   = api conv doc layout cold petfont
+SMALL   = api conv doc layout cold petfont names
 # (conv.c is called by the modules, whose base-page blocks start at $80:
 # its functions keep their variables out of the base page)
-NOZP    = conv
+NOZP    = conv m65
 OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45) $(BUILD)/obj/modcall.o45 $(BUILD)/obj/listcall.o45 $(BUILD)/obj/gap.o45 $(BUILD)/obj/gapmove.o45 $(BUILD)/obj/style.o45 $(BUILD)/obj/stylecold.o45 $(BUILD)/obj/lowmem.o45 $(BUILD)/obj/vicunlock.o45
 CCQUIET = 2>&1 | grep -v 'note:\|^ *[0-9]* |\|^ *|' || true
 

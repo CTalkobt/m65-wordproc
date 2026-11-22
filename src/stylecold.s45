@@ -1,5 +1,5 @@
 ; stylecold.s45 — the style table's file work (style.s45 has the rest):
-; sty_save, sty_load, sty_remap, called only by cold.c's doc_pack and
+; sty_save, sty_load, sty_remap, called only by names.c's doc_pack and
 ; doc_unpack, so in the same code overlay
 ;
 ; u16 sty_save(u16 o): o at $10/$11: ST_SIZE, st_n (2 bytes) and the
@@ -14,7 +14,7 @@
 ;   for theirs (past its count: 0), unless each was its own; with v1, its
 ;   CR / FF's attributes cleared but for the alignment (a version 1 file)
 
-.overlay cold
+.overlay names
 
 ; no calls through pointers here (ln45's call graph)
 .weak cc45.icallinfo
@@ -91,7 +91,7 @@ proc _sty_load
     .zp_uses $10, $11, $12
     .zp_clobbers $10, $11, $12, $13, $14, $15, $16, $17, $1c, $1d, $1e, $1f
     .zp_release $10, $11, $12, $13, $14, $15, $16, $17, $1c, $1d, $1e, $1f
-    .reg_clobbers A, Z
+    .reg_clobbers A, X, Z
     .flag_clobbers C, N, Z, V
     lda $10                 ; $14: SCRATCH_LIN + o (the table's head)
     sta $14

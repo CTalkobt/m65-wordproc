@@ -20,6 +20,8 @@
  *                           written)
  *   another font in part    Mono <code>, Serif, Sans, Head and PETSCII a
  *                           <span> (the style sheet's classes r, s, h, p)
+ *   a named style (#5)      <span data-style="its name"> around its
+ *                           characters' markup
  *   centre, right, justify  style="text-align: ..." on the paragraph
  *   page break              <div style="page-break-after: always"></div>
  * & < > are entities; Latin-1 characters are UTF-8. Empty paragraphs
@@ -100,12 +102,34 @@ static void restyle_to(u16 t) {
 
 /* the text of paragraph ps..pe-1; code: as it is (in <pre><code>; 2: a
  * PETSCII line) */
+static u8 open_nm;              /* the named style whose <span data-style> is open (0: none) */
+
+/* the named style of character i's (0: none): its span closed, the new
+ * one's opened (a '"' in its name as ') */
+static void name_to(u16 i) {
+    u8 k = atr_at(i);
+    const char *s;
+    if (i == 0xFFFF || !sty_named(k)) k = 0;
+    if (k == open_nm) return;
+    restyle_to(0);
+    if (open_nm) outs("</span>");
+    if (k) {
+        outs("<span data-style=\"");
+        for (s = sty_name(k); *s; s++) out(*s == '"' ? '\'' : (u8)*s);
+        outs("\">");
+    }
+    open_nm = k;
+}
+
 static void out_para(u16 ps, u16 pe, u8 code) {
     u16 u;
     u8 c;
     open_st = 0;
     for (; ps < pe; ps++) {
-        if (!code) restyle_to(h_style(ps));
+        if (!code) {
+            name_to(ps);
+            restyle_to(h_style(ps));
+        }
         c = txt_at(ps);
         if (code > 1) {
             u = pet_to_uni(c);
@@ -117,6 +141,7 @@ static void out_para(u16 ps, u16 pe, u8 code) {
         }
         out_ch(c);
     }
+    name_to(0xFFFF);
     restyle_to(0);
 }
 
@@ -220,7 +245,7 @@ u16 html_export(void) {
     walk_start();
     prev = P_NONE;
     pal = 0;
-    ld = 0;
+    ld = open_nm = 0;               /* (a module's variables are not 0 at its start) */
     while ((ev = walk_next()) != EV_END) {
         if (ev == EV_PEND && w_attr == CH_FF) {
             end_block();

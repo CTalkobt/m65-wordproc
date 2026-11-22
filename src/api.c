@@ -56,6 +56,7 @@ static char msg_parm[81];
 #define CMD_UNDO 22
 #define CMD_STYLE 32             /* + a kind (K_...): doc_style */
 #define CMD_FX 48                /* + the effect pop-up's item (CTRL+E): ED_FX */
+#define CMD_NAMES 64             /* + names_cmd's command (SHIFT+CTRL+S's pop-up: NM_...) */
 #define NFX 11
 
 #define GET_DIRTY 0
@@ -77,6 +78,7 @@ static char msg_parm[81];
 #define GET_HTMLBEGIN 21         /* HTML import (HTMLIN.OVL), streamed as RTF's: begin, chunk, end */
 #define GET_HTMLCHUNK 22
 #define GET_HTMLEND 23
+#define GET_NAMES 24             /* the named styles' count */
 
 /* what wp_key leaves to BASIC (its ON ... GOSUB) */
 #define ACT_HELP 1                 /* F8, HELP */
@@ -88,6 +90,7 @@ static char msg_parm[81];
 #define ACT_REPLACE 7              /* CTRL+H */
 #define ACT_SAVE 8                 /* CTRL+W: save, asking only for a new name */
 #define ACT_FX 9                   /* CTRL+E: the font and effect pop-up */
+#define ACT_NAMES 10               /* SHIFT+CTRL+S: the named styles' pop-up */
 
 static u8 started;
 u8 mod_cmd;
@@ -216,6 +219,7 @@ static const u8 keys[] = {
 
 u8 wp_key(u8 k) {
     u8 c, relayout = 0, mv = 1, m = kbd_mods(), v;
+    if ((m & KM_CTRL) && (m & KM_SHIFT) && (k == 19 || k == 147)) return ACT_NAMES;
     if ((m & KM_CTRL) && (m & KM_SHIFT) && (k == 6 || k == 2)) {
         wp_find(k == 2 ? FIND_BACK : FIND_FWD);
         return 0;
@@ -311,9 +315,28 @@ u8 wp_key(u8 k) {
     return 0;
 }
 
+/* a named style's command (names_cmd's c; NM_NEW: msg, from BASIC, its
+ * name): the selection noted for undo, then the overlay; a redefined one
+ * is drawn again everywhere */
+static void names(u8 c) {
+    u_open = 0;
+    if (sel_on) undo_note(sel_lo(), sel_hi());
+    ovl_fresh();
+    if (c >= NM_NEW) to_ascii(msg, NAME_LEN - 1);
+    c = names_cmd(c);
+    msg[0] = 0;
+    if (c) say("16 named styles at most.");
+    render_invalidate();
+    refresh(1);
+}
+
 void wp_cmd(u8 c) {
     u8 relayout = 1;
     u16 l;
+    if (c >= CMD_NAMES) {
+        names((u8)(c - CMD_NAMES));
+        return;
+    }
     msg[0] = 0;
     u_open = 0;                 /* (each command an edit of its own) */
     switch (c) {
@@ -442,6 +465,7 @@ u16 wp_get(u8 w) {
         mem_put(TEXT_LIN, 0x5A);
         return mem_get(TEXT_LIN) ^ 0x5A;
     case GET_KIND: return cur_kind();
+    case GET_NAMES: return names_count();
     case GET_IMPORT:
     case GET_MDIMPORT:
     case GET_RTFEND:

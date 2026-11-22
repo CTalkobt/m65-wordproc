@@ -64,3 +64,6 @@ UNDERLINE "Underline"
 STRIKE    "Strikethrough"
 SUPER     "Superscript"
 SUBSCR    "Subscript"
+# the named styles' pop-up (SHIFT+CTRL+S): its last item; the prompt
+NEWSTYLE  "New style..."
+STYLENAME "Name of the new style (the selection's look): %"

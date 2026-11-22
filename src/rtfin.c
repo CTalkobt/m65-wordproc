@@ -36,9 +36,11 @@
  * footers, footnotes and every {\* ...} group (as the spec says a reader
  * should for those it does not know). Unknown control words are ignored.
  */
+#include <string.h>
 #include "wp.h"
 #define PET_IN
 #include "petuni.h"
+#include "names_def.h"
 
 #define CHUNK 1024
 
@@ -65,8 +67,15 @@ static char s_name[24];                 /* (lower case) */
 
 /* the group's state (saved at {, put back at }) */
 static u8 font, flags, fs, uc, dest;
+/* character styles (\csN, named styles): the stylesheet's (their numbers,
+ * names as they are); the one in effect (its place + 1, 0: none), the last
+ * named style made of it (cs_k: its entry, for that one and style cs_a) */
+#define NCS 16
+static int16_t cs_num[NCS], cs_cur;
+static char cs_name[NCS][NAME_LEN], s_raw[NAME_LEN];
+static u8 ncs, cur_cs, cs_last, cs_a, cs_k;
 static u8 depth, over;
-static u8 g_font[DEPTH], g_flags[DEPTH], g_fs[DEPTH], g_uc[DEPTH], g_dest[DEPTH];
+static u8 g_font[DEPTH], g_flags[DEPTH], g_fs[DEPTH], g_uc[DEPTH], g_dest[DEPTH], g_cs[DEPTH];
 
 /* the font table: an RTF font's number, its Writer font */
 static int16_t f_num[NFONT];
@@ -88,6 +97,16 @@ static u8 rtf_font(int16_t n) {
 static void uchar(u16 u) {
     u8 f = fs >= 28 ? F_HEAD : font;
     b_attr = f == F_PET ? (u8)((flags & A_FX) | S_PETF) : (u8)(f | flags);
+    /* (in a character style: that named style, defined by its look) */
+    b_named = 0;
+    if (cur_cs) {
+        if (cur_cs != cs_last || b_attr != cs_a) {
+            cs_last = cur_cs;
+            cs_a = b_attr;
+            cs_k = name_define(cs_name[cur_cs - 1], b_attr);
+        }
+        b_named = cs_k;
+    }
     if (!(pkind & A_PET)) build_uni(u);
     else if (u >= 32) build_put(uni_pet(u));        /* (a PETSCII line's: back to PETSCII) */
     if (u >= 32) pempty = 0;
@@ -122,7 +141,10 @@ static void text(u8 c, u8 hex) {
     }
     if (dest == D_STYLES) {
         if (c == ';') style_end();
-        else if (s_len < sizeof s_name - 1) s_name[s_len++] = (char)(c | (is_letter(c) ? 0x20 : 0));
+        else if (s_len < sizeof s_name - 1) {
+            if (s_len < NAME_LEN - 1) s_raw[s_len] = (char)c;
+            s_name[s_len++] = (char)(c | (is_letter(c) ? 0x20 : 0));
+        }
         return;
     }
     if (dest == D_FONTS) {
@@ -181,6 +203,13 @@ static void style_end(void) {
         s_num[nstyle] = s_cur;
         s_kind[nstyle++] = k;
     }
+    if (cs_cur >= 0 && ncs < NCS) {
+        /* (a character style: its name as it is) */
+        s_raw[s_len < NAME_LEN - 1 ? s_len : NAME_LEN - 1] = 0;
+        cs_num[ncs] = cs_cur;
+        memcpy(cs_name[ncs++], s_raw, NAME_LEN);
+    }
+    cs_cur = -1;
     s_len = 0;
     s_cur = -1;
     pkind = 0;
@@ -193,6 +222,7 @@ static void push(void) {
         g_fs[depth] = fs;
         g_uc[depth] = uc;
         g_dest[depth] = dest;
+        g_cs[depth] = cur_cs;
         depth++;
     } else {
         over++;
@@ -215,6 +245,7 @@ static void pop(void) {
     fs = g_fs[depth];
     uc = g_uc[depth];
     dest = g_dest[depth];
+    cur_cs = g_cs[depth];
     if (!depth) st = S_DONE;
 }
 
@@ -239,10 +270,10 @@ static const char skips[] =
 static const char words[] =
     "par line row sect page tab cell pard plain ql qc qr qj b i ul ulnone uld ulw uldb "
     "f fs u uc bin deff fonttbl froman fmodern s outlinelevel stylesheet listtext ilvl "
-    "strike striked super sub nosupersub up dn emdash endash lquote rquote ldblquote rdblquote bullet";
+    "strike striked super sub nosupersub up dn emdash endash lquote rquote ldblquote rdblquote bullet cs";
 enum { W_PAR = 1, W_LINE, W_ROW, W_SECT, W_PAGE, W_TAB, W_CELL, W_PARD, W_PLAIN, W_QL, W_QC, W_QR, W_QJ,
        W_B, W_I, W_UL, W_ULNONE, W_ULD, W_ULW, W_ULDB, W_F, W_FS, W_U, W_UC, W_BIN, W_DEFF, W_FONTTBL,
-       W_FROMAN, W_FMODERN, W_S, W_OUTLINELEVEL, W_STYLESHEET, W_LISTTEXT, W_ILVL, W_STRIKE, W_STRIKED, W_SUPER, W_SUB, W_NOSUPERSUB, W_UP, W_DN, W_EMDASH, W_ENDASH, W_LQUOTE, W_RQUOTE, W_LDBLQUOTE, W_RDBLQUOTE, W_BULLET };
+       W_FROMAN, W_FMODERN, W_S, W_OUTLINELEVEL, W_STYLESHEET, W_LISTTEXT, W_ILVL, W_STRIKE, W_STRIKED, W_SUPER, W_SUB, W_NOSUPERSUB, W_UP, W_DN, W_EMDASH, W_ENDASH, W_LQUOTE, W_RQUOTE, W_LDBLQUOTE, W_RDBLQUOTE, W_BULLET, W_CS };
 static const u16 named[] = { 0x2014, 0x2013, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022 };
 
 static void ctrl_word(void) {
@@ -266,7 +297,10 @@ static void ctrl_word(void) {
     if (dest == D_STYLES) {
         /* a style's number (a character or table style's: none), its level */
         if (w == W_S) s_cur = param;
-        else if ((word[0] == 'c' || word[0] == 't' || word[0] == 'd') && word[1] == 's' && !word[2]) s_cur = -1;
+        else if ((word[0] == 'c' || word[0] == 't' || word[0] == 'd') && word[1] == 's' && !word[2]) {
+            s_cur = -1;
+            if (word[0] == 'c') cs_cur = param;
+        }
         else if (w == W_OUTLINELEVEL) pkind = level_kind(param);
         return;
     }
@@ -304,7 +338,15 @@ static void ctrl_word(void) {
         s_len = 0;
         s_cur = -1;
         break;
+    case W_CS: {
+        u8 k;
+        cur_cs = 0;
+        for (k = 0; k < ncs; k++)
+            if (cs_num[k] == param) cur_cs = (u8)(k + 1);
+        break;
+    }
     case W_PLAIN:
+        cur_cs = 0;
         font = deff_fam;
         flags = 0;
         fs = 24;
@@ -351,7 +393,7 @@ static void symbol(u8 c) {
     if (c == '\\' || c == '{' || c == '}') text(c, 0);
     else if (c == '~') text(' ', 0);
     else if (c == '_') text('-', 0);
-    else if (c == '*') dest = D_SKIP;
+    else if (c == '*' && dest != D_STYLES) dest = D_SKIP;     /* (in the stylesheet: a character style's, \*\csN) */
     else if ((c == '\r' || c == '\n') && dest == D_TEXT) end_para(CH_CR);
 }
 
@@ -433,7 +475,8 @@ static void rtf_begin(void) {
     st = S_TEXT;
     build_start();
     binskip = 0;
-    uskip = depth = over = nfont = nstyle = s_len = 0;
+    uskip = depth = over = nfont = nstyle = s_len = ncs = cur_cs = cs_last = 0;
+    cs_cur = -1;
     pempty = 1;
     align = font = flags = deff_fam = pkind = lkind = llevel = 0;
     deff = 0;

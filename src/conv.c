@@ -61,12 +61,15 @@ u8 sty(u8 s) {
     return sc_e;
 }
 
-/* style e's entry: found, or added (the table full: 0, the plain style) */
+void sty_flush(void) { sc_i = sc_e = sf_e = sf_i = 0; }
+
+/* style e's entry (not a named style's): found, or added (the table full:
+ * 0, the plain style) */
 u8 sty_find(u8 e) {
     u16 k;
     if (e == sf_e) return sf_i;
     for (k = 0; k < st_n; k++)
-        if (mem_get(ST_LIN + k) == e) goto found;
+        if (mem_get(ST_LIN + k) == e && !sty_named((u8)k)) goto found;
     if (st_n == 256) return 0;
     mem_put(ST_LIN + k, e);
     st_n++;
@@ -130,6 +133,37 @@ void sty_remap(u16 n, u8 v1) {
 }
 #endif
 
+/* ---- named styles (wp.h) ---- */
+u8 st_nidx[NNAMES];
+static char nbuf[NAME_LEN];
+
+const char *name_at(u8 k) {
+    mem_read((u8 *)nbuf, NAMES_LIN + (u16)k * NAME_LEN, NAME_LEN);
+    return nbuf;
+}
+
+const char *sty_name(u8 i) {
+    u8 k = sty_named(i);
+    return k ? name_at((u8)(k - 1)) : 0;
+}
+
+#ifndef __cc45__
+/* (on the MEGA65 style.s45's) */
+u8 sty_named(u8 i) {
+    u8 k;
+    if (i)
+        for (k = 0; k < NNAMES; k++)
+            if (st_nidx[k] == i) return (u8)(k + 1);
+    return 0;
+}
+
+u8 names_count(void) {
+    u8 k = 0;
+    while (k < NNAMES && st_nidx[k]) k++;
+    return k;
+}
+#endif
+
 /* ==== output: bytes to SCRATCH_LIN ==== */
 u16 o_n;
 
@@ -148,7 +182,7 @@ u16 o_end(void) { return o_n <= SCRATCH_MAX ? o_n : 0; }
 
 /* ==== export: the document's paragraphs and runs, in order ==== */
 u16 w_pos, w_to;
-u8 w_attr;
+u8 w_attr, w_idx;
 static u16 w_at, w_pe;              /* where the next event starts; the paragraph's CR / FF */
 static u8 w_in;                     /* in a paragraph (its runs, then its end) */
 
@@ -177,6 +211,7 @@ u8 walk_next(void) {
     a = atr_at(i);
     while (++i < w_pe && atr_at(i) == a) ;
     w_attr = sty(a);
+    w_idx = a;
     w_to = w_at = i;
     return EV_RUN;
 }
@@ -201,18 +236,18 @@ u16 item_num(u16 p) {
 
 /* ==== import: characters appended to the document ==== */
 u16 b_n;
-u8 b_attr, b_done;
+u8 b_attr, b_done, b_named;
 
 void build_start(void) {
     g_len = 0;
     b_n = 0;
-    b_attr = 0;
+    b_attr = b_named = 0;
 }
 
 void build_put(u8 c) {
     if (b_n >= DOC_MAX - 1) return;     /* (room kept for the final CR) */
     txt_put(b_n, c);
-    atr_put(b_n, c == CH_CR || c == CH_FF ? b_attr : sty_find(b_attr));   /* (b_attr: a style; a paragraph's) */
+    atr_put(b_n, c == CH_CR || c == CH_FF ? b_attr : b_named ? b_named : sty_find(b_attr));   /* (b_attr: a style; a paragraph's) */
     b_n++;
 }
 

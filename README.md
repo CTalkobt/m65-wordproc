@@ -88,6 +88,7 @@ keyboard buffer and saves a screenshot, e.g.
 | ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text; Markdown for a name ending in `.md`, RTF for `.rtf`, HTML for `.htm` or `.html`), Directory; Redraw, List on / off (with `LIST.OVL`), Help, Quit (ESC also ends a selection) |
 | CTRL+D | the style drop-down (below) |
 | CTRL+E | the font and effect pop-up: Sans, Serif, Mono, Head, PETSCII, Bold, Italic, Underline, Strikethrough, Superscript, Subscript, each drawn so and those on marked; the cursor keys move it, RETURN sets the font or turns the effect on or off (the selection's, or for what is typed next; superscript and subscript are one or neither), ESC leaves it |
+| SHIFT+CTRL+S | the named styles' pop-up (below) |
 | CTRL+L | redraw the whole screen |
 | CTRL+A | Compose: the next two characters make an accented one (below) |
 
@@ -141,6 +142,26 @@ own look; the cursor keys move through it and RETURN applies the one lit
   use (the character ROM at `$FF7E000`), into bank 4. Markdown writes it
   as Mono (a code span), HTML as `<span class="p">`, RTF as `\f4`, a font
   named PETSCII (both read back).
+- **Named styles** (issue #5, step 3): SHIFT+CTRL+S drops down the named
+  character styles, each in its look, then "New style...". RETURN applies
+  the one lit to the selection (or to what is typed next); on "New
+  style...", or with N, a name (up to 15 characters) is asked for and a
+  new style of the selection's look made of it; R redefines the one lit as
+  the selection's look, so every character of it changes; D takes its
+  name away (its text keeps its look). The top bar shows the name of the
+  typing style (the selection's first character's) when it is a named
+  one. Up to 16, kept for the session with the style table: a named
+  style is an entry of the table with a name (its index in `st_nidx`, in
+  bank 0, its name in colour RAM after the table, `NAMES_LIN`), applied
+  only by name: `sty_find` never gives it, so formatting one of its
+  characters (CTRL+B ...) takes it out. Saved with the document (file
+  version 4); loaded, a name the session has takes the file's definition.
+  HTML carries them as `<span data-style="name">` around their text's
+  markup, RTF as character styles (`{\*\csN \additive ... name;}` in the
+  stylesheet, `\csN` before the text), both read back (a style named in
+  another program's RTF, as Word's Hyperlink, becomes a named style too).
+  The commands are in the code overlay `names` (`src/names.c`, with the
+  file image's code); undo takes back applying one, not a redefinition.
 - **Lists**: a bulleted or numbered item is a paragraph, indented by its
   level (four levels). Its bullet (a square, hollow at the second and
   fourth levels) or number is drawn in the indent, not stored as text: a
@@ -207,6 +228,7 @@ letter with its accent), in `WRITER.FNT`.
 | `src/conv.c` | C | what the converters share (below): output to the scratch area, a walk over the document for export, a builder for import, Unicode as the document's characters |
 | `src/md.c`, `src/mdin.c` | C | Markdown export and import (below): the modules `MARKDOWN.OVL` and `MDIN.OVL` |
 | `src/rtf.c`, `src/rtfin.c` | C | RTF export and (streamed) import: the modules `RTF.OVL` and `RTFIN.OVL` |
+| `src/names.c`, `src/names_def.h` | C | named styles' commands and the file image (`doc_pack`, `doc_unpack`): the code overlay `names`; finding and defining a named style (`names_def.h`, compiled into it and the import modules) |
 | `src/petfont.c` | C | the C64 fonts made at the start (PETSCII lines', the PETSCII font): the code overlay `fonts` |
 | `src/html.c` | C | HTML export (below): the module `HTML.OVL` |
 | `src/htmlin.c` | C | HTML (streamed) import: the module `HTMLIN.OVL` |
@@ -265,8 +287,9 @@ the room for it. Two kinds:
   functions that note nothing (`del_raw`, `room`): it notes its own
   changes, and must not call back into itself.
 
-- **The code overlays** (`cold`, from `src/cold.c` and
-  `src/stylecold.s45`, 2.3 KB; `fonts`, from `src/petfont.c`, 1 KB): code
+- **The code overlays** (`cold`, from `src/cold.c`, 1.5 KB; `fonts`, from
+  `src/petfont.c`, 1 KB; `names`, from `src/names.c` and
+  `src/stylecold.s45`, 2.4 KB): code
   the program runs seldom, or at most once a key, linked by ln45 as copied
   code overlays (M65Compiler #685) rather than by mkmod.py. Their code is
   `WRITER.OV1`, which the BASIC program `BLOAD`s into bank 4 (`$4D000`)
@@ -289,7 +312,10 @@ the room for it. Two kinds:
   back; with `LIST.OVL`'s room 140 bytes larger (`MOD_SIZE` 6560: it and
   `MARKDOWN.OVL` and `HTML.OVL` are now compiled with `-fno-zp-locals`, as
   their base-page blocks met those of program functions they call), 1435
-  bytes are free.
+  bytes were free. Named styles (#5 step 3) took 1.1 KB of that: their
+  pop-up, the top bar's name and the BASIC to drive them (300 bytes);
+  `m65.c` is now compiled with `-fno-zp-locals` too (`DEFAULT0.OVL`'s
+  base page met `mem_copy`'s): 338 bytes free.
 
 - **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6560 bytes in
   bank 0), which is also where the drawing keeps its buffers and caches
@@ -407,22 +433,24 @@ the C64's. Each cell has its own colour (text, desk, tags, bars).
 | `$40000` | 32000 | the bitmap |
 | `$48000` | 8000 | the screen (16-bit cells) |
 | `$4A000` | 12 KB | `WRITER.FNT`'s first part: Head's glyphs and records, the raw font, the compose table |
-| `$4D000` | 4 KB | the code overlays (`WRITER.OV1`, 3.3 KB), copied from here into `mod_area` for each call |
-| `$4E000` | 3.8 KB | the C64 fonts (PETSCII lines', the PETSCII font): their records (2 x 672 bytes), then their glyphs (the upper-case set's 128 and a-z, 8 x 16) |
+| `$4D000` | 8 KB | the code overlays (`WRITER.OV1`, 4.9 KB: `cold`, `fonts`, `names`), copied from here into `mod_area` for each call |
+| `$4F000` | 3.8 KB | the C64 fonts (PETSCII lines', the PETSCII font): their records (2 x 672 bytes), then their glyphs (the upper-case set's 128 and a-z, 8 x 16) |
 | `$50000` | 59 KB | scratch (to the clipboard): the gap's bounce buffer, file image, text and Markdown files; from `$57530` (`DOC_MAX`) what undo puts back while it swaps; its last 15000 bytes (`$5B168`) undo's copy of what the last edit replaced |
 | `$5EC00` | 5 KB | clipboard |
 | `$8000000` | 64 KB | attic RAM: document text (up to 30000 characters) and the gap |
 | `$8010000` | 64 KB | attic RAM: document attributes, the same |
 | `$8020000` | 48 KB | attic RAM: the line table (4096 lines of 12 bytes) |
 | `$8030000` | 48 KB | attic RAM: the line table's bounce buffer (lines moved up) |
-| `$FF83000` | 20 KB | colour RAM past the screen's cells (`$FF81000`-`$FF82F3F`): `WRITER.FNT`'s second part, Sans, Serif and Mono (12 KB); then (`$FF86020`) the find and replace strings, the drawing's caches while `DEFAULT0.OVL` runs, `DEFAULT0.OVL` (`$FF86680`), and the style table (`$FF87C00`, up to 1 KB) |
+| `$FF83000` | 20 KB | colour RAM past the screen's cells (`$FF81000`-`$FF82F3F`): `WRITER.FNT`'s second part, Sans, Serif and Mono (12 KB); then (`$FF86020`) the find and replace strings, the drawing's caches while `DEFAULT0.OVL` runs, `DEFAULT0.OVL` (`$FF86680`), and the style table (`$FF87C00`, 256 bytes) and the named styles' names (`$FF87D00`, 16 x 16 bytes) |
 
 ### Files
 
 A document (`S`ave / `L`oad) is a PRG file: `"WP"`, version 3, the length
 (2 bytes), the text (Latin-1: ASCII, and `$A0`-`$FF` for the accented
 characters; CR ends a paragraph, FF a page), the attributes, then the
-style table: its entry size (1), its count (2 bytes), its entries. A
+style table: its entry size (1), its count (2 bytes), its entries, then
+(version 4) the named styles: their count, and each one's entry and name
+(16 bytes, 0-ended). A
 character's attribute byte is an index into the style table (issue #5),
 whose entry is its style: bits 0-1 font, 2 bold, 3 italic, 4 underline,
 5 strikethrough, 6-7 superscript (1) or subscript (2), or (3, with Mono's
@@ -511,6 +539,7 @@ elsewhere:
 | `<b>` `<strong>`, `<i>` `<em>` `<cite>`, `<u>` `<ins>`, `<code>` `<tt>` `<kbd>` `<samp>` | bold, italic, underline, Mono |
 | `<s>` `<strike>` `<del>`, `<sup>`, `<sub>` | strikethrough, superscript, subscript (nested: the innermost script) |
 | `<span class="s">` / `"r"` / `"h"` / `"p"` (the export's) | Sans, Serif, Head, the PETSCII font |
+| `<span data-style="name">` (the export's) | a named style, defined by its text's look |
 | `style="text-align: ..."`, `align="..."`, `<center>` | alignment |
 | `style="page-break-after: always"` (or `break-before` / `break-after`) | a page break |
 | table rows, cells | a paragraph a row, two spaces between cells |

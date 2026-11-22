@@ -209,7 +209,7 @@ extern const struct font font_sans, font_serif, font_mono, font_head;
  * the upper-case / graphics set (a PETSCII line's), and Latin-1 in the
  * lower-case set (the PETSCII font) */
 extern const struct font font_petl, font_petf;
-#define PET_LIN     0x4E000UL   /* their records: font_petl's, font_petf's (672 bytes each) */
+#define PET_LIN     0x4F000UL   /* their records: font_petl's, font_petf's (672 bytes each) */
 #define PETG_LIN    (PET_LIN + 2 * 672)     /* their glyphs: upper-case set codes 0-127, then a-z (16 bytes each) */
 #ifdef __cc45__
 #define CHARROM_LIN 0xFF7E000UL /* the character set in use: upper case / graphics, then lower case */
@@ -377,6 +377,31 @@ u8 sty_find(u8 e);              /* style e's entry (added if new) */
 u16 sty_save(u16 o);            /* the table at the scratch area's o (doc_pack); the end */
 u8 sty_load(u16 o, u8 v);       /* a file's table there merged (v: its version); 1: each its own; 2: not one */
 void sty_remap(u16 n, u8 v1);   /* the loaded document's indexes through sty_load's (v1: CR / FF cleared) */
+void sty_flush(void);           /* sty's and sty_find's last lookups forgotten (an entry changed) */
+/* Named styles (#5 step 3): up to NNAMES entries of the table have a
+ * name (st_nidx: the entry, 0 none; st_nname). One is applied by its name
+ * only (SHIFT+CTRL+S): sty_find never gives it, so formatting a character
+ * of it (CTRL+B ...) takes it out. Redefined, every character of it
+ * changes. Kept with the table for the session, saved with a document
+ * (version 4: after the table, the count and each one's entry and name;
+ * loaded, a name the session has takes the file's definition) and in
+ * HTML (data-style) and RTF (character styles, \csN). (names.c, the
+ * overlay names; sty_named and sty_name resident) */
+#define NNAMES 16
+#define NAME_LEN 16             /* (15 characters and a 0) */
+#define NAMES_LIN (ST_LIN + 0x100)      /* the names, slot k's at + k * NAME_LEN (past the table's 256 entries) */
+extern u8 st_nidx[NNAMES];
+u8 sty_named(u8 i);             /* entry i's name's slot + 1 (0: none) */
+const char *name_at(u8 k);      /* slot k's name (in a buffer of the program's) */
+const char *sty_name(u8 i);     /* entry i's name (0: none) */
+u8 names_count(void);           /* the names (slots 0..n-1 in use) */
+/* (name_slot, name_define: names_def.h, in the modules that need them)*/
+u8 names_cmd(u8 c);             /* the pop-up's: NM_APPLY + n, NM_REDEF + n, NM_UNNAME + n, NM_NEW (msg: its name); 1: no room */
+#define NM_APPLY 0
+#define NM_REDEF 16
+#define NM_UNNAME 32
+#define NM_NEW 48
+u16 names_save(u16 o);          /* the names at the scratch area's o (doc_pack); the end */
 /* output: bytes to SCRATCH_LIN (o_n of them; past SCRATCH_MAX counted, not written) */
 extern u16 o_n;
 void o_start(void);
@@ -391,7 +416,7 @@ u16 o_end(void);                /* the size written; 0: more than fits */
  *   EV_END   the document's end */
 enum { EV_END, EV_PARA, EV_RUN, EV_PEND };
 extern u16 w_pos, w_to;
-extern u8 w_attr;
+extern u8 w_attr, w_idx;        /* (w_idx: an EV_RUN's style index) */
 void walk_start(void);
 u8 walk_next(void);
 /* import: the document built from the start (b_n characters so far), each
@@ -399,6 +424,7 @@ u8 walk_next(void);
  * alignment); build_end: the document's length, set, and it laid out */
 extern u16 b_n;
 extern u8 b_attr, b_done;
+extern u8 b_named;              /* (not 0: the characters' entry, a named style's, not b_attr's) */
 void build_start(void);
 void build_put(u8 c);
 void build_uni(u16 u);          /* a Unicode character as the document's (Latin-1, or ASCII for some) */

@@ -19,7 +19,9 @@
  *   styles       <b> <strong>, <i> <em> <cite> <var> <dfn>, <u> <ins>,
  *                <code> <tt> <kbd> <samp> (Mono), <s> <strike> <del>,
  *                <sup>, <sub>, <span class="s|r|h|p">
- *                (the export's Sans, Serif, Head, PETSCII)
+ *                (the export's Sans, Serif, Head, PETSCII); <span
+ *                data-style="name">: a named style (#5), defined by its
+ *                text's look (one the session has: redefined)
  *   alignment    style="text-align: ...", align="...", <center>
  *   page break   style="page-break-after: always" (or break-before / -after)
  *   tables       a row a paragraph, two spaces between cells
@@ -33,9 +35,11 @@
  *                &#xH; and UTF-8 (build_uni: Latin-1, or ASCII for some);
  *                a byte that is not UTF-8 as Latin-1
  */
+#include <string.h>
 #include "wp.h"
 #define PET_IN
 #include "petuni.h"
+#include "names_def.h"
 
 enum {
     S_TEXT, S_LT, S_NAME, S_ATTR, S_ANAME, S_AEQ, S_AVAL0, S_AVAL, S_ENT, S_BANG, S_COMMENT, S_DECL, S_RAW
@@ -48,9 +52,9 @@ static u8 lower(u8 c) { return is_letter(c) ? (u8)(c | 0x20) : c; }
 
 /* the tag: its name (lower case), a closing one; an attribute's name and
  * value (lower case; quoted with q, 0: not); what the attributes say */
-static char nm[12], an[8], av[64], en[10];
+static char nm[12], an[12], av[64], en[10], rv[NAME_LEN], tn[NAME_LEN];
 static u8 nl, closing, anl, avl, q, enl, dash;
-static u8 t_align, t_pb, t_font, t_pet;
+static u8 t_align, t_pb, t_font, t_pet, t_nm;
 #define NONE 0xFF
 
 /* the text's context */
@@ -62,7 +66,9 @@ static u8 ld, lt[4];                    /* lists open; each one's kind (K_BULLET
 static u8 n_on[7];                      /* <b> <i> <u> <code> <s> <sup> <sub> (and the like) open */
 static u8 scr;                          /* the script of the innermost <sup> / <sub> open */
 static u8 sd, sfont[8];                 /* <span>s open; each one's font (NONE: the kind's) */
-static u8 sp_n, sp_nl, sp_attr;         /* spaces held (to a paragraph's end: dropped); a line end among them; their style */
+static u8 nm_d, nm_a, nm_k;             /* the <span data-style>'s depth + 1 (0: none); the style last named so, its entry */
+static char nm_s[NAME_LEN];             /* its name (as it is: not lower case) */
+static u8 sp_n, sp_nl, sp_attr, sp_nm;  /* spaces held (to a paragraph's end: dropped); a line end among them; their style, named style */
 static u8 u_need, u_lead;               /* UTF-8: continuation bytes due; the first byte */
 static u16 u_val;
 
@@ -111,12 +117,24 @@ static void brk(u8 gap) {
     if (gap) want_gap = 1;
 }
 
+/* the named style for style a now (in a <span data-style>: that style,
+ * defined by its text's look; 0: none) */
+static u8 named(u8 a) {
+    if (!nm_d) return 0;
+    if (!nm_k || nm_a != a) {
+        nm_a = a;
+        nm_k = name_define(nm_s, a);
+    }
+    return nm_k;
+}
+
 /* a character of the text (the spaces held before it) */
 static void ch(u16 u) {
     pre_first = 0;              /* (a UTF-8 one too: a line end after it counts) */
     begin();
     if (sp_n) {
         b_attr = sp_attr;
+        b_named = sp_nm;
         if (sp_nl) sp_n = 1;
         while (sp_n) {
             build_put(' ');
@@ -125,6 +143,7 @@ static void ch(u16 u) {
         sp_nl = 0;
     }
     b_attr = attr();
+    b_named = named(b_attr);
     if (pk & A_PET) build_put(uni_pet(u));
     else build_uni(u);
 }
@@ -162,7 +181,7 @@ static void text_byte(u8 c) {
         /* (a run with a line end: one space; spaces alone: as they are) */
         if (!popen) return;
         if (c != ' ') sp_nl = 1;
-        if (!sp_n) sp_attr = attr();
+        if (!sp_n) sp_nm = named(sp_attr = attr());
         if (sp_n < 255) sp_n++;
         return;
     }
@@ -211,8 +230,14 @@ static u8 align_of(void) { return has("center") ? 1 : has("right") ? 2 : has("ju
 /* an attribute read: style (text-align, a page break), align, class (a
  * <span>'s font: the export's s, r, h; a <pre>'s petscii) */
 static void attr_done(void) {
-    u8 k = word_at("style align class ", an);
+    u8 k = word_at("style align class data-style ", an);
     av[avl] = 0;
+    if (k == 4) {
+        /* (a named style's: its name as it is) */
+        rv[avl < NAME_LEN ? avl : NAME_LEN - 1] = 0;
+        memcpy(tn, rv, NAME_LEN);
+        t_nm = 1;
+    }
     if (k == 1) {
         if (has("text-align")) t_align = align_of();
         if ((has("break-after") || has("break-before")) && (has("always") || has("page"))) t_pb = 1;
@@ -249,17 +274,23 @@ static void tag_end(void) {
     }
     if (t == T_SPAN) {
         if (closing) {
+            if (sd == nm_d) nm_d = 0;
             if (sd) sd--;
         } else if (sd < sizeof sfont) {
             sfont[sd] = t_font != NONE ? t_font : sd ? sfont[sd - 1] : NONE;
             sd++;
+            if (t_nm) {
+                memcpy(nm_s, tn, NAME_LEN);
+                nm_d = sd;
+                nm_k = 0;
+            }
         }
         return;
     }
     if (t >= T_CELL && t < T_TR) {
         /* (a table's cells: two spaces after one) */
         if (!closing && popen) {
-            if (!sp_n) sp_attr = attr();
+            if (!sp_n) sp_nm = named(sp_attr = attr());
             sp_n = 2;
             sp_nl = 0;
         }
@@ -404,7 +435,7 @@ static u8 feed(u8 c) {
         }
         nm[nl] = 0;
         t_align = t_font = NONE;
-        t_pb = t_pet = 0;
+        t_pb = t_pet = t_nm = 0;
         st = S_ATTR;
         return 1;
     case S_ATTR:
@@ -446,6 +477,7 @@ static u8 feed(u8 c) {
             st = S_ATTR;
             return !q;
         }
+        if (avl < NAME_LEN - 1) rv[avl] = (char)c;
         if (avl < sizeof av - 1) av[avl++] = (char)lower(c);
         return 0;
     case S_ENT:
@@ -481,7 +513,7 @@ static void html_begin(void) {
     u8 k;
     build_start();
     st = S_TEXT;
-    popen = want_gap = no_gap = pal = hk = nq = npre = ld = sd = sp_n = sp_nl = u_need = 0;
+    popen = want_gap = no_gap = pal = hk = nq = npre = ld = sd = sp_n = sp_nl = u_need = nm_d = 0;
     for (k = 0; k < sizeof n_on; k++) n_on[k] = 0;
     scr = 0;
 }

@@ -35,6 +35,7 @@
 #define CMD_LIST 21
 #define CMD_STYLE 32
 #define CMD_FX 48
+#define CMD_NAMES 64
 
 #define GET_DIRTY 0
 #define GET_PACK 2
@@ -49,6 +50,7 @@
 #define GET_HTMLBEGIN 21
 #define GET_FONTS 15
 #define GET_KIND 16
+#define GET_NAMES 24
 ' + the file's kind (fk): the document exported, as text, Markdown, RTF, HTML
 #define GET_XEXPORT 17
 
@@ -119,7 +121,7 @@ waitkey:
   ' drawn again, ESC the menu (or the selection's end), CTRL+F find, CTRL+H
   ' replace, CTRL+W save, CTRL+E the font and effect pop-up
   sys {wp_key}, asc(k$) : rreg ka
-  on ka gosub loadhelp, copysel, stylemenu, redraw, escape, dofind, doreplace, savedoc, fxmenu
+  on ka gosub loadhelp, copysel, stylemenu, redraw, escape, dofind, doreplace, savedoc, fxmenu, namedmenu
   goto mainloop
 
 proc copysel
@@ -167,7 +169,23 @@ proc fxmenu
   if m = 13 then sys {wp_cmd}, CMD_FX + sv
 endproc
 
-' (wp_drop's list dk, dn items, sv lit; m: RETURN or ESC)
+' ---- the named styles' pop-up (SHIFT+CTRL+S), where the drop-down is:
+' RETURN applies the style lit (to the selection, or for typing; on "New
+' style..." names a new one), R redefines it as the selection's look, D
+' takes its name away (its text keeps its look), N names a new style of
+' the selection's look ----
+proc namedmenu
+  sys {wp_get}, GET_NAMES : rreg nn
+  sv = 0 : dk = 128 : dn = nn + 1 : call dropdown
+  if m = 13 and sv = nn then m = 78
+  if sv < nn then if m = 13 then sys {wp_cmd}, CMD_NAMES + sv
+  if sv < nn then if m = 82 then sys {wp_cmd}, CMD_NAMES + 16 + sv
+  if sv < nn then if m = 68 then sys {wp_cmd}, CMD_NAMES + 32 + sv
+  if m = 78 then a$ = "" : am = 15 : call ask(MSG_STYLENAME) : if ok and a$ <> "" then call setstr(a$, {msg}) : sys {wp_cmd}, CMD_NAMES + 48
+endproc
+
+' (wp_drop's list dk, dn items, sv lit; m: RETURN or ESC, or for the
+' named styles R, D, N)
 proc dropdown
   do
     sys {wp_drop}, dk + sv
@@ -176,7 +194,7 @@ proc dropdown
     sv = mod(sv - (m = 17) + (m = 145) + dn, dn)
     i = instr(p"n123qcb#p", m$)
     if i and dk = 0 then sv = i - 1 : m = 13
-  loop until m = 13 or m = 27
+  loop until m = 13 or m = 27 or (dk = 128 and (m = 82 or m = 68 or m = 78))
   sys {wp_drop}, 255
 endproc
 
@@ -215,7 +233,7 @@ proc ask(q)
   if c = 13 then ok = 1 : goto .done
   if c = 27 then goto .done
   if c = 20 and len(a$) > 0 then a$ = left$(a$, len(a$) - 1)
-  if len(a$) < am and ((c > 31 and c < 128 and (am > 16 or (c > 32 and c <> 34 and c <> 44 and c <> 58))) or (c >= 193 and c <= 218)) then a$ = a$ + c$
+  if len(a$) < am and ((c > 31 and c < 128 and (am <> 16 or (c > 32 and c <> 34 and c <> 44 and c <> 58))) or (c >= 193 and c <= 218)) then a$ = a$ + c$
   goto .again
 .done:
   am = 16

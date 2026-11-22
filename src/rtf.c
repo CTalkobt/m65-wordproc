@@ -17,6 +17,9 @@
  *   a page break      \par\page (the paragraph ends the page)
  *   \ { }             escaped with "\"; Latin-1 characters as \'hh
  *                     (\ansicpg1252: Windows-1252 has them)
+ *   a named style     a character style, {\*\cs20 \additive ... its name;}
+ *                     in the stylesheet (20 + its slot), \csN before its
+ *                     characters' properties (after them \plain)
  *   a PETSCII line    \s8 "PETSCII Code" (read back as one), its
  *                     characters as Unicode (petuni.h): \uN? (U+1FBxx a
  *                     UTF-16 pair, as Word writes it)
@@ -35,7 +38,7 @@ static const char rtf_head[] =
     "{\\stylesheet{\\s0 Normal;}{\\s1\\outlinelevel0 heading 1;}{\\s2\\outlinelevel1 heading 2;}"
     "{\\s3\\outlinelevel2 heading 3;}{\\s4\\li540 Quote;}{\\s5\\li360 Code;}"
     "{\\s6\\li360\\fi-360 List Bullet;}{\\s7\\li360\\fi-360 List Number;}"
-    "{\\s8\\li360 PETSCII Code;}}\r\n";
+    "{\\s8\\li360 PETSCII Code;}";
 /* a paragraph kind's \sN and the rest of its properties */
 static const char *const kind_rtf[KIND_TAB] = { "\\s0", "\\s1\\outlinelevel0", "\\s2\\outlinelevel1",
                                                 "\\s3\\outlinelevel2", "\\s4\\li540", "\\s5\\li360", "\\s6", "\\s7" };
@@ -65,11 +68,39 @@ static void out_u(u16 u) {
     out('?');
 }
 
+/* style a's properties, those set (a named style's, in the stylesheet) */
+static void props(u8 a) {
+    u8 f = font_id(a), s = SCRIPT(a);
+    outs("\\f");
+    out((u8)('0' + f));
+    outs(f == F_HEAD ? "\\fs36" : "\\fs24");
+    if (a & A_BOLD) outs("\\b");
+    if (a & A_ITAL) outs("\\i");
+    if (a & A_UNDER) outs("\\ul");
+    if (a & A_STRIKE) outs("\\strike");
+    if (s) outs(s == A_SUP ? "\\super" : "\\sub");
+}
+
 static u16 rtf_export(void) {
     u16 i, u;
-    u8 ev, now = 0xFF, a, c, d, sp = 0, pet = 0, nf = 0xFF, ns = 0xFF, f;  /* (now: none yet, so all written) */
+    u8 ev, now = 0xFF, a, c, d, sp = 0, pet = 0, nf = 0xFF, ns = 0xFF, f, nk = 0;  /* (now: none yet, so all written) */
     o_start();
     outs(rtf_head);
+    /* the named styles: character styles \cs20 ... (the stylesheet's end) */
+    for (a = 0; a < names_count(); a++) {
+        const char *s;
+        outs("{\\*\\cs");
+        out_dec((u16)(20 + a));
+        outs(" \\additive");
+        props(sty(st_nidx[a]));
+        out(' ');
+        for (s = name_at(a); *s; s++) {
+            if (*s == '\\' || *s == '{' || *s == '}') out('\\');
+            out((u8)*s);
+        }
+        outs(";}");
+    }
+    outs("}\r\n");
     walk_start();
     while ((ev = walk_next()) != EV_END) {
         if (ev == EV_PARA) {
@@ -102,6 +133,21 @@ static u16 rtf_export(void) {
             }
         } else if (ev == EV_RUN) {
             a = w_attr;
+            /* a named style: \csN before its properties; leaving one,
+             * \plain and them all again */
+            f = sty_named(w_idx);
+            if (f != nk) {
+                if (nk) {
+                    outs("\\plain");
+                    now = nf = ns = 0xFF;
+                }
+                if (f) {
+                    outs("\\cs");
+                    out_dec((u16)(19 + f));
+                }
+                nk = f;
+                sp = 1;
+            }
             if (a != now) {
                 d = now == 0xFF ? 0xFF : a ^ now;
                 f = font_id(a);

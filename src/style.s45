@@ -8,13 +8,17 @@
 ; u8 sty_find(u8 e): e at $10, its index in A (added if new; the table
 ;   full: 0; the last one found kept)
 ; void sty_init(void): entries 0-31 those styles, the rest 0
+; void sty_flush(void): sty's and sty_find's last lookups forgotten
+; (sty_find never gives a named style's entry: st_nidx, conv.c)
+; u8 sty_named(u8 i): i at $10: its name's slot + 1 in A (0: none)
+; u8 names_count(void): the slots in use (from 0) in A
 
 ; no calls through pointers here (ln45's call graph)
 .weak cc45.icallinfo
 cc45.icallinfo = 1
 
-.global _sty, _sty_find, _sty_init, _raw_fx, __st_ptr
-.extern _st_n
+.global _sty, _sty_find, _sty_init, _sty_flush, _sty_named, _names_count, _raw_fx, __st_ptr
+.extern _st_n, _st_nidx
 
 .segment "bss"
 __sc:   .res 2          ; sty's last: index, entry
@@ -57,11 +61,61 @@ proc _sty
     .func_flags zp_call
 endproc
 
+; C set when entry Z is a named style's (st_nidx); A, X, the flags
+; clobbered, Z kept
+proc __st_named
+    tza
+    beq @no
+    ldx #15                 ; (NNAMES - 1)
+@look:
+    cmp _st_nidx,x
+    beq @yes
+    dex
+    bpl @look
+@no:
+    clc
+    rts
+@yes:
+    sec
+    rts
+endproc
+
+proc _sty_named
+    .zp_uses $10
+    .reg_clobbers A, X, Z
+    .flag_clobbers C, N, Z, V
+    lda $10                 ; (LDZ has no base-page mode: $10 would be absolute)
+    taz
+    jsr __st_named
+    lda #0
+    bcc @none
+    txa
+    inc a
+@none:
+    rts
+    .func_flags zp_call
+endproc
+
+proc _names_count
+    .reg_clobbers A, X
+    .flag_clobbers C, N, Z
+    ldx #0
+@next:
+    lda _st_nidx,x
+    beq @done
+    inx
+    cpx #16                 ; (NNAMES)
+    bne @next
+@done:
+    txa
+    rts
+endproc
+
 proc _sty_find
     .zp_uses $10
     .zp_clobbers $10, $11, $12, $13, $14
     .zp_release $10, $11, $12, $13, $14
-    .reg_clobbers A, Z
+    .reg_clobbers A, X, Z
     .flag_clobbers C, N, Z, V
     lda $10
     cmp __sf
@@ -80,7 +134,10 @@ proc _sty_find
 @cmp:
     lda [$10],z
     cmp $14
-    beq @found
+    bne @skip
+    jsr __st_named          ; (a named style's: not this one)
+    bcc @found
+@skip:
     inz
     bne @next
     lda #0                  ; (full)
@@ -101,6 +158,17 @@ proc _sty_find
     tza
     rts
     .func_flags zp_call
+endproc
+
+proc _sty_flush
+    .reg_clobbers A
+    .flag_clobbers N, Z
+    lda #0
+    sta __sc
+    sta __sc+1
+    sta __sf
+    sta __sf+1
+    rts
 endproc
 
 proc _sty_init

@@ -103,6 +103,8 @@ static const struct run help[] = {
             "F6 page break           F1 page / raw view\r"
             "CTRL+D     style: the drop-down at the top left\r"
             "CTRL+E     font (PETSCII too), strike, sup/sub\r"
+            "SHIFT+CTRL+S  named styles: apply (RETURN),\r"
+            "           R)edefine, D)elete name, N)ew\r"
             "TAB / DEL  at a list item's start: in / out\r" },
     { 0, "A style applies to the paragraphs the selection holds whole, or the cursor's; "
          "to the rest of the selection as a character style (Normal: plain). In the "

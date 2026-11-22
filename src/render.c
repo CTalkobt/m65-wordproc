@@ -430,7 +430,16 @@ void render_bars(void) {
     put_str("  ");
     put_str(kind_names[cur_kind()]);
     while (sn < BOX_HI - 2) sb[sn++] = ' ';
-    put_str("v  MEGA65 Writer  ");
+    put_str("v  ");
+    {
+        /* (the typing style's name, when it is a named style's) */
+        const char *nm = sty_name(sel_on ? atr_at(sel_lo()) : typing_attr);
+        if (nm) {
+            put_str(nm);
+            put_str("  ");
+        }
+    }
+    put_str("MEGA65 Writer  ");
     put_str(fname[0] ? fname : "untitled");
     if (dirty) put_str(" *");
     ln = sn;
@@ -649,7 +658,7 @@ static void render_page(void) {
 static const u8 fx_attr[NFX] = { F_SANS, F_SERIF, F_MONO, F_HEAD, S_PETF, A_BOLD, A_ITAL, A_UNDER, A_STRIKE, A_SUP, A_SUB };
 
 void wp_drop(u8 k) {
-    u8 n, r = 0, a, w, cnt = NSTYLES, cs = 0, fxm = k & 0x40, *d;
+    u8 n, r = 0, a, w, cnt = NSTYLES, cs = 0, fxm = k & 0x40, nm = k & 0x80, *d;
     u16 x, sy = BAR_H;
     const char *s;
     if (k == 0xFF) {
@@ -666,16 +675,26 @@ void wp_drop(u8 k) {
         r = font_id(cs);
         if (IS_C64(cs)) cs &= (u8)~A_SCRIPT;
     }
+    if (nm) {
+        /* (SHIFT+CTRL+S: the named styles, then "New style...") */
+        cnt = (u8)(names_count() + 1);
+        k &= 0x3F;
+        cs = sel_on ? atr_at(sel_lo()) : typing_attr;
+    }
     for (n = 0; n < cnt; n++) {
         a = fxm ? fx_attr[n] : kind_attr[n];
         s = fxm ? msg_get((u8)(MSG_SANS + n)) : kind_names[n];
+        if (nm) {
+            a = n + 1 < cnt ? sty(st_nidx[n]) : 0;
+            s = n + 1 < cnt ? name_at(n) : msg_get(MSG_NEWSTYLE);
+        }
         band_fill(DROP_H, row_blank);
         for (x = 12; *s; s++) {
             w = char_w((u8)*s, a);
             draw_char((u8)*s, x, w, DROP_ASC, a);
             x += w;
         }
-        if (fxm && (n < NFACES ? r == n : (cs & a)))
+        if ((fxm && (n < NFACES ? r == n : (cs & a))) || (nm && n + 1 < cnt && st_nidx[n] == cs))
             band_xor(3, 8, DROP_ASC - 8, DROP_ASC - 3);
         if (n == k) band_xor(0, DROP_W * 8, 0, DROP_H);
         for (r = 0, d = band; r < DROP_H; r++, d += COLS) {

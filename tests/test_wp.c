@@ -520,7 +520,7 @@ static void test_gap(void) {
     /* the file image (round the gap) */
     {
         u16 sz = wp_get(2);
-        CHECK(sz == 5 + 2 * doc_len + 3 + st_n);
+        CHECK(sz == 5 + 2 * doc_len + 3 + st_n + 1);
         for (q = 0; q < n && MEM[SCRATCH_LIN + 5 + q] == (u8)ref[q]; q++) {}
         CHECK(q == n);
         CHECK(wp_get(4) == 0 && doc_len == n + 1);
@@ -563,7 +563,7 @@ static void test_gap(void) {
         wp_cmd(22);
         CHECK(doc_len == k);
         p = wp_get(2);
-        CHECK(p == 5 + 2 * doc_len + 3 + st_n);
+        CHECK(p == 5 + 2 * doc_len + 3 + st_n + 1);
         CHECK(wp_get(4) == 0 && doc_len == k);
         layout();
         check_layout();
@@ -782,7 +782,7 @@ int main(void) {
             t[i] = txt_at(i);
             a[i] = atr_at(i);
         }
-        CHECK(sz == 5 + 2 * len + 3 + st_n);
+        CHECK(sz == 5 + 2 * len + 3 + st_n + 1);     /* (+ the named styles' count: 0) */
         wp_cmd(13);
         CHECK(doc_len == 1);
         CHECK(wp_get(4) == 0);
@@ -1035,6 +1035,81 @@ int main(void) {
             CHECK(sa(0) == (S_PETF | A_BOLD));
             wp_cmd(4);
             CHECK(sa(0) == (F_SANS | A_BOLD));
+        }
+        {
+            /* named styles (#5 step 3): SHIFT+CTRL+S's commands
+             * (CMD_NAMES + names_cmd's), a name in msg as BASIC pokes it */
+#define CMD_NAMES 64
+#define SEL(a, b) (sel_anchor = (a), cur = (b), sel_on = 1)
+            u8 k, e;
+            const char *s;
+            wp_cmd(13);
+            type("one two three");
+            SEL(4, 7);
+            wp_cmd(CMD_FX + NFACES);            /* ("two" bold) */
+            memcpy(msg, "\xc5MPHASIS", 9);      /* ("Emphasis") */
+            wp_cmd(CMD_NAMES + NM_NEW);
+            k = atr_at(4);
+            s = sty_name(k);
+            render_bars();
+            CHECK(strstr(mod_area.r.bar_text[0], "v  Emphasis  MEGA65 Writer") != NULL);     /* (the top bar) */
+            CHECK(names_count() == 1 && s && strcmp(s, "Emphasis") == 0 && sa(4) == A_BOLD && atr_at(6) == k &&
+                  k != sty_find(A_BOLD) && typing_attr == k);
+            /* applied ("three"), redefined as italic ("one" made so first) */
+            SEL(8, 13);
+            wp_cmd(CMD_NAMES + NM_APPLY);
+            CHECK(atr_at(8) == k && atr_at(12) == k);
+            SEL(0, 3);
+            wp_cmd(CMD_FX + NFACES + 1);
+            wp_cmd(CMD_NAMES + NM_REDEF);
+            CHECK(sa(4) == A_ITAL && sa(8) == A_ITAL && atr_at(0) == k);
+            /* formatting one of its characters: no longer the style */
+            SEL(4, 5);
+            wp_cmd(CMD_FX + NFACES);
+            CHECK(atr_at(4) != k && sa(4) == (A_ITAL | A_BOLD) && atr_at(5) == k);
+            wp_cmd(22);                         /* (undone) */
+            CHECK(atr_at(4) == k);
+            /* the file: saved, the name taken away, loaded: it again */
+            sel_on = 0;
+            wp_get(2);
+            wp_cmd(CMD_NAMES + NM_UNNAME);
+            CHECK(names_count() == 0 && sa(4) == A_ITAL && !sty_name(k));
+            CHECK(wp_get(4) == 0 && names_count() == 1 && strcmp(sty_name(atr_at(4)), "Emphasis") == 0 &&
+                  sa(4) == A_ITAL && atr_at(0) == atr_at(4));
+            /* a name the session has: the file's definition wins */
+            e = atr_at(4);
+            wp_get(2);
+            SEL(0, 3);
+            wp_cmd(CMD_FX + NFACES + 2);        /* (underlined: "one" not the style) */
+            wp_cmd(CMD_NAMES + NM_REDEF);       /* ("Emphasis" underlined italic) */
+            CHECK(sa(4) == (A_ITAL | A_UNDER));
+            CHECK(wp_get(4) == 0 && sa(4) == A_ITAL && atr_at(4) == e && names_count() == 1);
+            /* HTML and RTF: two named styles of the same look (italic),
+             * exported, the session's names taken away, imported: back */
+            SEL(8, 13);
+            memcpy(msg, "\xc2IG \xc4\x45\x41L", 9);         /* ("Big Deal") */
+            wp_cmd(CMD_NAMES + NM_NEW);
+            sel_on = 0;
+            CHECK(names_count() == 2 && sa(8) == A_ITAL && atr_at(8) != atr_at(0) && strcmp(sty_name(atr_at(8)), "Big Deal") == 0);
+            n = mod_run(MOD_HTML_EXPORT);
+            memcpy(m, MEM + SCRATCH_LIN, n);
+            m[n] = 0;
+            CHECK(strstr(m, "<p><span data-style=\"Emphasis\"><i>one</i></span> <span data-style=\"Emphasis\"><i>two</i></span> "
+                            "<span data-style=\"Big Deal\"><i>three</i></span></p>") != NULL);
+            while (names_count()) wp_cmd(CMD_NAMES + NM_UNNAME);
+            html_in(m);
+            CHECK(names_count() == 2 && strcmp(sty_name(atr_at(0)), "Emphasis") == 0 && atr_at(4) == atr_at(0) &&
+                  strcmp(sty_name(atr_at(8)), "Big Deal") == 0 && sa(8) == A_ITAL && sa(0) == A_ITAL && !sty_name(atr_at(3)));
+            rtf_out(m);
+            CHECK(strstr(m, "{\\*\\cs20 \\additive\\f0\\fs24\\i Emphasis;}{\\*\\cs21 \\additive\\f0\\fs24\\i Big Deal;}}") &&
+                  strstr(m, "\\cs20\\f0\\fs24\\b0\\i\\ulnone\\strike0\\nosupersub one\\plain"));
+            while (names_count()) wp_cmd(CMD_NAMES + NM_UNNAME);
+            rtf_in(m);
+            CHECK(names_count() == 2 && strcmp(sty_name(atr_at(0)), "Emphasis") == 0 && atr_at(4) == atr_at(0) &&
+                  strcmp(sty_name(atr_at(8)), "Big Deal") == 0 && sa(8) == A_ITAL && sa(0) == A_ITAL && !sty_name(atr_at(3)));
+            /* (the names taken away: the file tests after expect none) */
+            while (names_count()) wp_cmd(CMD_NAMES + NM_UNNAME);
+            CHECK(names_count() == 0);
         }
         rtf_in("{\\rtf1\\ansi a\\up6 b\\up0 c\\dn4 d\\dn0 e\\par}");
         CHECK(sa(1) == A_SUP && sa(2) == 0 && sa(3) == A_SUB && sa(4) == 0);
@@ -1500,7 +1575,7 @@ int main(void) {
         n = doc_pack();
         MEM[SCRATCH_LIN + 2] = 1;
         CHECK(doc_unpack() == 0 && sa(2) == (2 << A_ALIGN_SHIFT) && para_kind(0) == K_NORMAL);
-        MEM[SCRATCH_LIN + 2] = 4;
+        MEM[SCRATCH_LIN + 2] = 5;
         CHECK(doc_unpack() == 1);                       /* (a later version: refused) */
         /* the style table: a version 2 file (a character's attribute: its
          * style), and a version 3 file's table merged into the session's */
@@ -1511,7 +1586,7 @@ int main(void) {
         sput(1, A_BOLD);
         sput(2, F_SERIF | A_UNDER);
         n = doc_pack();
-        CHECK(n == 5 + 2 * 5 + 3 + st_n && MEM[SCRATCH_LIN + 15] == ST_SIZE);
+        CHECK(n == 5 + 2 * 5 + 3 + st_n + 1 && MEM[SCRATCH_LIN + 15] == ST_SIZE);
         for (k = 0; k < 4; k++) MEM[SCRATCH_LIN + 10 + k] = sa(k);
         MEM[SCRATCH_LIN + 2] = 2;
         CHECK(doc_unpack() == 0 && sa(0) == 0 && sa(1) == A_BOLD && sa(2) == (F_SERIF | A_UNDER) && sa(3) == 0);
@@ -1520,6 +1595,7 @@ int main(void) {
         MEM[SCRATCH_LIN + 16] = 41;                     /* (the file's table: 41 entries, 40 bold italic) */
         for (n = 32; n < 40; n++) MEM[SCRATCH_LIN + 18 + n] = 0;
         MEM[SCRATCH_LIN + 18 + 40] = A_BOLD | A_ITAL;
+        MEM[SCRATCH_LIN + 18 + 41] = 0;                 /* (no named styles) */
         MEM[SCRATCH_LIN + 10 + 1] = 40;
         MEM[SCRATCH_LIN + 10 + 3] = 200;                /* (past the table: plain) */
         CHECK(doc_unpack() == 0 && sa(1) == (A_BOLD | A_ITAL) && sa(2) == (F_SERIF | A_UNDER) && sa(3) == 0 &&
