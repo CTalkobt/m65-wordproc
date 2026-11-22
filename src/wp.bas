@@ -73,6 +73,9 @@ start:
   ' the messages (WRITER.MSG) to free RAM below the program, each time:
   ' after the Writer it could be the graphics commands' buffers
   bload "writer.msg", b0, p(MSG_TAB)
+  ' the C half's code overlays (WRITER.OV1, before any SYS into it: ln45
+  ' --overlay-no-load), to bank 4 where its first two bytes say ($4D000)
+  bload "writer.ov1", b4 : bank 128
   ' the fonts' glyphs, once: to the scratch area, then the C half copies
   ' codes 32-128 to bank 4 (FONT_LIN in wp.h) and the Latin-1 ones and the
   ' compose table to colour RAM (HI_LIN)

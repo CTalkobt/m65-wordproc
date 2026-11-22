@@ -38,8 +38,8 @@ make test       # the C half on the host (gcc): editing, layout, files; build/*.
 
 On a MEGA65: copy `build/writer.d81` to the SD card, mount it, then
 `DLOAD "WRITER"` and `RUN`. The disk holds `WRITER` (the program),
-`WRITER.OV1` (the program's seldom-run code, a code overlay the program
-loads at its first call into C: required),
+`WRITER.OV1` (the program's seldom-run code, code overlays the program
+loads at its start: required),
 `WRITER.FNT` (the fonts' glyphs, loaded by the program), `WRITER.MSG` (the
 messages, menu and prompts, from `src/messages.txt`: loaded by the program
 at each start to `$1800`), `WRITER.HELP` (the
@@ -212,7 +212,7 @@ letter with its accent), in `WRITER.FNT`.
 | `src/htmlin.c` | C | HTML (streamed) import: the module `HTMLIN.OVL` |
 | `src/list.c` | C | list mode's markers: the module `LIST.OVL` |
 | `src/edit.c`, `src/edit_undo.c` | C | undo, find and replace, the styles: the module `DEFAULT0.OVL` |
-| `src/modcall.s45` | asm | the jump into `DEFAULT0.OVL` (and, for ln45's call graph, what it calls) |
+| `src/modcall.s45`, `src/listcall.s45` | asm | the jumps into `DEFAULT0.OVL` and `LIST.OVL` (and, for ln45's call graph, what each calls) |
 | `src/api.c` | C | the functions BASIC calls with `SYS {name}, a` (and reads with `RREG`) |
 | `tools/helpdoc.c`, `tools/mkhelp.c` | C (host) | the help document, written as a Writer file by the C half itself |
 | `tools/mkmod.py` | Python | links a module against the program (below) |
@@ -269,22 +269,29 @@ the room for it. Two kinds:
   `src/stylecold.s45`, 2.3 KB; `fonts`, from `src/petfont.c`, 1 KB): code
   the program runs seldom, or at most once a key, linked by ln45 as copied
   code overlays (M65Compiler #685) rather than by mkmod.py. Their code is
-  `WRITER.OV1`, which the
-  program's first `SYS` into C loads into bank 4 (`$4D000`); a call into
+  `WRITER.OV1`, which the BASIC program `BLOAD`s into bank 4 (`$4D000`)
+  before its first `SYS` into C (`ln45 --overlay-no-load`: no loader in
+  bank 0; and `--overlay-depth=2`, as calls into them never nest: M65Compiler
+  #689); a call into
   it goes through a resident stub that copies it by DMA into `mod_area`'s
   first `MOD_SCRATCH` bytes, the drawing's buffers (`ln45
   --overlay-region=_mod_area+2707`; `cold.c` checks the number). Since
   the drawing, the layout and the modules overwrite those, only `api.c`'s
   `SYS` entries call into it, after `ovl_fresh()` (`__ovl_current = 0`:
   copied in again) and before anything draws, and it calls nothing that
-  writes `mod_area`. Its variables stay in bank 0. Bank 0 gains 581
-  bytes: 2.1 KB of code leaves it, while the overlay runtime (its loader,
-  calls, stubs and tables: 1.3 KB, and 250 bytes of variables) stays.
+  writes `mod_area`. Its variables stay in bank 0. Bank 0 first gained
+  581 bytes: 2.1 KB of code left it, while the overlay runtime (its loader,
+  calls, stubs and tables: 1.3 KB, and 250 bytes of variables) stayed.
   The PETSCII font and PETSCII lines (#5, #11) then cost 620 bytes of it
   in the drawing, the layout and the menus, and 140 more for `DEFAULT0.OVL`'s
   room (`LIST_OFS` 4560 to 4700: their style commands): 365 bytes free.
+  The smaller runtime (#689: no loader, a return stack 2 deep) gave 1.2 KB
+  back; with `LIST.OVL`'s room 140 bytes larger (`MOD_SIZE` 6560: it and
+  `MARKDOWN.OVL` and `HTML.OVL` are now compiled with `-fno-zp-locals`, as
+  their base-page blocks met those of program functions they call), 1435
+  bytes are free.
 
-- **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6420 bytes in
+- **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6560 bytes in
   bank 0), which is also where the drawing keeps its buffers and caches
   (the band, the redraw cache, the bars' text, the row patterns, and the
   layout's buffer of new lines and the menu's text: 4.3 KB),

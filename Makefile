@@ -57,9 +57,12 @@ BASFLAGS ?= --minify --link-align=1
 # kept in bank 4's free $4D000-$4DFFF (after writer.fnt's first part, from
 # $4A000; the C64 fonts are from $4E000: wp.h's PET_LIN) as WRITER.OV1, which the first SYS loads, and copied for each
 # call into mod_area's first MOD_SCRATCH bytes, the drawing's buffers
-# (OVL_ROOM: cold.c checks it is MOD_SCRATCH)
+# (OVL_ROOM: cold.c checks it is MOD_SCRATCH). The BASIC program loads
+# WRITER.OV1 itself (--overlay-no-load: no loader in bank 0), and calls into
+# them never nest (an overlay calls only resident code): a return stack 2
+# deep (M65Compiler #689)
 OVL_ROOM = 2707
-OVLFLAGS = --overlay-store=0x4D000-0x4DFFF --overlay-region=_mod_area+$(OVL_ROOM)
+OVLFLAGS = --overlay-store=0x4D000-0x4DFFF --overlay-region=_mod_area+$(OVL_ROOM) --overlay-no-load --overlay-depth=2
 # the C half's CPU stack: a page of its own, $1700-$17FF (it never goes
 # deeper than 32 bytes), next to its base page (src/lowmem.s45's $1600),
 # not 512 bytes at the end of bank 0 (ln45 --stack-page, M65Compiler
@@ -72,7 +75,7 @@ SMALL   = api conv doc layout cold petfont
 # (conv.c is called by the modules, whose base-page blocks start at $80:
 # its functions keep their variables out of the base page)
 NOZP    = conv
-OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45) $(BUILD)/obj/modcall.o45 $(BUILD)/obj/gap.o45 $(BUILD)/obj/gapmove.o45 $(BUILD)/obj/style.o45 $(BUILD)/obj/stylecold.o45 $(BUILD)/obj/lowmem.o45 $(BUILD)/obj/vicunlock.o45
+OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45) $(BUILD)/obj/modcall.o45 $(BUILD)/obj/listcall.o45 $(BUILD)/obj/gap.o45 $(BUILD)/obj/gapmove.o45 $(BUILD)/obj/style.o45 $(BUILD)/obj/stylecold.o45 $(BUILD)/obj/lowmem.o45 $(BUILD)/obj/vicunlock.o45
 CCQUIET = 2>&1 | grep -v 'note:\|^ *[0-9]* |\|^ *|' || true
 
 # The messages (src/messages.txt): WRITER.MSG, BLOADed by the BASIC program
@@ -108,9 +111,11 @@ $(BUILD)/buildid.h: FORCE
 $(BUILD)/obj/render.o45: $(BUILD)/buildid.h
 
 # MARKDOWN.OVL: Markdown export (md.c), a run-once module
+# (-fno-zp-locals: its locals off the base page, where they met those of
+# the program's functions it calls)
 $(BUILD)/obj/md_mod.o45: src/md.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
-	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+	$(CC45) -O1 -fno-zp-locals $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
 
 $(BUILD)/markdown.ovl: $(TARGET) $(BUILD)/obj/md_mod.o45 tools/mkmod.py
 	python3 tools/mkmod.py --entry _md_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/md_mod.o45
@@ -143,7 +148,7 @@ $(BUILD)/rtfin.ovl: $(TARGET) $(BUILD)/obj/rtfin_mod.o45 tools/mkmod.py
 # HTML.OVL: HTML export (html.c), a run-once module
 $(BUILD)/obj/html_mod.o45: src/html.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
-	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+	$(CC45) -O1 -fno-zp-locals $(CC45FLAGS) -c $< -o $@ $(CCQUIET)     # (as md_mod's)
 
 $(BUILD)/html.ovl: $(TARGET) $(BUILD)/obj/html_mod.o45 tools/mkmod.py
 	python3 tools/mkmod.py --entry _html_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/html_mod.o45
@@ -162,7 +167,7 @@ $(BUILD)/htmlin.ovl: $(TARGET) $(BUILD)/obj/htmlin_mod.o45 tools/mkmod.py
 # draw_line and render_raw)
 $(BUILD)/obj/list_mod.o45: src/list.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
-	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+	$(CC45) -O1 -fno-zp-locals $(CC45FLAGS) -c $< -o $@ $(CCQUIET)     # (as md_mod's)
 
 $(BUILD)/list.ovl: $(TARGET) $(BUILD)/obj/list_mod.o45 tools/mkmod.py
 	python3 tools/mkmod.py --at _mod_area --ofs LIST_OFS --size LIST_SIZE --entry _list_main \

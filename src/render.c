@@ -93,12 +93,18 @@ u8 list_check(void) {
     return list_ok;
 }
 
-/* LIST.OVL's markers over line l (*L), just drawn into the band */
+/* LIST.OVL's markers over line l (*L), just drawn into the band (on the
+ * MEGA65 through listcall.s45's list_entry: a jump through list_vec) */
+#ifdef __cc45__
+void list_entry(void);
+void *list_vec;
+#endif
 static void list_marks(u16 l, const struct line *L) {
     hk_l = l;
     hk_L = L;
 #ifdef __cc45__
-    ((void (*)(void))&list_area[4])();
+    list_vec = &list_area[4];
+    list_entry();
 #else
     list_main();
 #endif

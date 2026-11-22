@@ -1,0 +1,35 @@
+; listcall.s45 — the drawing's call into LIST.OVL, at mod_area + LIST_OFS
+;
+; void list_entry(void): a jump to the module's entry (list_vec, render.c:
+; after its 4-byte header), then (never run) a JSR to each program function
+; LIST.OVL calls (tools/mkmod.py lists them: build/list.equ.s45; not the
+; run time's asm helpers). As modcall.s45's for DEFAULT0.OVL: ln45's call
+; graph then has the drawing (list_marks) calling them, as the module
+; does, so it keeps their static storage apart from the drawing's, which
+; is live while the module runs. (Its own file: ln45 takes all of an asm
+; object's labels for one function.)
+
+; no calls through pointers here (ln45's call graph)
+.weak cc45.icallinfo
+cc45.icallinfo = 1
+
+.global _list_entry
+.extern _list_vec
+.extern _atr_at, _band_xor, _font_of, _just_init, _just_w, _line_end, _mem_read, _raw_tag, _sty, _txt_at
+
+.segment "code"
+
+proc _list_entry
+    jmp (_list_vec)
+    jsr _atr_at
+    jsr _band_xor
+    jsr _font_of
+    jsr _just_init
+    jsr _just_w
+    jsr _line_end
+    jsr _mem_read
+    jsr _raw_tag
+    jsr _sty
+    jsr _txt_at
+    .func_flags zp_call
+    endproc

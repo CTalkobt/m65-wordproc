@@ -409,7 +409,7 @@ void doc_built(void);           /* after build_end (b_done): doc_loaded(1) (mod_
 /* ---- modules (.OVL files, loaded by BASIC into mod_area: render.c) ----
  * A module is built apart (Makefile: linked at mod_area against the
  * program's map) and is at most MOD_SIZE bytes, code, data and variables. */
-#define MOD_SIZE 6420            /* (LIST_OFS + LIST.OVL's room; more than the largest run-once module, MDIN.OVL) */
+#define MOD_SIZE 6560            /* (LIST_OFS + LIST.OVL's room, 1860; more than the largest run-once module, MDIN.OVL) */
 #define MOD_MORE 0x80                   /* (in a command: more calls follow, the module stays) */
 #define MOD_MD_EXPORT 0                 /* MARKDOWN.OVL: md_export */
 #define MOD_MD_IMPORT 1                 /* MDIN.OVL: md_import */
