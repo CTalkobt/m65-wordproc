@@ -72,7 +72,7 @@ static const struct run help[] = {
     { 0, "RETURN on an empty item ends the list" },
     { K_BULLET, "\r" },
     { 0, "\r" },
-    { 0, "A PETSCII line (CTRL+D) holds the C64's graphics as typed (SHIFT and C= with a key), broken at a character, not a word:" },
+    { 0, "A PETSCII line (CTRL+D) holds the C64's graphics as typed (SHIFT and C= with a key; CTRL+9 / CTRL+0 reverse on / off), broken at a character, not a word:" },
     { 0, "\r" },
     { MONO, "\xb0\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xc3\xae" },
     { K_CODE | A_PET, "\r" },
@@ -139,13 +139,15 @@ static const struct run help[] = {
     { K_H2, "\r" },
     { MONO, "N new     L load     S save\r"
             "I import  E export   (PETSCII text; Markdown\r"
-            "          for .md, RTF .rtf, HTML .htm)\r"
+            "          for .md, RTF .rtf, HTML .htm,\r"
+            "          PDF .pdf: export only)\r"
+            "W words, characters, paragraphs counted\r"
             "D directory   H this help   Q quit\r"
             "R redraw the screen (also CTRL+L)\r"
             "T list mode on / off\r" },
     { 0, "Saved Writer documents keep their fonts and styles. "
          "Markdown is read and written by MARKDOWN.OVL, RTF by RTF.OVL, HTML by HTML.OVL "
-         "and HTMLIN.OVL, when they are on the disk. "
+         "and HTMLIN.OVL, PDF by PDF.OVL and PDF2.OVL, when they are on the disk. "
          "List mode (LIST.OVL) marks spaces, paragraph ends, wrapped lines "
          "and trailing spaces.\r" },
 };

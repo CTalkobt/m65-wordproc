@@ -57,14 +57,11 @@ extern u8 npages;
 #define SCHEME_RAW 3            /* per cell (always rewritten) */
 #define SCHEME_BAR 4
 
+/* the row patterns made, the colours unknown (cold.c's rows_init: before
+ * anything is drawn into the band, where the overlay is copied) */
 static void init_rows(void) {
-    u8 i;
-    for (i = 0; i < COLS; i++) {
-        row_desk[i] = 0xFF;
-        row_blank[i] = 0;
-        row_page[i] = (i < PAGE_X / 8 || i >= (PAGE_X + PAGE_W) / 8) ? 0xFF : 0;
-    }
-    for (i = 0; i < ROWS; i++) rowcol[i] = 0xFF;
+    ovl_fresh();
+    rows_init();
     inited = 1;
 }
 
@@ -128,10 +125,13 @@ u16 mod_run(u8 cmd) {
     if (cmd == MOD_MD_EXPORT) md_main();
     else if (cmd == MOD_MD_IMPORT) mdin_main();
     else if (cmd == MOD_HTML_EXPORT) html_main();
+    else if (cmd == MOD_PDF_EXPORT) pdf_main();
+    else if (cmd == MOD_PDF_END) pdf2_main();
     else if ((cmd & ~MOD_MORE) > MOD_HTML_EXPORT) htmlin_main();
     else if (cmd == MOD_RTF_EXPORT) rtf_main();
     else rtfin_main();
 #endif
+    ovl_fresh();                /* (the module wrote over the overlays' room) */
     doc_built();
     /* (not while more calls follow: the caches written here are in the
      * module's memory) */
@@ -517,9 +517,10 @@ static void sb_draw(u16 x, u8 sh, u8 top) {
 /* line l (*L) into the band (rows 0..h-1) */
 static void draw_line(u16 l, const struct line *L) {
     u16 i = L->start, e = line_end(l), x, lo = 0, hi = 0, cx = 0xFFFF;
-    u8 h = L->h, asc = L->asc;
+    u8 h = L->h, asc = L->asc, rvs;
     struct just j;
     just_init(&j, L);
+    rvs = j.pet ? rvs_at(i) : 0;
     if (h > BAND_H) h = BAND_H;
     band_fill(h, row_page);
     if (sel_on) {
@@ -556,8 +557,13 @@ static void draw_line(u16 l, const struct line *L) {
             if (sel_on && i >= lo && i < hi) band_xor(x, x + 4, 0, h);
             continue;
         }
+        if (j.pet && (c & 0x7F) == RVS_ON) {
+            rvs = c == RVS_ON;          /* (not drawn: 0 wide) */
+            continue;
+        }
         w = just_w(c, a, &j);
         draw_char(c, x, w, asc, a);
+        if (rvs) band_xor(x, x + w, (u8)(asc - 14), (u8)(asc + 2));
         if (sel_on && i >= lo && i < hi) band_xor(x, x + w, 0, h);
         x += w;
     }
@@ -740,7 +746,7 @@ static void render_raw(void) {
         band_fill(RAW_H, row_blank);
         if (l < nlines) {
             u16 i = L.start, e = line_end(l);
-            u8 pet = atr_at(para_end(i)) & A_PET;
+            u8 pet = atr_at(para_end(i)) & A_PET, rvs = pet ? rvs_at(i) : 0;
             col = 0;
             for (; i < e && col < COLS; i++) {
                 u8 c = txt_at(i), n = raw_tag(i, tags), k, tc = C_BLUE;
@@ -758,7 +764,14 @@ static void render_raw(void) {
                     raw_cell(col, G_PILCROW, 0);
                     cellcol[col] = C_GREY;
                 } else if (pet) {
-                    draw_glyph(&font_petl, c, (u16)col * 8, 0, 0);     /* (its C64 glyph, 8 x 16) */
+                    if ((c & 0x7F) == RVS_ON) {
+                        /* (RVS ON / OFF: R / r inverted) */
+                        rvs = c == RVS_ON;
+                        raw_cell(col, rvs ? 'R' : 'r', 0xFF);
+                    } else {
+                        draw_glyph(&font_petl, c, (u16)col * 8, 0, 0);     /* (its C64 glyph, 8 x 16) */
+                        if (rvs) raw_invert_cell(col);
+                    }
                 } else {
                     raw_cell(col, c, 0);
                 }

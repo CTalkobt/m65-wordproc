@@ -169,7 +169,7 @@ static void style(u8 k) {
                 if (conv) {
                     c = txt_at(i);
                     if (pet && (u8)(c - 'a') < 26) c = (u8)(c - 32);
-                    else if (c >= 0x60) c = '?';
+                    else if ((u8)(c - 0x20) >= 0x40) c = '?';    /* (and control codes: RVS ON / OFF) */
                     txt_put(i, c);
                 }
             }

@@ -17,11 +17,72 @@
  * Its variables are resident, as an overlay's are (m65.c's video state).
  */
 #include "wp.h"
+#include "msg.h"
 #ifdef __cc45__
 #pragma cc45 overlay(cold)
 /* (the room: MOD_SCRATCH, which the Makefile gives ln45 as OVL_ROOM) */
 typedef char ovl_room_is_scratch[OVL_ROOM == MOD_SCRATCH ? 1 : -1];
 #endif
+
+/* ---- moved out of bank 0 from doc.c and render.c (called after
+ * ovl_fresh, before anything draws) ---- */
+void doc_new(void) {
+    g_len = 0;
+    txt_put(0, CH_CR);
+    atr_put(0, 0);
+    doc_len = 1;
+    cur = 0;
+    sel_on = 0;
+    typing_attr = 0;
+    dirty = 0;
+    view_y = 0;
+    goal_valid = 0;
+    u_have = 0;
+    layout_all();
+}
+
+/* the selection to the clipboard */
+void doc_copy(void) {
+    u16 lo, n;
+    if (!sel_on) return;
+    lo = sel_lo();
+    n = sel_hi() - lo;
+    if (n > CLIP_MAX) n = CLIP_MAX;
+    doc_out((u16)(CLIP_LIN - SCRATCH_LIN), CLIP_MAX, lo, n);
+    clip_len = n;
+}
+
+/* a document just loaded or imported (doc_len characters): its final CR
+ * made sure of, the cursor at its start, laid out anew; d: changed */
+void doc_loaded(u8 d) {
+    if (!doc_len || txt_at(doc_len - 1) != CH_CR) {
+        if (doc_len < DOC_MAX) {
+            atr_put(doc_len, 0);
+            doc_len++;
+        }
+        txt_put(doc_len - 1, CH_CR);
+    }
+    cur = 0;
+    sel_on = 0;
+    view_y = 0;
+    goal_valid = 0;
+    dirty = d;
+    u_have = 0;
+    typing_attr = attr_at_cursor();
+    layout_all();
+}
+
+/* the drawing's row patterns (render.c's init_rows: render_invalidate
+ * made them unknown), the cells' colours unknown */
+void rows_init(void) {
+    u8 i;
+    for (i = 0; i < COLS; i++) {
+        mod_area.r.row_desk[i] = 0xFF;
+        mod_area.r.row_blank[i] = 0;
+        mod_area.r.row_page[i] = (i < PAGE_X / 8 || i >= (PAGE_X + PAGE_W) / 8) ? 0xFF : 0;
+    }
+    for (i = 0; i < ROWS; i++) mod_area.r.rowcol[i] = 0xFF;
+}
 
 /* the text as PETSCII (lower-case set) for a SEQ file (a PETSCII line's
  * as it is); the size */
@@ -96,10 +157,49 @@ u8 petscii_to_ascii(u8 c) {
     return 0;
 }
 
+/* msg: the words, characters (not the paragraph ends) and paragraphs
+ * (those with a word) of the selection, or of the document */
+void doc_count(void) {
+    u16 i = 0, e = doc_len, w = 0, ch = 0, pa = 0;
+    u8 c, in = 0, txt = 0, k;
+    char b[18], t[6];
+    if (sel_on) {
+        i = sel_lo();
+        e = sel_hi();
+    }
+    for (; i <= e; i++) {
+        c = i < e ? txt_at(i) : CH_CR;
+        if (c == CH_CR || c == CH_FF) {
+            if (txt) pa++;
+            txt = in = 0;
+            continue;
+        }
+        ch++;
+        if (c == ' ' || c == 0xA0) in = 0;
+        else if (!in) {
+            in = txt = 1;
+            w++;
+        }
+    }
+    /* "w,ch,pa" for the message's fields */
+    e = 0;
+    for (k = 0; k < 3; k++) {
+        i = k == 0 ? w : k == 1 ? ch : pa;
+        c = 0;
+        do {
+            t[c++] = (char)('0' + i % 10);
+            i /= 10;
+        } while (i);
+        while (c) b[e++] = t[--c];
+        b[e++] = k < 2 ? ',' : 0;
+    }
+    msg_fill(sel_on ? MSG_COUNTSEL : MSG_COUNT, b);
+}
+
 /* key k (its PETSCII code) as the cursor's paragraph has it: in a PETSCII
  * line the code as it is (but a control code), else as ASCII; 0: none */
 u8 key_char(u8 k) {
-    if (atr_at(para_end(cur)) & A_PET) return (k & 0x7F) < 0x20 ? 0 : k;
+    if (atr_at(para_end(cur)) & A_PET) return (k & 0x7F) < 0x20 && (k & 0x7F) != RVS_ON ? 0 : k;   /* (RVS ON / OFF typed) */
     return petscii_to_ascii(k);
 }
 

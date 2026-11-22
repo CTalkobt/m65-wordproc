@@ -33,6 +33,7 @@
 #define CMD_ALL 18
 #define CMD_CLEAN 20
 #define CMD_LIST 21
+#define CMD_COUNT 23
 #define CMD_STYLE 32
 #define CMD_FX 48
 #define CMD_NAMES 64
@@ -51,6 +52,9 @@
 #define GET_FONTS 15
 #define GET_KIND 16
 #define GET_NAMES 24
+#define GET_PDFPREP 26
+#define GET_PDF 25
+#define GET_PDF2 27
 ' + the file's kind (fk): the document exported, as text, Markdown, RTF, HTML
 #define GET_XEXPORT 17
 
@@ -148,7 +152,7 @@ proc menu
   sys {wp_panel}, 2
   getkey m$
   sys {wp_panel}, 0
-  on instr(p"nlsiedhrtq", chr$(asc(m$) and 127)) gosub newdoc, loaddoc, savedoc, importtext, exporttext, showdir, loadhelp, redraw, listmode, quit
+  on instr(p"nlsiedhrtqw", chr$(asc(m$) and 127)) gosub newdoc, loaddoc, savedoc, importtext, exporttext, showdir, loadhelp, redraw, listmode, quit, words
 endproc
 
 ' ---- the style drop-down (CTRL+D) under the top bar's style field: the
@@ -174,6 +178,11 @@ endproc
 ' style..." names a new one), R redefines it as the selection's look, D
 ' takes its name away (its text keeps its look), N names a new style of
 ' the selection's look ----
+' W)ords: the words, characters and paragraphs counted, in the bottom bar
+proc words
+  sys {wp_cmd}, CMD_COUNT
+endproc
+
 proc namedmenu
   sys {wp_get}, GET_NAMES : rreg nn
   sv = 0 : dk = 128 : dn = nn + 1 : call dropdown
@@ -338,6 +347,7 @@ proc importtext
     if ok and a$ <> "" then call ftype : if fk = 1 then mf$ = "mdin.ovl"
     if fk = 2 then mf$ = "rtfin.ovl"
     if fk = 3 then mf$ = "htmlin.ovl"
+    if fk = 4 then sys {wp_say}, MSG_NOPDFIN : ok = 0
     if ok and a$ <> "" then dopen#2, (a$) : e$ = ds$ : dclose#2 : if val(e$) then call sp(MSG_NOTIMP, e$) : ok = 0
     if ok and a$ <> "" then
       call sp(MSG_IMPORTING, a$)
@@ -397,10 +407,16 @@ proc exporttext
   call ask(MSG_EXPORT)
   if ok and a$ <> "" then
     call ftype
-    ml = 1 : lo = 0 : hi = 0
+    ml = 1 : lo = 0 : hi = 0 : g = GET_XEXPORT + fk : vr = 0
+    ' (PDF: the page view laid out to its end first; from the raw view, back
+    ' to it after)
+    if fk = 4 then g = GET_PDF : sys {wp_get}, GET_PDFPREP : rreg vr
     if fk then call loadmod
-    if ml then sys {wp_get}, GET_XEXPORT + fk : rreg lo, hi
+    if ml then sys {wp_get}, g : rreg lo, hi
+    ' (PDF: PDF2.OVL then, after PDF.OVL's pages: the rest)
+    if fk = 4 and ml and lo + hi and lo + hi < 510 then mf$ = "pdf2.ovl" : call loadmod : if ml then sys {wp_get}, GET_PDF2 : rreg lo, hi
     if fk then call loadlist
+    if vr then sys {wp_cmd}, CMD_VIEW
     n = lo + 256 * hi
     call modsaid
     if ok and n = 0 then sys {wp_say}, MSG_TOOLONG + fk : ok = 0
@@ -464,6 +480,7 @@ proc ftype
   b$ = right$(a$, 4)
   if b$ = p".rtf" or b$ = p".RTF" then fk = 2 : mf$ = "rtf.ovl"
   if b$ = p".htm" or b$ = p".HTM" or b$ = p"html" or b$ = p"HTML" then fk = 3 : mf$ = "html.ovl"
+  if b$ = p".pdf" or b$ = p".PDF" then fk = 4 : mf$ = "pdf.ovl"
 endproc
 
 proc showdir

@@ -216,6 +216,17 @@ u8 walk_next(void) {
     return EV_RUN;
 }
 
+u8 rvs_at(u16 i) {
+    u8 c;
+    while (i) {
+        c = txt_at(--i);
+        if (c == CH_CR || c == CH_FF) break;
+        if (c == RVS_ON) return 1;
+        if (c == RVS_OFF) return 0;
+    }
+    return 0;
+}
+
 /* paragraph p's number in its list: 1 + the numbered items before it at
  * its level (deeper ones passed over), back to anything else (here: the
  * Markdown and RTF modules call it, and the drawing) */

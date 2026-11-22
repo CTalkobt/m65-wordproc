@@ -54,7 +54,8 @@ static u8 lower(u8 c) { return is_letter(c) ? (u8)(c | 0x20) : c; }
  * value (lower case; quoted with q, 0: not); what the attributes say */
 static char nm[12], an[12], av[64], en[10], rv[NAME_LEN], tn[NAME_LEN];
 static u8 nl, closing, anl, avl, q, enl, dash;
-static u8 t_align, t_pb, t_font, t_pet, t_nm;
+static u8 t_align, t_pb, t_font, t_pet, t_nm, t_rv;
+static u8 rv_d;                         /* the <span class="rv">'s depth (a PETSCII line's reverse video; 0: none) */
 #define NONE 0xFF
 
 /* the text's context */
@@ -245,6 +246,7 @@ static void attr_done(void) {
         t_align = align_of();
     } else if (k == 3) {
         if (has("petscii")) t_pet = 1;
+        if (avl == 2 && av[0] == 'r' && av[1] == 'v') t_rv = 1;
         if (avl == 1) t_font = av[0] == 's' ? F_SANS : av[0] == 'r' ? F_SERIF : av[0] == 'h' ? F_HEAD : av[0] == 'p' ? F_PET : NONE;
     }
 }
@@ -275,6 +277,10 @@ static void tag_end(void) {
     if (t == T_SPAN) {
         if (closing) {
             if (sd == nm_d) nm_d = 0;
+            if (sd && sd == rv_d) {
+                rv_d = 0;
+                build_put(RVS_OFF);
+            }
             if (sd) sd--;
         } else if (sd < sizeof sfont) {
             sfont[sd] = t_font != NONE ? t_font : sd ? sfont[sd - 1] : NONE;
@@ -283,6 +289,13 @@ static void tag_end(void) {
                 memcpy(nm_s, tn, NAME_LEN);
                 nm_d = sd;
                 nm_k = 0;
+            }
+            if (t_rv && npre && pet) {
+                /* (a PETSCII line's reverse video) */
+                begin();
+                b_attr = attr();
+                build_put(RVS_ON);
+                rv_d = sd;
             }
         }
         return;
@@ -435,7 +448,7 @@ static u8 feed(u8 c) {
         }
         nm[nl] = 0;
         t_align = t_font = NONE;
-        t_pb = t_pet = t_nm = 0;
+        t_pb = t_pet = t_nm = t_rv = 0;
         st = S_ATTR;
         return 1;
     case S_ATTR:
@@ -513,7 +526,7 @@ static void html_begin(void) {
     u8 k;
     build_start();
     st = S_TEXT;
-    popen = want_gap = no_gap = pal = hk = nq = npre = ld = sd = sp_n = sp_nl = u_need = nm_d = 0;
+    popen = want_gap = no_gap = pal = hk = nq = npre = ld = sd = sp_n = sp_nl = u_need = nm_d = rv_d = 0;
     for (k = 0; k < sizeof n_on; k++) n_on[k] = 0;
     scr = 0;
 }

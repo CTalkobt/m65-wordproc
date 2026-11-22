@@ -31,8 +31,8 @@ TARGET = $(BUILD)/writer.prg
 MAP    = $(BUILD)/writer.map
 DISK   = $(BUILD)/writer.d81
 
-CSRC    = src/cold.c src/petfont.c src/names.c src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/rtfin.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/m65.c src/fonts.c
-PORTABLE = src/cold.c src/petfont.c src/names.c src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/rtfin.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/fonts.c
+CSRC    = src/cold.c src/petfont.c src/names.c src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/rtfin.c src/html.c src/htmlin.c src/pdf.c src/list.c src/edit.c src/edit_undo.c src/m65.c src/fonts.c
+PORTABLE = src/cold.c src/petfont.c src/names.c src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/rtfin.c src/html.c src/htmlin.c src/pdf.c src/list.c src/edit.c src/edit_undo.c src/fonts.c
 HEADERS = src/wp.h src/petuni.h
 
 # The C half is compiled here (basic45 --link takes the objects): -O2 for
@@ -86,7 +86,7 @@ $(MSGS) &: src/messages.txt tools/mkmsg.py
 	@mkdir -p $(BUILD)
 	python3 tools/mkmsg.py src/messages.txt $(MSGS)
 
-$(BUILD)/obj/api.o45 $(BUILD)/obj/render.o45: $(BUILD)/msg.h
+$(BUILD)/obj/api.o45 $(BUILD)/obj/render.o45 $(BUILD)/obj/cold.o45: $(BUILD)/msg.h
 
 $(BUILD)/obj/%.o45: src/%.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
@@ -100,7 +100,7 @@ $(BUILD)/obj/%.o45: src/%.s45
 # linked by tools/mkmod.py to run at the program's mod_area, against its
 # map (basic45 --map: M65Compiler #595, in master since 6a7dd256); the build's ID (of the sources and the tools) ties each to the
 # program it was linked with (render.c's mod_run refuses another's).
-MODS    = $(BUILD)/markdown.ovl $(BUILD)/mdin.ovl $(BUILD)/rtf.ovl $(BUILD)/rtfin.ovl $(BUILD)/html.ovl $(BUILD)/htmlin.ovl $(BUILD)/list.ovl $(BUILD)/default0.ovl
+MODS    = $(BUILD)/markdown.ovl $(BUILD)/mdin.ovl $(BUILD)/rtf.ovl $(BUILD)/rtfin.ovl $(BUILD)/html.ovl $(BUILD)/htmlin.ovl $(BUILD)/pdf.ovl $(BUILD)/pdf2.ovl $(BUILD)/list.ovl $(BUILD)/default0.ovl
 BUILD_ID := $(shell cat src/*.c src/*.h src/wp.bas tools/mkmod.py $(CC45) $(CC45_ROOT)/bin/ln45 2>/dev/null | cksum | awk '{print $$1 % 65536}')
 
 $(BUILD)/buildid.h: FORCE
@@ -132,6 +132,22 @@ $(BUILD)/mdin.ovl: $(TARGET) $(BUILD)/obj/mdin_mod.o45 tools/mkmod.py
 $(BUILD)/obj/rtf_mod.o45: src/rtf.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
 	$(CC45) -O1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+
+# PDF.OVL: PDF export (pdf.c), a run-once module
+# (and PDF2.OVL, its second part, from the same file: PDF_PART)
+$(BUILD)/obj/pdf_mod.o45: src/pdf.c $(HEADERS)
+	@mkdir -p $(BUILD)/obj
+	$(CC45) -O1 -fno-zp-locals -DPDF_PART=1 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+
+$(BUILD)/pdf.ovl: $(TARGET) $(BUILD)/obj/pdf_mod.o45 tools/mkmod.py
+	python3 tools/mkmod.py --entry _pdf_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/pdf_mod.o45
+
+$(BUILD)/obj/pdf2_mod.o45: src/pdf.c $(HEADERS)
+	@mkdir -p $(BUILD)/obj
+	$(CC45) -O1 -fno-zp-locals -DPDF_PART=2 $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+
+$(BUILD)/pdf2.ovl: $(TARGET) $(BUILD)/obj/pdf2_mod.o45 tools/mkmod.py
+	python3 tools/mkmod.py --entry _pdf2_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/pdf2_mod.o45
 
 $(BUILD)/rtf.ovl: $(TARGET) $(BUILD)/obj/rtf_mod.o45 tools/mkmod.py
 	python3 tools/mkmod.py --entry _rtf_main $(MAP) $(TARGET) $@ $(BUILD_ID) $(BUILD)/obj/rtf_mod.o45
@@ -212,6 +228,8 @@ $(DISK): $(TARGET) src/writer.fnt $(BUILD)/writer.msg $(BUILD)/help.prg $(MODS)
 	$(DISK45) add $@ $(BUILD)/rtfin.ovl "RTFIN.OVL"
 	$(DISK45) add $@ $(BUILD)/html.ovl "HTML.OVL"
 	$(DISK45) add $@ $(BUILD)/htmlin.ovl "HTMLIN.OVL"
+	$(DISK45) add $@ $(BUILD)/pdf.ovl "PDF.OVL"
+	$(DISK45) add $@ $(BUILD)/pdf2.ovl "PDF2.OVL"
 	$(DISK45) add $@ $(BUILD)/list.ovl "LIST.OVL"
 	$(DISK45) add $@ $(BUILD)/default0.ovl "DEFAULT0.OVL"
 

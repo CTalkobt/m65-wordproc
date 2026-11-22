@@ -17,21 +17,6 @@ u16 clip_len;
 u16 u_pos, u_tail, u_n;
 u8 u_have, u_open, f_len, r_len, r_on;
 
-void doc_new(void) {
-    g_len = 0;
-    txt_put(0, CH_CR);
-    atr_put(0, 0);
-    doc_len = 1;
-    cur = 0;
-    sel_on = 0;
-    typing_attr = 0;
-    dirty = 0;
-    view_y = 0;
-    goal_valid = 0;
-    u_have = 0;
-    layout_all();
-}
-
 u16 sel_lo(void) { return sel_anchor < cur ? sel_anchor : cur; }
 u16 sel_hi(void) { return sel_anchor < cur ? cur : sel_anchor; }
 
@@ -331,19 +316,10 @@ void doc_delete_fwd(void) {
     goal_valid = 0;
 }
 
-/* ---- the clipboard (bank 4: text, then attributes) ---- */
-void doc_copy(void) {
-    u16 lo, n;
-    if (!sel_on) return;
-    lo = sel_lo();
-    n = sel_hi() - lo;
-    if (n > CLIP_MAX) n = CLIP_MAX;
-    doc_out((u16)(CLIP_LIN - SCRATCH_LIN), CLIP_MAX, lo, n);
-    clip_len = n;
-}
-
+/* ---- the clipboard (bank 4: text, then attributes; doc_copy: cold.c) ---- */
 void doc_cut(void) {
     if (!sel_on) return;
+    ovl_fresh();
     doc_copy();
     delete_selection();
     goal_valid = 0;
@@ -363,26 +339,6 @@ void doc_paste(void) {
 
 /* ---- files: doc_pack, doc_unpack, doc_export, doc_import are in cold.c
  * (an overlay) ---- */
-
-/* a document just loaded or imported (doc_len characters): its final CR
- * made sure of, the cursor at its start, laid out anew; d: changed */
-void doc_loaded(u8 d) {
-    if (!doc_len || txt_at(doc_len - 1) != CH_CR) {
-        if (doc_len < DOC_MAX) {
-            atr_put(doc_len, 0);
-            doc_len++;
-        }
-        txt_put(doc_len - 1, CH_CR);
-    }
-    cur = 0;
-    sel_on = 0;
-    view_y = 0;
-    goal_valid = 0;
-    dirty = d;
-    u_have = 0;
-    typing_attr = attr_at_cursor();
-    layout_all();
-}
 
 /* an import built (build_end): the cursor at the start, laid out anew */
 void doc_built(void) {

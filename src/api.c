@@ -54,6 +54,7 @@ static char msg_parm[81];
 #define CMD_CLEAN 20
 #define CMD_LIST 21
 #define CMD_UNDO 22
+#define CMD_COUNT 23             /* the words, characters, paragraphs counted (doc_count): the bottom bar */
 #define CMD_STYLE 32             /* + a kind (K_...): doc_style */
 #define CMD_FX 48                /* + the effect pop-up's item (CTRL+E): ED_FX */
 #define CMD_NAMES 64             /* + names_cmd's command (SHIFT+CTRL+S's pop-up: NM_...) */
@@ -79,6 +80,9 @@ static char msg_parm[81];
 #define GET_HTMLCHUNK 22
 #define GET_HTMLEND 23
 #define GET_NAMES 24             /* the named styles' count */
+#define GET_PDF 25               /* the document as PDF (PDF.OVL, loaded) */
+#define GET_PDFPREP 26           /* (before PDF.OVL is loaded) the page view laid out to the end; 1: it was the raw view */
+#define GET_PDF2 27              /* the PDF's end (PDF2.OVL, loaded after PDF.OVL ran) */
 
 /* what wp_key leaves to BASIC (its ON ... GOSUB) */
 #define ACT_HELP 1                 /* F8, HELP */
@@ -365,13 +369,17 @@ void wp_cmd(u8 c) {
         relayout = 0;
         break;
     case CMD_COPY:
+        ovl_fresh();
         doc_copy();
         sel_on = 0;
         relayout = 0;
         break;
     case CMD_CUT: doc_cut(); break;
     case CMD_PASTE: doc_paste(); break;
-    case CMD_NEW: doc_new(); break;
+    case CMD_NEW:
+        ovl_fresh();
+        doc_new();
+        break;
     case CMD_LINEEND:
         l = line_of(cur);
         cur = (u16)(line_end(l) - 1);
@@ -408,6 +416,11 @@ void wp_cmd(u8 c) {
     case CMD_UNDO:
         l = edit_run(ED_UNDO);
         if (l) say(l == 1 ? "Nothing to undo." : ed_need);
+        break;
+    case CMD_COUNT:
+        ovl_fresh();
+        doc_count();
+        relayout = 0;
         break;
     case CMD_LIST:              /* list mode (LIST.OVL) on / off */
         if (list_ok) list_on ^= 1;
@@ -466,6 +479,18 @@ u16 wp_get(u8 w) {
         return mem_get(TEXT_LIN) ^ 0x5A;
     case GET_KIND: return cur_kind();
     case GET_NAMES: return names_count();
+    case GET_PDF: return scratched(mod_run(MOD_PDF_EXPORT));
+    case GET_PDF2: return scratched(mod_run(MOD_PDF_END));
+    case GET_PDFPREP: {
+        u8 r = view_mode;
+        if (r) {
+            view_mode = VIEW_PAGE;
+            layout_all();
+        }
+        layout_update();
+        while (layout_idle()) {}
+        return r;
+    }
     case GET_IMPORT:
     case GET_MDIMPORT:
     case GET_RTFEND:

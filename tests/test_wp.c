@@ -1001,6 +1001,21 @@ int main(void) {
             wp_key(0xC1);
             n = doc_export();
             CHECK(n == 4 && MEM[SCRATCH_LIN] == 'X' && MEM[SCRATCH_LIN + 2] == 0xC1);
+            /* reverse video (CTRL+9 / CTRL+0): typed, 0 wide, in HTML */
+            wp_key(RVS_ON);
+            type("ab");
+            wp_key(RVS_OFF);
+            type("c");
+            text_of(buf, sizeof buf);
+            CHECK(strcmp(buf, "x\r\xc1\x12\x41\x42\x92\x43\r") == 0 && rvs_at(5) && !rvs_at(3) && !rvs_at(7));
+            CHECK(char_w(RVS_ON, S_PETL) == 0 && char_w(RVS_OFF, S_PETL) == 0 && x_of(1, 4) - x_of(1, 2) == 8);
+            n = mod_run(MOD_HTML_EXPORT);
+            memcpy(m, MEM + SCRATCH_LIN, n);
+            m[n] = 0;
+            CHECK(strstr(m, "<pre class=\"petscii\"><code>\xe2\x99\xa0<span class=\"rv\">AB</span>C</code></pre>") != NULL);
+            html_in(m);
+            text_of(buf, sizeof buf);
+            CHECK(strcmp(buf, "x\r\r\xc1\x12\x41\x42\x92\x43\r") == 0);
 
             /* the PETSCII font, a character style (CTRL+E's font 4) */
             wp_cmd(13);
@@ -1110,6 +1125,15 @@ int main(void) {
             /* (the names taken away: the file tests after expect none) */
             while (names_count()) wp_cmd(CMD_NAMES + NM_UNNAME);
             CHECK(names_count() == 0);
+            /* W)ords: the document's count, then a selection's */
+            wp_cmd(13);
+            type("one two\n\n  three  \nfour");
+            wp_cmd(23);
+            CHECK(strcmp(msg, "Words: 4, characters: 20, paragraphs: 3.") == 0);
+            SEL(4, 11);
+            wp_cmd(23);
+            CHECK(strcmp(msg, "Selected: words: 1, characters: 5, paragraphs: 1.") == 0);
+            sel_on = 0;
         }
         rtf_in("{\\rtf1\\ansi a\\up6 b\\up0 c\\dn4 d\\dn0 e\\par}");
         CHECK(sa(1) == A_SUP && sa(2) == 0 && sa(3) == A_SUB && sa(4) == 0);
@@ -1710,6 +1734,36 @@ int main(void) {
 
     test_edit();
     test_gap();
+
+    /* PDF (PDF.OVL, then PDF2.OVL): the help as a PDF file, its
+     * cross-reference table where startxref says, and each object where
+     * the table says */
+    {
+        u16 n, x, k, o;
+        const char *p;
+        doc_load_help();
+        wp_get(26);
+        n = mod_run(MOD_PDF_EXPORT);
+        CHECK(n > 0);
+        n = mod_run(MOD_PDF_END);
+        CHECK(n > 1000 && !memcmp(MEM + SCRATCH_LIN, "%PDF-1.4", 8) && !memcmp(MEM + SCRATCH_LIN + n - 6, "%%EOF\n", 6));
+        MEM[SCRATCH_LIN + n] = 0;
+        p = strstr((const char *)MEM + SCRATCH_LIN + n - 40, "startxref\n");
+        CHECK(p != NULL);
+        if (p) {
+            x = (u16)atoi(p + 10);
+            CHECK(!memcmp(MEM + SCRATCH_LIN + x, "xref\n0 ", 7));
+            for (k = 1; k < 20; k++) {
+                char t[16];
+                o = (u16)atoi(strchr((const char *)MEM + SCRATCH_LIN + x + 5, '\n') + 1 + 20 * k);
+                sprintf(t, "%u 0 obj", k);
+                if (memcmp(MEM + SCRATCH_LIN + o, t, strlen(t))) {
+                    CHECK(0);
+                    break;
+                }
+            }
+        }
+    }
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

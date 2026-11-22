@@ -49,7 +49,8 @@ without it the program starts with an empty document), `MARKDOWN.OVL` and
 works, and a `.md` name gets "Markdown needs MARKDOWN.OVL and MDIN.OVL on
 the disk"),
 `RTF.OVL` and `RTFIN.OVL` (RTF export and import, the same for `.rtf`), `HTML.OVL` and
-`HTMLIN.OVL` (HTML export and import, the same for `.htm` and `.html`), `LIST.OVL`
+`HTMLIN.OVL` (HTML export and import, the same for `.htm` and `.html`), `PDF.OVL` and
+`PDF2.OVL` (PDF export, for `.pdf`), `LIST.OVL`
 (list mode, a module: without it the menu does not offer it) and
 `DEFAULT0.OVL` (undo, find and replace, and the styles; a required module,
 named so that it is not taken for an optional one: without it those do
@@ -85,7 +86,7 @@ keyboard buffer and saves a screenshot, e.g.
 | CTRL+H | find and replace (below) |
 | CTRL+W | save, under the document's name (asking only when it has none) |
 | F8 or HELP | the help (`WRITER.HELP`) as the document (after asking about unsaved changes) |
-| ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text; Markdown for a name ending in `.md`, RTF for `.rtf`, HTML for `.htm` or `.html`), Directory; Redraw, List on / off (with `LIST.OVL`), Help, Quit (ESC also ends a selection) |
+| ESC | menu, in a panel over the bottom three rows: New, Load, Save, Import, Export (plain text; Markdown for a name ending in `.md`, RTF for `.rtf`, HTML for `.htm` or `.html`, PDF for `.pdf`: export only), Directory; Redraw, List on / off (with `LIST.OVL`), Words (the selection's, or the document's, words, characters and paragraphs counted, in the bottom bar), Help, Quit (ESC also ends a selection) |
 | CTRL+D | the style drop-down (below) |
 | CTRL+E | the font and effect pop-up: Sans, Serif, Mono, Head, PETSCII, Bold, Italic, Underline, Strikethrough, Superscript, Subscript, each drawn so and those on marked; the cursor keys move it, RETURN sets the font or turns the effect on or off (the selection's, or for what is typed next; superscript and subscript are one or neither), ESC leaves it |
 | SHIFT+CTRL+S | the named styles' pop-up (below) |
@@ -121,7 +122,10 @@ own look; the cursor keys move through it and RETURN applies the one lit
   (`A_PET`), holding PETSCII codes as typed, drawn in the C64's
   upper-case / graphics set (8 x 16: the C64's 8 x 8 glyphs with each row
   twice, as the C128's 80 columns look), so SHIFT and C= with a key type
-  its graphics; control codes (colours, ...) are not typed. Its text is
+  its graphics; CTRL+9 and CTRL+0 type RVS ON and RVS OFF (`$12`, `$92`),
+  and the characters between them (or to the paragraph's end) are drawn
+  reversed (the codes themselves 0 wide; the raw view shows them as an
+  inverted R and r); other control codes (colours, ...) are not typed. Its text is
   made PETSCII that looks as it did (a-z as A-Z, what the set lacks `?`);
   made another style again, its graphics become `?`. A long one is broken
   at a character, not a word, and keeps its spaces; RETURN in one starts
@@ -231,6 +235,7 @@ letter with its accent), in `WRITER.FNT`.
 | `src/names.c`, `src/names_def.h` | C | named styles' commands and the file image (`doc_pack`, `doc_unpack`): the code overlay `names`; finding and defining a named style (`names_def.h`, compiled into it and the import modules) |
 | `src/petfont.c` | C | the C64 fonts made at the start (PETSCII lines', the PETSCII font): the code overlay `fonts` |
 | `src/html.c` | C | HTML export (below): the module `HTML.OVL` |
+| `src/pdf.c` | C | PDF export (below): the modules `PDF.OVL` and `PDF2.OVL` (`PDF_PART` 1 and 2) |
 | `src/htmlin.c` | C | HTML (streamed) import: the module `HTMLIN.OVL` |
 | `src/list.c` | C | list mode's markers: the module `LIST.OVL` |
 | `src/edit.c`, `src/edit_undo.c` | C | undo, find and replace, the styles: the module `DEFAULT0.OVL` |
@@ -315,7 +320,10 @@ the room for it. Two kinds:
   bytes were free. Named styles (#5 step 3) took 1.1 KB of that: their
   pop-up, the top bar's name and the BASIC to drive them (300 bytes);
   `m65.c` is now compiled with `-fno-zp-locals` too (`DEFAULT0.OVL`'s
-  base page met `mem_copy`'s): 338 bytes free.
+  base page met `mem_copy`'s): 338 bytes free. Reverse video, the word
+  count and the PDF export's BASIC then took that to 7 bytes, after
+  `doc_new`, `doc_copy`, `doc_loaded` and the row patterns' setup moved
+  into the overlay `cold` too (`mod_run` marks it stale after a module).
 
 - **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6560 bytes in
   bank 0), which is also where the drawing keeps its buffers and caches
@@ -556,6 +564,30 @@ Tests (`make test`): the help exported, imported and exported again gives
 the same HTML; HTML from elsewhere imported as expected. In xemu a
 2.8 KB page from elsewhere and the help's HTML, imported and exported
 again on the MEGA65, are byte for byte what the host makes.
+
+### PDF
+
+Export only (`src/pdf.c`: the modules `PDF.OVL`, the pages, and
+`PDF2.OVL`, the rest, run one after the other into the same output, as
+together they are more than `MOD_SIZE`): the document as the page view
+lays it out (BASIC has it laid out to its end first, from the raw view
+too), a PDF page (US Letter: Writer's page is its shape, a pixel 1.125
+points) for each of Writer's, so its lines, pages, alignment and
+justification are Writer's. Each page's content is in Writer's pixels,
+whole numbers. The text is in PDF's standard fonts (Sans and Head
+Helvetica, Serif Times, Mono Courier, bold and italic their variants),
+sized by height and each word placed where Writer puts it and scaled
+(`Tz`) to be as wide as Writer's: the module has the standard fonts'
+widths (Helvetica's and Times', 95 codes each, 8/1000 of the size). Bold,
+italic, underline and strikethrough, superscript and subscript as Writer
+draws them; the PETSCII font and PETSCII lines in a Type 3 font of
+Writer's own C64 glyphs (those used, 8 x 16 image masks: `PETSCII.FNT`'s
+or the character ROM's), reverse video white on a black box; a quote's
+bar, a code block's line, bullets and numbers, each page's number at its
+foot. Latin-1's accented letters print (WinAnsi has them all); there are
+no pictures, links or outlines. A 3-page document with all of these is
+25 KB (the scratch area holds 59 KB of output). `poppler`'s `pdfinfo` / `pdftotext` and Ghostscript read the MEGA65's
+output; Ghostscript's rendering was checked against the screen.
 
 ### RTF
 

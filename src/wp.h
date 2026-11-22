@@ -294,6 +294,7 @@ void doc_delete(u16 from, u16 to);
 u8 doc_type(u8 c);              /* ASCII at the cursor (replacing a selection) */
 void doc_backspace(void);
 void doc_delete_fwd(void);
+extern u16 clip_len;            /* the clipboard's characters (doc.c) */
 void doc_copy(void);
 void doc_cut(void);
 void doc_paste(void);
@@ -352,6 +353,8 @@ void mod_entry(void);           /* (modcall.s45: a jump to the module in mod_are
 #endif
 void to_ascii(char *s, u8 max);         /* PETSCII s as ASCII, in place */
 u8 key_char(u8 k);                      /* a typed key as text (a PETSCII line's: as it is) */
+void doc_count(void);                   /* msg: the words, characters, paragraphs counted */
+void rows_init(void);                   /* (render.c's init_rows) the drawing's row patterns */
 u8 compose_find(u8 a, u8 b);            /* Compose: a and b's character (0: none) */
 void msg_fill(u8 n, const char *p);     /* msg: message n, its place holders from p */
 void stopvec(u8 on);                    /* RUN/STOP ignored (1) or not */
@@ -447,6 +450,8 @@ void doc_built(void);           /* after build_end (b_done): doc_loaded(1) (mod_
 #define MOD_HTML_BEGIN (MOD_MORE | 7)   /* HTMLIN.OVL: an import starts (streamed, as RTF's) */
 #define MOD_HTML_CHUNK (MOD_MORE | 8)   /* HTMLIN.OVL: the next 1 KB of the file, at SCRATCH_LIN */
 #define MOD_HTML_END 9                  /* HTMLIN.OVL: the import's end: the document's length */
+#define MOD_PDF_EXPORT 10               /* PDF.OVL: the document (the page view's layout, to its end) as PDF at SCRATCH_LIN: its pages */
+#define MOD_PDF_END 11                  /* PDF2.OVL: then its C64 glyphs, the cross-reference table: its size */
 extern u8 mod_cmd;                      /* what the module is to do */
 extern u16 mod_ret;                     /* its result */
 u8 mod_ok(const u8 *m);                 /* a module's header there, of this build */
@@ -455,6 +460,8 @@ void md_main(void);                     /* MARKDOWN.OVL's entry (md.c) */
 void mdin_main(void);                   /* MDIN.OVL's entry (mdin.c) */
 void rtf_main(void);                    /* RTF.OVL's entry (rtf.c) */
 void rtfin_main(void);                  /* RTFIN.OVL's entry (rtfin.c) */
+void pdf_main(void);                    /* PDF.OVL's entry (pdf.c) */
+void pdf2_main(void);                   /* PDF2.OVL's entry (pdf.c) */
 void html_main(void);                   /* HTML.OVL's entry (html.c) */
 void htmlin_main(void);                 /* HTMLIN.OVL's entry (htmlin.c) */
 /* LIST.OVL (list.c), list mode: resident, it draws its markers over each
@@ -499,6 +506,11 @@ struct just {                   /* walking along a line: its justification */
 };
 /* style a as a PETSCII line's character is drawn: its effects, in font_petl */
 #define PET_STYLE(a) ((u8)(((a) & A_FX) | S_PETL))
+/* A PETSCII line's reverse video: RVS ON ($12, CTRL+9) to RVS OFF ($92,
+ * CTRL+0) or the paragraph's end, the codes themselves 0 wide */
+#define RVS_ON 0x12
+#define RVS_OFF 0x92
+u8 rvs_at(u16 i);               /* (conv.c) reverse on just before i, in its paragraph */
 void just_init(struct just *j, const struct line *L);
 u8 just_w(u8 c, u8 a, struct just *j);  /* c's width, with a space's share of the justification */
 u16 x_of(u16 l, u16 pos);       /* pos's x in line l (pixels from the text's left, or cells) */

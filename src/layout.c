@@ -46,7 +46,7 @@ static u8 is_break(u8 c) { return c == CH_CR || c == CH_FF; }
 u8 char_w(u8 c, u8 a) {
     const struct font *f = font_of(a);
     u8 w;
-    if (is_break(c)) return 0;
+    if (is_break(c) || (f == &font_petl && (c & 0x7F) == RVS_ON)) return 0;   /* (a PETSCII line's RVS ON / OFF) */
     if (c < FONT_FIRST || (c > 126 && c < FONT_HI)) c = '?';
     w = mem_get(f->offs + (u16)((c - FONT_FIRST) * 3));
     return (u8)(w + ((a & A_BOLD) ? 1 : 0));

@@ -11,7 +11,7 @@
  *                           (with <br> between, as above); code: <pre><code>,
  *                           a line a paragraph (a PETSCII line: <pre
  *                           class="petscii">, its characters as Unicode:
- *                           petuni.h); list items: <li> in <ul> or
+ *                           petuni.h; reverse video <span class="rv">); list items: <li> in <ul> or
  *                           <ol> (start="N" when it starts past 1), nested
  *                           by their level inside the item before
  *   bold, italic, underline <b>, <i>, <u>, strikethrough <s>, superscript
@@ -123,7 +123,7 @@ static void name_to(u16 i) {
 
 static void out_para(u16 ps, u16 pe, u8 code) {
     u16 u;
-    u8 c;
+    u8 c, rv = 0;
     open_st = 0;
     for (; ps < pe; ps++) {
         if (!code) {
@@ -132,6 +132,14 @@ static void out_para(u16 ps, u16 pe, u8 code) {
         }
         c = txt_at(ps);
         if (code > 1) {
+            if ((c & 0x7F) == RVS_ON) {
+                /* (reverse video: <span class="rv">) */
+                if ((c == RVS_ON) != rv) {
+                    outs(rv ? "</span>" : "<span class=\"rv\">");
+                    rv ^= 1;
+                }
+                continue;
+            }
             u = pet_to_uni(c);
             if (u >= 0x80 || !u) {
                 out_uni(u);
@@ -141,6 +149,7 @@ static void out_para(u16 ps, u16 pe, u8 code) {
         }
         out_ch(c);
     }
+    if (rv) outs("</span>");
     name_to(0xFFFF);
     restyle_to(0);
 }
@@ -231,6 +240,7 @@ static const char style[] =
     ".s { font-family: sans-serif; }\n"
     ".h { font-size: larger; font-weight: bold; }\n"
     ".p { font-family: \"C64 Pro Mono\", monospace; }\n"
+    ".rv { background: black; color: white; }\n"
     "</style>\n</head>\n<body>\n";
 
 /* the document as HTML at SCRATCH_LIN; its size (0: more than fits) */
