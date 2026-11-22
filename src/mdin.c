@@ -10,7 +10,9 @@
  * the common entities, and UTF-8 characters (Latin-1's as they are, curly
  * quotes, dashes, ... as ASCII, others "?": build_uni). Blocks are
  * separated by an empty paragraph (not after a heading). Emphasis is
- * paired within a paragraph; an unpaired * or _ is text.
+ * paired within a paragraph; an unpaired * or _ is text. Also ~~strike~~,
+ * Pandoc's ^superscript^ and ~subscript~, and <u> <s> <del> <strike> <sup>
+ * <sub>.
  */
 #include "wp.h"
 
@@ -234,6 +236,17 @@ static void inline_md(u16 i, u16 e) {
             else if (nx != ' ' && closer('~', (u16)(i + 2))) flags |= A_STRIKE;
             else lit(c, 2);
             i += 2;
+            continue;
+        }
+        if (c == '^' || c == '~') {
+            /* Pandoc's ^superscript^ and ~subscript~: to the next one with
+             * no space between */
+            want = c == '^' ? A_SUP : A_SUB;
+            for (j = (u16)(i + 1); j < e && in(j) != c && in(j) != ' '; j++) ;
+            if (flags & want) flags &= (u8)~want;
+            else if (j < e && in(j) == c && j > i + 1) flags = (u8)((flags & ~A_SCRIPT) | want);
+            else put(c);
+            i++;
             continue;
         }
         if (c == '<' && (is_alnum(in(i + 1)) || in(i + 1) == '/')) {

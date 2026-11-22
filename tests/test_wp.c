@@ -867,6 +867,10 @@ int main(void) {
         CHECK(strncmp(m, "a~~b~~<sup>c</sup><sub>d</sub>`e`\n", 34) == 0);
         md_fixed_point(m, h2, "effects");
         CHECK(sa(1) == A_STRIKE && sa(2) == A_SUP && sa(3) == A_SUB);
+        md_in("E=mc^2^ H~2~O a^b c ~ d 2^10 x\\^y\n");
+        text_of(buf, sizeof buf);
+        CHECK(strcmp(buf, "E=mc2 H2O a^b c ~ d 2^10 x^y\r") == 0 && sa(4) == A_SUP && sa(7) == A_SUB && sa(8) == 0 &&
+              sa(11) == 0 && sa(19) == 0);
         md_in("x ~~gone~~ ~~ y <s>s</s><del>d</del> E=mc<sup>2</sup> H<sub>2</sub>O\n");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "x gone ~~ y sd E=mc2 H2O\r") == 0 && sa(2) == A_STRIKE && sa(5) == A_STRIKE &&
@@ -893,6 +897,8 @@ int main(void) {
         n = rtf_out(m);
         CHECK(strstr(m, "\\strike") && strstr(m, "\\super") && strstr(m, "\\sub") && strstr(m, "\\nosupersub"));
         rtf_round("effects");
+        rtf_in("{\\rtf1\\ansi a\\up6 b\\up0 c\\dn4 d\\dn0 e\\par}");
+        CHECK(sa(1) == A_SUP && sa(2) == 0 && sa(3) == A_SUB && sa(4) == 0);
         rtf_in("{\\rtf1\\ansi a{\\strike b}\\striked1 c\\striked0 d\\super e\\sub f\\nosupersub g\\par}");
         text_of(buf, sizeof buf);
         CHECK(strcmp(buf, "abcdefg\r") == 0 && sa(0) == 0 && sa(1) == A_STRIKE && sa(2) == A_STRIKE && sa(3) == 0 &&
@@ -1089,11 +1095,11 @@ int main(void) {
         for (k = 0; k < 300; k++) {
             static const char *w[] = {"word", "*star*", "a_b", "[x]", "#1", "<tag>", "&amp;", "1.", "- ", "`q`",
                                       "  ", "\\", "Mono", "~", ">", "!", "x+y", "=", "C64", "''",
-                                      "caf\xe9", "\xc4\xdf\xff", "\xa0", "\xbf\xa1"};
+                                      "caf\xe9", "\xc4\xdf\xff", "\xa0", "\xbf\xa1", "a^b", "~s~"};
             u16 nw = (u16)(1 + rand() % 60), q;
             doc_len = 0;
             for (q = 0; q < nw; q++) {
-                const char *t = w[rand() % 24];
+                const char *t = w[rand() % 26];
                 u8 a = (u8)(rand() % 4 == 0 ? rnd_style() : 0), r = (u8)(rand() % 14);
                 for (; *t; t++) {
                     txt_put(doc_len, (u8)*t);

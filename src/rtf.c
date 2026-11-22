@@ -30,7 +30,8 @@
  *   \fonttbl          each font's family: \froman Serif, \fmodern Mono,
  *                     others Sans; a size of 14 pt or more (\fs28) is Head
  *   \b \i \ul (\ulnone, \ul0, the other underlines), \strike (\striked),
- *   \super \sub \nosupersub, \plain, \pard
+ *   \super \sub \nosupersub (\upN \dnN: superscript, subscript), \plain,
+ *   \pard
  *   \ql \qc \qr \qj   alignment
  *   \outlinelevelN    heading N + 1 (from 3: heading 3)
  *   \sN               the kind of the stylesheet's style N, by its name:
@@ -347,10 +348,10 @@ static const char skips[] =
 static const char words[] =
     "par line row sect page tab cell pard plain ql qc qr qj b i ul ulnone uld ulw uldb "
     "f fs u uc bin deff fonttbl froman fmodern s outlinelevel stylesheet listtext ilvl "
-    "strike striked super sub nosupersub emdash endash lquote rquote ldblquote rdblquote bullet";
+    "strike striked super sub nosupersub up dn emdash endash lquote rquote ldblquote rdblquote bullet";
 enum { W_PAR = 1, W_LINE, W_ROW, W_SECT, W_PAGE, W_TAB, W_CELL, W_PARD, W_PLAIN, W_QL, W_QC, W_QR, W_QJ,
        W_B, W_I, W_UL, W_ULNONE, W_ULD, W_ULW, W_ULDB, W_F, W_FS, W_U, W_UC, W_BIN, W_DEFF, W_FONTTBL,
-       W_FROMAN, W_FMODERN, W_S, W_OUTLINELEVEL, W_STYLESHEET, W_LISTTEXT, W_ILVL, W_STRIKE, W_STRIKED, W_SUPER, W_SUB, W_NOSUPERSUB, W_EMDASH, W_ENDASH, W_LQUOTE, W_RQUOTE, W_LDBLQUOTE, W_RDBLQUOTE, W_BULLET };
+       W_FROMAN, W_FMODERN, W_S, W_OUTLINELEVEL, W_STYLESHEET, W_LISTTEXT, W_ILVL, W_STRIKE, W_STRIKED, W_SUPER, W_SUB, W_NOSUPERSUB, W_UP, W_DN, W_EMDASH, W_ENDASH, W_LQUOTE, W_RQUOTE, W_LDBLQUOTE, W_RDBLQUOTE, W_BULLET };
 static const u16 named[] = { 0x2014, 0x2013, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022 };
 
 static void ctrl_word(void) {
@@ -433,6 +434,8 @@ static void ctrl_word(void) {
     case W_SUPER: flags = (u8)((flags & ~A_SCRIPT) | A_SUP); break;
     case W_SUB: flags = (u8)((flags & ~A_SCRIPT) | A_SUB); break;
     case W_NOSUPERSUB: flags &= (u8)~A_SCRIPT; break;
+    case W_UP:                          /* (raised, lowered: \up0 \dn0 neither) */
+    case W_DN: flags = (u8)((flags & ~A_SCRIPT) | (on1 ? (w == W_UP ? A_SUP : A_SUB) : 0)); break;
     case W_F: font = font_of(param); break;
     case W_FS: fs = param > 255 ? 255 : (u8)param; break;
     case W_U:

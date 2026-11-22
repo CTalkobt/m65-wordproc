@@ -389,7 +389,7 @@ from elsewhere.
 | Code | a fenced code block, a line a paragraph (empty ones too) |
 | list items | `- ` or `N. ` (its number), four spaces before it a level; items one after another are one list (import: `-`, `*`, `+`, `N.` or `N)`; an item deeper than the one before is a level in, else at the level whose indent it has; a blank line between items keeps the list going, as a loose list; the marker is not kept as text) |
 | bold, italic, underline | `**…**`, `*…*`, `<u>…</u>`, where they differ from the paragraph style's own (a heading's bold is not written) |
-| strikethrough, superscript, subscript | `~~…~~`, `<sup>…</sup>`, `<sub>…</sub>` (import: also `<s>`, `<del>`, `<strike>`) |
+| strikethrough, superscript, subscript | `~~…~~`, `<sup>…</sup>`, `<sub>…</sub>` (import: also `<s>`, `<del>`, `<strike>`, and Pandoc's `^…^` and `~…~`, with no space inside; `^` is escaped on export) |
 | Mono inside a paragraph | `` `…` `` |
 | centre, right, justify | `<div align="center">` … `</div>` around the block |
 | page break | `<div style="page-break-after: always"></div>` |
@@ -478,7 +478,8 @@ it may be larger than the scratch area): control words, control symbols,
 groups (which keep the character formatting) and text. Fonts map by their
 family in `\fonttbl` (`\froman` Serif, `\fmodern` Mono, others Sans), a
 size of 14 pt or more is Head; `\b`, `\i`, the underlines, `\strike`
-(`\striked`), `\super`, `\sub`, `\nosupersub`, `\plain`,
+(`\striked`), `\super`, `\sub`, `\nosupersub`, `\upN` / `\dnN` (raised,
+lowered: superscript, subscript), `\plain`,
 `\pard`, alignment; a paragraph's kind from `\outlinelevelN` (heading N+1,
 from 3 on heading 3) or from its `\sN`, by the style's name in the
 `\stylesheet` ("heading N" as its level, "Title" Heading 1, a name with

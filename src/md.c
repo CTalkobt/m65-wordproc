@@ -23,7 +23,7 @@
  *   centre, right, justify  <div align="center"> ... </div> around it
  *   page break              <div style="page-break-after: always"></div>
  *   Serif, Head in part     (no Markdown for them: plain text)
- * Punctuation that Markdown reads is escaped with "\"; spaces at a
+ * Punctuation that Markdown reads (^ too: Pandoc's superscript) is escaped with "\"; spaces at a
  * paragraph's start are &nbsp;. Empty paragraphs are not written. Latin-1
  * characters are written as UTF-8.
  */
@@ -127,7 +127,7 @@ static void out_para(u16 ps, u16 pe, u8 code) {
             /* escaped: what Markdown would read as markup (at the start: a
              * heading, quote, list, or the dot or ) after a number) */
             u8 n = txt_at(i + 1);
-            if (in_set("\\`*_[]~", c) || (lead && in_set("#>-+=", c)) || (digits && !lead && in_set(".)", c)) ||
+            if (in_set("\\`*_[]~^", c) || (lead && in_set("#>-+=", c)) || (digits && !lead && in_set(".)", c)) ||
                 (c == '<' && (is_letter(n) || in_set("/!?", n))) || (c == '&' && (is_letter(n) || n == '#')))
                 out('\\');
             out_utf8(c);
