@@ -150,6 +150,30 @@ static const struct run help[] = {
          "and HTMLIN.OVL, PDF by PDF.OVL and PDF2.OVL, when they are on the disk. "
          "List mode (LIST.OVL) marks spaces, paragraph ends, wrapped lines "
          "and trailing spaces.\r" },
+    { 0, "\r" },
+    { H2, "Freeing disk space" },
+    { K_H2, "\r" },
+    { 0, "These files can be deleted from the disk. Without one, the rest of Writer "
+         "works; only what it does is gone:\r" },
+    { MONO, "MARKDOWN.OVL  export to .md\r"
+            "MDIN.OVL      import from .md\r"
+            "RTF.OVL       export to .rtf\r"
+            "RTFIN.OVL     import from .rtf\r"
+            "HTML.OVL      export to .htm / .html\r"
+            "HTMLIN.OVL    import from .htm / .html\r"
+            "PDF.OVL       export to .pdf (both are\r"
+            "PDF2.OVL       needed: one alone, no PDF)\r"
+            "LIST.OVL      list mode (T: not offered)\r"
+            "PETSCII.FNT   the C64 glyphs: the PETSCII\r"
+            "              font and lines use the\r"
+            "              MEGA65's own character set\r"
+            "WRITER.HELP   this help: Writer starts with\r"
+            "              an empty document, and H / F8\r"
+            "              say the help is not there\r" },
+    { 0, "The largest are MDIN.OVL, HTMLIN.OVL and PDF.OVL (about 6 KB each). "
+         "Keep WRITER, WRITER.OV1, WRITER.FNT, WRITER.MSG and DEFAULT0.OVL: "
+         "Writer needs them (without DEFAULT0.OVL there is no undo, find, replace "
+         "or styles).\r" },
 };
 
 void doc_load_help(void) {

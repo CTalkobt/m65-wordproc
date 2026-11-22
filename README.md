@@ -37,32 +37,52 @@ make test       # the C half on the host (gcc): editing, layout, files; build/*.
 ```
 
 On a MEGA65: copy `build/writer.d81` to the SD card, mount it, then
-`DLOAD "WRITER"` and `RUN`. The disk holds `WRITER` (the program),
-`WRITER.OV1` (the program's seldom-run code, code overlays the program
-loads at its start: required),
-`WRITER.FNT` (the fonts' glyphs, loaded by the program), `WRITER.MSG` (the
-messages, menu and prompts, from `src/messages.txt`: loaded by the program
-at each start to `$1800`), `WRITER.HELP` (the
-help: a Writer document shown when the program starts and again with F8 / HELP;
-without it the program starts with an empty document), `MARKDOWN.OVL` and
-`MDIN.OVL` (Markdown export and import, modules: without them the rest
-works, and a `.md` name gets "Markdown needs MARKDOWN.OVL and MDIN.OVL on
-the disk"),
-`RTF.OVL` and `RTFIN.OVL` (RTF export and import, the same for `.rtf`), `HTML.OVL` and
-`HTMLIN.OVL` (HTML export and import, the same for `.htm` and `.html`), `PDF.OVL` and
-`PDF2.OVL` (PDF export, for `.pdf`), `LIST.OVL`
-(list mode, a module: without it the menu does not offer it) and
-`DEFAULT0.OVL` (undo, find and replace, and the styles; a required module,
-named so that it is not taken for an optional one: without it those do
-nothing, or say "No DEFAULT0.OVL."). A `PETSCII.FNT` added to the disk (a C64
-character set, as a PRG file: a 2-byte load address, then the upper-case /
-graphics set and perhaps the lower-case set, 2 KB each) gives the PETSCII
-font and PETSCII lines its glyphs; without it they are the MEGA65's own.
+`DLOAD "WRITER"` and `RUN`. The disk holds:
+
+| File | What it is | Required |
+|---|---|---|
+| `WRITER` | the program | yes |
+| `WRITER.OV1` | the program's seldom-run code: code overlays the program loads at its start | yes |
+| `WRITER.FNT` | the fonts' glyphs, loaded by the program | yes |
+| `WRITER.MSG` | the messages, menu and prompts, from `src/messages.txt`: loaded at each start to `$1800` | yes |
+| `DEFAULT0.OVL` | undo, find and replace, and the styles: a module, named so that it is not taken for an optional one | yes |
+| `WRITER.HELP` | the help: a Writer document shown when the program starts and again with F8 / HELP | no |
+| `MARKDOWN.OVL`, `MDIN.OVL` | Markdown export, import (modules) | no |
+| `RTF.OVL`, `RTFIN.OVL` | RTF export, import | no |
+| `HTML.OVL`, `HTMLIN.OVL` | HTML export, import | no |
+| `PDF.OVL`, `PDF2.OVL` | PDF export (both parts) | no |
+| `LIST.OVL` | list mode | no |
+| `PETSCII.FNT` | not built: a C64 character set added to the disk, as a PRG file (a 2-byte load address, then the upper-case / graphics set and perhaps the lower-case set, 2 KB each) | no |
 
 `tools/xemu_run.py` runs it headless in xemu, types keys into the KERNAL's
 keyboard buffer and saves a screenshot, e.g.
 `python3 tools/xemu_run.py build/writer.prg build/writer.d81 out.png wait:8 keys:133 wait:1`
 (F1: the raw view).
+
+### Freeing disk space
+
+The optional files can be deleted; the rest of Writer works without them,
+and only what each one does is gone (the help's "Freeing disk space" lists
+the same):
+
+| Deleted | What is no longer available |
+|---|---|
+| `MARKDOWN.OVL` | export to `.md` |
+| `MDIN.OVL` | import from `.md` |
+| `RTF.OVL` | export to `.rtf` |
+| `RTFIN.OVL` | import from `.rtf` |
+| `HTML.OVL` | export to `.htm` / `.html` |
+| `HTMLIN.OVL` | import from `.htm` / `.html` |
+| `PDF.OVL` or `PDF2.OVL` | export to `.pdf` (it needs both) |
+| `LIST.OVL` | list mode: the menu no longer offers T |
+| `PETSCII.FNT` | the C64 glyphs: the PETSCII font and PETSCII lines use the MEGA65's own character set |
+| `WRITER.HELP` | the help: Writer starts with an empty document, and H / F8 say "No help: WRITER.HELP is not on the disk." |
+
+A missing converter is reported when its file name is used (e.g. "Markdown
+needs MARKDOWN.OVL and MDIN.OVL on the disk"). The largest are `MDIN.OVL`,
+`HTMLIN.OVL` and `PDF.OVL` (about 6 KB each). Without `DEFAULT0.OVL`, undo,
+find, replace and the styles do nothing or say "No DEFAULT0.OVL."; Writer needs the
+other required files to run.
 
 ## Keys
 
