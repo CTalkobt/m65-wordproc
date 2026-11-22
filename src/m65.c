@@ -15,7 +15,6 @@
 #define VIC(r) (*(volatile u8 *)(r))
 #define COLRAM (0xFF80000UL + COLOR_OFS)
 
-void vic_unlock(void);          /* $D02F unlocked, interrupts masked (vicunlock.s45) */
 
 u8 mem_get(u32 a) { return *(u8 __far *)a; }
 void mem_put(u32 a, u8 v) { *(u8 __far *)a = v; }
@@ -45,69 +44,7 @@ void color_row(u8 row, const u8 *c) {
     dma_copy_far_step(COLRAM + (u16)row * COLS * 2 + 1, 2, (u32)(u16)c, 1, COLS);
 }
 
-/* the registers we change, saved for video_off */
-static const u8 saved_regs[] = {
-    0x31, 0x54, 0x58, 0x59, 0x5D, 0x5E, 0x60, 0x61, 0x62, 0x63, 0x64, 0x65,
-    0x68, 0x69, 0x6A, 0x7B, 0x20, 0x21,
-};
-#define NSAVED (sizeof saved_regs)
-static u8 saved[NSAVED];
-static u8 is_on, screen_made;
-
-static void make_screen(void) {
-    u16 i;
-    u8 __far *p = (u8 __far *)SCREEN_LIN;
-    /* cell n shows character n */
-    for (i = 0; i < COLS * ROWS; i++) {
-        *p++ = (u8)i;
-        *p++ = (u8)(i >> 8);
-    }
-    /* colour RAM: the first byte of every cell 0, the colour black */
-    dma_fill_far_step(COLRAM, 2, COLS * ROWS, 0);
-    dma_fill_far_step(COLRAM + 1, 2, COLS * ROWS, C_BLACK);
-    dma_fill_far(BITMAP_LIN, COLS * ROWS * 8, 0);
-    screen_made = 1;
-}
-
-void video_on(void) {
-    u8 i;
-    vic_unlock();               /* the VIC-IV's registers (vicunlock.s45) */
-    if (!is_on) {
-        for (i = 0; i < NSAVED; i++) saved[i] = VIC(0xD000 + saved_regs[i]);
-        is_on = 1;
-    }
-    if (!screen_made) make_screen();
-    VIC(0xD05D) &= 0x7F;        /* no hot registers: the KERNAL's writes leave ours */
-    VIC(0xD031) |= 0x88;        /* H640, V400 (first: it resets others) */
-    VIC(0xD031) &= (u8)~0x30;   /* no bitplanes, no VIC-III attributes */
-    VIC(0xD011) &= (u8)~0x60;   /* text mode (no bitmap, no extended colour) */
-    VIC(0xD016) &= (u8)~0x10;   /* no multicolour */
-    VIC(0xD054) = (u8)((VIC(0xD054) & ~0x06) | 0x01);   /* 16-bit characters, none full-colour */
-    VIC(0xD058) = COLS * 2;     /* bytes a row */
-    VIC(0xD059) = 0;
-    VIC(0xD05E) = COLS;         /* characters a row */
-    VIC(0xD063) = 0;            /* (their high bits; the screen address's bits 24-27) */
-    VIC(0xD060) = (u8)SCREEN_LIN;
-    VIC(0xD061) = (u8)(SCREEN_LIN >> 8);
-    VIC(0xD062) = (u8)(SCREEN_LIN >> 16);
-    VIC(0xD064) = (u8)COLOR_OFS;
-    VIC(0xD065) = (u8)(COLOR_OFS >> 8);
-    VIC(0xD068) = (u8)BITMAP_LIN;
-    VIC(0xD069) = (u8)(BITMAP_LIN >> 8);
-    VIC(0xD06A) = (u8)(BITMAP_LIN >> 16);
-    VIC(0xD07B) = ROWS - 1;
-    VIC(0xD020) = C_DGREY;
-    VIC(0xD021) = C_WHITE;
-}
-
-void video_off(void) {
-    u8 i;
-    if (!is_on) return;
-    vic_unlock();
-    VIC(0xD031) = saved[0];     /* first: it resets others */
-    for (i = 1; i < NSAVED; i++) VIC(0xD000 + saved_regs[i]) = saved[i];
-    is_on = 0;
-}
+/* (video_on, video_off: cold.c, an overlay) */
 
 /* ---- the keyboard ---- */
 u8 kbd_mods(void) { return VIC(0xD611); }

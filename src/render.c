@@ -749,21 +749,3 @@ void render(void) {
     render_bars();
 }
 
-/* PETSCII (a GET's code, the lower-case set) as ASCII; 0 if none */
-u8 petscii_to_ascii(u8 c) {
-    if (c >= 0x41 && c <= 0x5A) return (u8)(c + 32);
-    if (c >= 0xC1 && c <= 0xDA) return (u8)(c - 128);
-    if (c >= 0x61 && c <= 0x7A) return (u8)(c - 32);
-    if (c >= 0x20 && c <= 0x40) return c;
-    if (c == 0x5B || c == 0x5D) return c;
-    if (c == 0x5C) return '\\';         /* the pound sign's key */
-    if (c == 0x5E) return '^';
-    if (c == 0x5F) return '_';          /* the left arrow */
-    if (c == 0xA4) return '_';
-    if (c == 0xDB) return '{';
-    if (c == 0xDD) return '}';
-    if (c == 0xDC) return '|';
-    if (c == 0xDE) return '~';
-    if (c == 0xBA) return '`';          /* SHIFT + @ */
-    return 0;
-}

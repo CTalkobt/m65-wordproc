@@ -304,6 +304,22 @@ u16 ed(u8 cmd, u16 a);          /* edit_run(cmd) with ed_a = a */
 #define doc_style(k) ed(ED_STYLE, k)                    /* paragraph style k (K_...) */
 void edit_main(void);           /* DEFAULT0.OVL's entry (edit.c) */
 void mod_entry(void);           /* (modcall.s45: a jump to the module in mod_area) */
+/* (cold.c and stylecold.s45, the overlay cold: what follows to
+ * doc_import, petscii_to_ascii, font_install, video_on, video_off, the
+ * sty_ file routines. Called only from api.c's SYS entries, after
+ * ovl_fresh and before anything draws or lays out: the overlay runs in
+ * mod_area's buffers, which the drawing, the layout and the modules
+ * overwrite, so it is copied in again for each SYS that calls it) */
+#ifdef __cc45__
+#include <overlay.h>
+#define ovl_fresh() (__ovl_current = 0)
+#else
+#define ovl_fresh() ((void)0)
+#endif
+void to_ascii(char *s, u8 max);         /* PETSCII s as ASCII, in place */
+u8 compose_find(u8 a, u8 b);            /* Compose: a and b's character (0: none) */
+void msg_fill(u8 n, const char *p);     /* msg: message n, its place holders from p */
+void stopvec(u8 on);                    /* RUN/STOP ignored (1) or not */
 u16 doc_pack(void);             /* the file image at SCRATCH_LIN; its size */
 u8 doc_unpack(void);            /* 0: loaded */
 u16 doc_export(void);           /* the PETSCII text at SCRATCH_LIN; its size */

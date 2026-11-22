@@ -358,47 +358,8 @@ void doc_paste(void) {
     goal_valid = 0;
 }
 
-/* ---- files ----
- * The image BASIC saves with BSAVE and loads with BLOAD, at SCRATCH_LIN:
- * "WP", version 3, the length n (2 bytes), the text, the attributes (a
- * character's: an index into the style table), then the style table:
- * ST_SIZE, its entries' count (2 bytes), the entries. Loaded, the table's
- * entries are merged into the session's (sty_find) and the characters'
- * indexes changed to match, where they differ.
- * (Version 2, before the table: a character's attribute was its style;
- * version 1, before paragraph kinds: a CR / FF's attribute also had the
- * typing style in its low bits, cleared when one is loaded.) */
-#define WP_VERSION 3
-
-u16 doc_pack(void) {
-    u8 h[5];
-    h[0] = 'W';
-    h[1] = 'P';
-    h[2] = WP_VERSION;
-    h[3] = (u8)doc_len;
-    h[4] = (u8)(doc_len >> 8);
-    mem_write(SCRATCH_LIN, h, 5);
-    doc_out(5, doc_len, 0, doc_len);
-    return sty_save((u16)(5 + 2 * doc_len));
-}
-
-u8 doc_unpack(void) {
-    u16 n;
-    u8 h[5], v, same;
-    mem_read(h, SCRATCH_LIN, 5);
-    v = h[2];
-    n = h[3] | (u16)(h[4] << 8);
-    if (h[0] != 'W' || h[1] != 'P' || !v || v > WP_VERSION || n == 0 || n > DOC_MAX) return 1;
-    same = sty_load((u16)(5 + 2 * n), v);
-    if (same > 1) return 1;
-    g_len = 0;
-    mem_copy(TEXT_LIN, SCRATCH_LIN + 5, n);
-    mem_copy(ATTR_LIN, SCRATCH_LIN + 5 + n, n);
-    if (v == 1 || !same) sty_remap(n, v == 1);
-    doc_len = n;
-    doc_loaded(0);
-    return 0;
-}
+/* ---- files: doc_pack, doc_unpack, doc_export, doc_import are in cold.c
+ * (an overlay) ---- */
 
 /* a document just loaded or imported (doc_len characters): its final CR
  * made sure of, the cursor at its start, laid out anew; d: changed */
@@ -418,44 +379,6 @@ void doc_loaded(u8 d) {
     u_have = 0;
     typing_attr = attr_at_cursor();
     layout_all();
-}
-
-/* the text as PETSCII (lower-case set) for a SEQ file; the size */
-u16 doc_export(void) {
-    u16 i;
-    o_start();
-    for (i = 0; i < doc_len; i++) {
-        u8 c = as_ascii(txt_at(i));
-        if (c >= 'a' && c <= 'z') c = (u8)(c - 32);
-        else if (c >= 'A' && c <= 'Z') c = (u8)(c + 128);
-        else if (c == CH_FF) c = CH_CR;
-        else if (c == '_') c = 0xA4;
-        o_put(c);
-    }
-    return o_n;
-}
-
-/* a PETSCII text file read (FREAD#) to SCRATCH_LIN, after GET_IMPORT_PREP
- * zeroed it, as the document; its length */
-u16 doc_import(void) {
-    u16 i;
-    u8 c;
-    build_start();
-    for (i = 0; i < DOC_MAX - 1; i++) {
-        c = mem_get(SCRATCH_LIN + i);
-        if (!c) break;
-        if (c != CH_CR) {
-            if (c == 0xA0) c = ' ';
-            c = petscii_to_ascii(c);
-            if (!c) continue;
-        }
-        build_put(c);
-    }
-    /* past the file's end the drive gives CRs: one CR at the end */
-    while (b_n > 1 && txt_at(b_n - 1) == CH_CR && txt_at(b_n - 2) == CH_CR) b_n--;
-    i = build_end();
-    doc_built();
-    return i;
 }
 
 /* an import built (build_end): the cursor at the start, laid out anew */

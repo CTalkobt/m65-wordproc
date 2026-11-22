@@ -26,7 +26,9 @@ default checked out next to this directory (`CC45_ROOT`), at master
 `2b53dc79` or later (`basic45 --map`, a working
 `--minify`, struct fields read at their addresses (M65Compiler #657-#660),
 without which bank 0 overflows, and `basic45 --stack-page`; build
-`BASFLAGS=` for an unminified program).
+`BASFLAGS=` for an unminified program), and since the code overlay main
+`57bceb8b` or later (M65Compiler #685: `basic45 --link` programs with
+overlays, `ln45 --overlay-region`).
 
 ```bash
 make            # build/writer.prg and build/writer.d81
@@ -36,6 +38,8 @@ make test       # the C half on the host (gcc): editing, layout, files; build/*.
 
 On a MEGA65: copy `build/writer.d81` to the SD card, mount it, then
 `DLOAD "WRITER"` and `RUN`. The disk holds `WRITER` (the program),
+`WRITER.OV1` (the program's seldom-run code, a code overlay the program
+loads at its first call into C: required),
 `WRITER.FNT` (the fonts' glyphs, loaded by the program), `WRITER.MSG` (the
 messages, menu and prompts, from `src/messages.txt`: loaded by the program
 at each start to `$1800`), `WRITER.HELP` (the
@@ -174,7 +178,8 @@ letter with its accent), in `WRITER.FNT`.
 |------|----------|------|
 | `src/wp.bas` | BASIC 65 | the main loop (GET and what each key means; idle time handed to C), the menu, file-name prompts and confirmations, all disk work (`BLOAD` / `BSAVE` documents and fonts, `DOPEN` + `FREAD#` / `FWRITE#` text and Markdown import and export, `DIR`), loading the help document, error trapping |
 | `src/doc.c` | C | the document: two parallel arrays in attic RAM (text, an attribute byte per character) with a gap at the last edit, insert and delete, the clipboard, the file image |
-| `src/style.s45` | asm | the style table (`sty`, `sty_find`, `sty_init`; the file image's table written, read and merged, the indexes remapped): `conv.c` has them in C for the host |
+| `src/style.s45`, `src/stylecold.s45` | asm | the style table (`sty`, `sty_find`, `sty_init`; in the overlay, the file image's table written, read and merged, the indexes remapped): `conv.c` has them in C for the host |
+| `src/cold.c` | C | the code overlay `cold` (below): the file image packed and unpacked, plain-text export and import, the fonts installed, the screen set up and given back, keys and BASIC's text as ASCII, Compose, the messages filled in |
 | `src/gap.s45`, `src/gapmove.s45` | asm | reading and writing a character round the gap (`txt_at` ...), moving the gap (`gap_to`, `move2`): `doc.c` and `conv.c` have them in C for the host |
 | `src/layout.c` | C | line breaking for both views, justification, pagination, raw-view tags, cursor ↔ position mapping; incremental and lazy (below) |
 | `src/render.c` | C | drawing: glyphs blitted (synthetic bold, italic shear, underline) into a band buffer and copied to the bitmap by DMA; only what changed is drawn again; status bars |
@@ -230,7 +235,7 @@ the room for it. Two kinds:
   (`edit_run`: every edit notes for undo what it will change, so every
   key that edits makes one) copies it into `mod_area`, up to `LIST.OVL`,
   by DMA and runs it: about 6 KB of DMA, well under a millisecond. Its
-  first 2805 bytes there are buffers the drawing uses only while it draws
+  first 2707 bytes there are buffers the drawing uses only while it draws
   (the band, the layout's new lines, the menu's text, ...: `MOD_SCRATCH`);
   the rest, the drawing's caches, go to colour RAM meanwhile and come
   back after, so nothing is drawn again for it. It keeps nothing of its
@@ -239,7 +244,22 @@ the room for it. Two kinds:
   functions that note nothing (`del_raw`, `room`): it notes its own
   changes, and must not call back into itself.
 
-- **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6784 bytes in
+- **The code overlay** (`cold`, from `src/cold.c` and
+  `src/stylecold.s45`; 2.1 KB): code the program runs seldom, or at most
+  once a key, linked by ln45 as a copied code overlay (M65Compiler #685)
+  rather than by mkmod.py. Its code is `WRITER.OV1`, which the
+  program's first `SYS` into C loads into bank 4 (`$4D000`); a call into
+  it goes through a resident stub that copies it by DMA into `mod_area`'s
+  first `MOD_SCRATCH` bytes, the drawing's buffers (`ln45
+  --overlay-region=_mod_area+2707`; `cold.c` checks the number). Since
+  the drawing, the layout and the modules overwrite those, only `api.c`'s
+  `SYS` entries call into it, after `ovl_fresh()` (`__ovl_current = 0`:
+  copied in again) and before anything draws, and it calls nothing that
+  writes `mod_area`. Its variables stay in bank 0. Bank 0 gains 581
+  bytes: 2.1 KB of code leaves it, while the overlay runtime (its loader,
+  calls, stubs and tables: 1.3 KB, and 250 bytes of variables) stays.
+
+- **Where it runs**: `mod_area` (`src/render.c`, `MOD_SIZE` = 6280 bytes in
   bank 0), which is also where the drawing keeps its buffers and caches
   (the band, the redraw cache, the bars' text, the row patterns, and the
   layout's buffer of new lines and the menu's text: 4.3 KB),
@@ -355,6 +375,7 @@ the C64's. Each cell has its own colour (text, desk, tags, bars).
 | `$40000` | 32000 | the bitmap |
 | `$48000` | 8000 | the screen (16-bit cells) |
 | `$4A000` | 12 KB | `WRITER.FNT`'s first part: Head's glyphs and records, the raw font, the compose table |
+| `$4D000` | 12 KB | the code overlay (`WRITER.OV1`, 2.1 KB), copied from here into `mod_area` for each call |
 | `$50000` | 59 KB | scratch (to the clipboard): the gap's bounce buffer, file image, text and Markdown files; from `$57530` (`DOC_MAX`) what undo puts back while it swaps; its last 15000 bytes (`$5B168`) undo's copy of what the last edit replaced |
 | `$5EC00` | 5 KB | clipboard |
 | `$8000000` | 64 KB | attic RAM: document text (up to 30000 characters) and the gap |

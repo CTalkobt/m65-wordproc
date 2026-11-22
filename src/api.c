@@ -105,6 +105,7 @@ static void refresh(u8 relayout) {
 }
 
 void wp_init(void) {
+    ovl_fresh();
     video_on();
     render_invalidate();
     if (!started) {
@@ -184,28 +185,10 @@ static void typed(u8 c) {
     if (doc_type(c)) say("The document is full.");
 }
 
-/* Compose (CTRL+A), then two characters: the Latin-1 character the compose
- * table (writer.fnt: compose_at) gives them, in either order: "a -> a with
- * its diaeresis, 'e, `e, ^e, ~n, oa, ,c, ss, ae, o/, << ... (issue #1) */
+/* Compose (CTRL+A), then two characters: the character compose_find
+ * (cold.c) gives them (issue #1) */
 #define K_COMPOSE 1
 static u8 compose, comp1;
-
-static u8 compose_find(u8 a, u8 b) {
-    u8 e[3];
-    u16 i = 0;
-    do {
-        mem_read(e, compose_at + i, 3);
-        if (e[0] == a && e[1] == b) return e[2];
-        i += 3;
-    } while (e[0]);
-    return 0;
-}
-
-/* writer.fnt, BLOADed to the scratch area: its parts to FONT_LIN, HI_LIN */
-void font_install(void) {
-    mem_copy(FONT_LIN, SCRATCH_LIN, font_lo_size);
-    mem_copy(HI_LIN, SCRATCH_LIN + font_lo_size, font_hi_size);
-}
 
 void wp_cmd(u8 c);
 u16 wp_find(u8 op);
@@ -245,6 +228,7 @@ u8 wp_key(u8 k) {
         return 0;
     }
     msg[0] = 0;
+    ovl_fresh();                /* (petscii_to_ascii, compose_find) */
     if (compose || k == K_COMPOSE) {
         c = petscii_to_ascii(k);
         if (!compose) {
@@ -424,6 +408,7 @@ static u16 scratched(u16 n) {
 }
 
 u16 wp_get(u8 w) {
+    ovl_fresh();
     switch (w) {
     case GET_DIRTY: return dirty;
     case GET_LEN: return doc_len;
@@ -470,19 +455,11 @@ u16 wp_get(u8 w) {
     return 0;
 }
 
-static void to_ascii(char *s, u8 max) {
-    u8 i;
-    for (i = 0; i < max && s[i]; i++) {
-        u8 c = petscii_to_ascii((u8)s[i]);
-        s[i] = (char)(c ? c : '?');
-    }
-    s[i] = 0;
-}
-
 /* find and replace: op FIND_... (SETF / SETR: msg as the string); 1 when
  * a match is selected (DEFAULT0.OVL says what it found, in msg) */
 u16 wp_find(u8 op) {
     u16 r;
+    ovl_fresh();
     if (op >= FIND_SETF) to_ascii(msg, FIND_MAX);
     else u_open = 0;
     r = edit_run(op);
@@ -502,24 +479,9 @@ const char *msg_get(u8 n) {
     return s;
 }
 
-/* msg: message n, its place holders filled from p: 1 a field of p (up to
- * a comma), 2 all the rest */
-static void msg_fill(u8 n, const char *p) {
-    const char *t = msg_get(n);
-    u8 i = 0;
-    char c;
-    while ((c = *t++) != 0 && i < 78) {
-        if ((u8)c > 2) msg[i++] = c;
-        else {
-            while (*p && i < 78 && (c == 2 || *p != ',')) msg[i++] = *p++;
-            if (*p) p++;
-        }
-    }
-    msg[i] = 0;
-}
-
 void wp_say(u8 n) {
     u8 i;
+    ovl_fresh();
     to_ascii(msg, 78);
     for (i = 0; (msg_parm[i] = msg[i]) != 0; i++) {}
     msg_fill(n, msg_parm);
@@ -530,6 +492,7 @@ void wp_say(u8 n) {
  * MSG_MENU, ..., the bar's MSG_VIEW (with List on / off when LIST.OVL is
  * loaded); closed (0): msg emptied, the view drawn again under it */
 void wp_panel(u8 n) {
+    ovl_fresh();
     panel = n;
     if (n) msg_fill(MSG_VIEW, list_ok ? msg_get(MSG_LISTON + list_on) : "");
     else msg[0] = 0;
@@ -537,11 +500,13 @@ void wp_panel(u8 n) {
 }
 
 void wp_setname(void) {
+    ovl_fresh();
     to_ascii(fname, 16);
     render_bars();
 }
 
 void wp_video(u8 on) {
+    ovl_fresh();
     if (on) {
         video_on();
         render_invalidate();
@@ -551,30 +516,10 @@ void wp_video(u8 on) {
     }
 }
 
-/* RUN/STOP ignored while editing (on 1), or not (0): the KERNAL's STOP
- * vector ($0328) pointed at a routine that answers "not pressed" as the
- * KERNAL's own nstop does (A = $FF, the flags of CMP #$7F). It must be in
- * RAM that BASIC's memory map shows (BASIC 65 runs with its ROM over
- * $2000-$BFFF), so it goes to $0378, free between the KERNAL's file tables
- * (to $0369) and its RAM code ($0380). */
-#define NOSTOP 0x0378
-static u16 old_stop;
+/* RUN/STOP ignored while editing (on 1), or not (0): stopvec (cold.c) */
 void wp_stopvec(u8 on) {
-#ifdef __cc45__
-    static const u8 code[5] = { 0xA9, 0xFF, 0xC9, 0x7F, 0x60 };     /* lda #$ff : cmp #$7f : rts */
-    volatile u16 *v = (volatile u16 *)0x0328;
-    u8 i;
-    if (on) {
-        for (i = 0; i < 5; i++) ((volatile u8 *)NOSTOP)[i] = code[i];
-        if (*v != NOSTOP) old_stop = *v;
-        *v = NOSTOP;
-    } else if (old_stop) {
-        *v = old_stop;
-    }
-#else
-    (void)on;
-    (void)old_stop;
-#endif
+    ovl_fresh();
+    stopvec(on);
 }
 
 /* while no key waits: more of the document laid out; 1 while there is more

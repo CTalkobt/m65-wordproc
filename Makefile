@@ -31,8 +31,8 @@ TARGET = $(BUILD)/writer.prg
 MAP    = $(BUILD)/writer.map
 DISK   = $(BUILD)/writer.d81
 
-CSRC    = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/m65.c src/fonts.c
-PORTABLE = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/fonts.c
+CSRC    = src/cold.c src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/m65.c src/fonts.c
+PORTABLE = src/cold.c src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/fonts.c
 HEADERS = src/wp.h src/petuni.h
 
 # The C half is compiled here (basic45 --link takes the objects): -O2 for
@@ -53,6 +53,13 @@ CC45FLAGS = -fno-tail-call-optimization -I$(CC45_ROOT)/lib/include -Isrc -I$(BUI
 # page (as much as 255 bytes of bank 0 otherwise lost; M65Compiler #678,
 # main since c6006fdd)
 BASFLAGS ?= --minify --link-align=1
+# Code overlays (M65Compiler #685): cold.c's code is the overlay "cold",
+# kept in bank 4's free $4D000-$4FFFF (after writer.fnt's first part, from
+# $4A000) as WRITER.OV1, which the first SYS loads, and copied for each
+# call into mod_area's first MOD_SCRATCH bytes, the drawing's buffers
+# (OVL_ROOM: cold.c checks it is MOD_SCRATCH)
+OVL_ROOM = 2707
+OVLFLAGS = --overlay-store=0x4D000-0x4FFFF --overlay-region=_mod_area+$(OVL_ROOM)
 # the C half's CPU stack: a page of its own, $1700-$17FF (it never goes
 # deeper than 32 bytes), next to its base page (src/lowmem.s45's $1600),
 # not 512 bytes at the end of bank 0 (ln45 --stack-page, M65Compiler
@@ -61,11 +68,11 @@ BASFLAGS ?= --minify --link-align=1
 # set. (0x17, not $17: the shell would take $1 as an argument)
 STACKFLAGS = --stack-page=0x17
 FAST    = render m65 fonts
-SMALL   = api conv doc layout
+SMALL   = api conv doc layout cold
 # (conv.c is called by the modules, whose base-page blocks start at $80:
 # its functions keep their variables out of the base page)
 NOZP    = conv
-OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45) $(BUILD)/obj/modcall.o45 $(BUILD)/obj/gap.o45 $(BUILD)/obj/gapmove.o45 $(BUILD)/obj/style.o45 $(BUILD)/obj/lowmem.o45 $(BUILD)/obj/vicunlock.o45
+OBJS    = $(foreach f,$(FAST) $(SMALL),$(BUILD)/obj/$(f).o45) $(BUILD)/obj/modcall.o45 $(BUILD)/obj/gap.o45 $(BUILD)/obj/gapmove.o45 $(BUILD)/obj/style.o45 $(BUILD)/obj/stylecold.o45 $(BUILD)/obj/lowmem.o45 $(BUILD)/obj/vicunlock.o45
 CCQUIET = 2>&1 | grep -v 'note:\|^ *[0-9]* |\|^ *|' || true
 
 # The messages (src/messages.txt): WRITER.MSG, BLOADed by the BASIC program
@@ -80,7 +87,7 @@ $(BUILD)/obj/api.o45 $(BUILD)/obj/render.o45: $(BUILD)/msg.h
 
 $(BUILD)/obj/%.o45: src/%.c $(HEADERS)
 	@mkdir -p $(BUILD)/obj
-	$(CC45) $(if $(filter $*,$(SMALL)),-O1,-O2) $(if $(filter $*,$(NOZP)),-fno-zp-locals) $(CC45FLAGS) -c $< -o $@ $(CCQUIET)
+	$(CC45) $(if $(filter $*,$(SMALL)),-O1,-O2) $(if $(filter $*,$(NOZP)),-fno-zp-locals) $(CC45FLAGS) -DOVL_ROOM=$(OVL_ROOM) -c $< -o $@ $(CCQUIET)
 
 $(BUILD)/obj/%.o45: src/%.s45
 	@mkdir -p $(BUILD)/obj
@@ -175,12 +182,13 @@ all: $(DISK)
 
 $(TARGET): src/wp.bas $(OBJS) $(BUILD)/msg.h
 	@mkdir -p $(BUILD)
-	$(BASIC45) -I $(BUILD) $(foreach f,$(OBJS),--link $(f)) --map $(MAP) $(BASFLAGS) $(STACKFLAGS) --report src/wp.bas -o $@
+	$(BASIC45) -I $(BUILD) $(foreach f,$(OBJS),--link $(f)) --map $(MAP) $(BASFLAGS) $(STACKFLAGS) $(OVLFLAGS) --report src/wp.bas -o $@
 
 $(DISK): $(TARGET) src/writer.fnt $(BUILD)/writer.msg $(BUILD)/help.prg $(MODS)
 	rm -f $@
 	$(DISK45) create $@ -n "WRITER" -i "65"
 	$(DISK45) add $@ $(TARGET) "WRITER"
+	$(DISK45) add $@ $(BUILD)/writer.ov1 "WRITER.OV1"
 	$(DISK45) add $@ src/writer.fnt "WRITER.FNT"
 	$(DISK45) add $@ $(BUILD)/writer.msg "WRITER.MSG"
 	$(DISK45) add $@ $(BUILD)/help.prg "WRITER.HELP"
