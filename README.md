@@ -15,6 +15,18 @@ they will print. Two views:
   through, `[A]` underlined, raised or lowered) and paragraph marks (¶). You
   can edit in either view.
 
+## Screenshots
+
+Taken in xemu, from the help document Writer shows at its start.
+
+| Page layout | Raw view (F1) |
+|---|---|
+| ![Page layout view](docs/screenshots/page-layout.png) | ![Raw view](docs/screenshots/raw-view.png) |
+| **Style drop-down (CTRL+D)** | **Menu (ESC)** |
+| ![Style drop-down](docs/screenshots/style-dropdown.png) | ![Menu](docs/screenshots/menu.png) |
+| **Lists, a PETSCII line, justified text** | **PDF export (page 1, exported on the MEGA65)** |
+| ![Lists and a PETSCII line](docs/screenshots/lists-petscii.png) | ![PDF export](docs/screenshots/pdf-export.png) |
+
 It needs a MEGA65 with attic RAM (the 8 MB HyperRAM at `$8000000`), where
 the document is kept; without it, it stops at the start with "No attic
 RAM." xemu emulates it.
