@@ -11,6 +11,8 @@
  *                           (quote paragraphs that follow each other: one
  *                           quote, with hard breaks); code: a fenced code
  *                           block (``` ... ```), a line a paragraph;
+ *                           a PETSCII line: one fenced ```petscii, its
+ *                           characters as Unicode (petuni.h)
  *                           list items: "- " or "N. " (the item's
  *                           number), four spaces before it a level
  *   bold, italic            **...**, *...* (where they differ from the
@@ -28,6 +30,9 @@
  * characters are written as UTF-8.
  */
 #include "wp.h"
+#define PET_OUT
+#define PET_UTF8
+#include "petuni.h"
 
 #define M_CODE 0x01             /* a character shown as code (a font bit: not in M_FLAGS) */
 #define M_FLAGS (A_UNDER | A_BOLD | A_ITAL | A_STRIKE | A_SCRIPT)
@@ -92,7 +97,8 @@ static u8 in_set(const char *s, u8 c) {
     return 0;
 }
 
-/* the text of paragraph ps..pe-1 (pe: its CR / FF); code: as a code block */
+/* the text of paragraph ps..pe-1 (pe: its CR / FF); code: as a code block
+ * (2: a PETSCII line) */
 static void out_para(u16 ps, u16 pe, u8 code) {
     u16 i = ps, j;
     u8 c, s, lead = 1, digits = 1;
@@ -104,7 +110,8 @@ static void out_para(u16 ps, u16 pe, u8 code) {
     while (i < pe) {
         c = txt_at(i);
         if (code) {
-            out_utf8(c);
+            if (code > 1) out_uni(pet_to_uni(c));
+            else out_utf8(c);
             i++;
             continue;
         }
@@ -144,6 +151,7 @@ static void out_para(u16 ps, u16 pe, u8 code) {
 
 static const char *const align_attr[4] = { "", "center", "right", "justify" };
 static u8 prev, pal;            /* the last block's kind; its alignment (a div open) */
+static u8 ppet;                 /* the last block a PETSCII line (A_PET) */
 
 /* the last block closed (its fence, its div) and a blank line after it */
 static void end_block(void) {
@@ -156,7 +164,7 @@ static void end_block(void) {
 /* the document as Markdown at SCRATCH_LIN; its size (0: more than fits) */
 u16 md_export(void) {
     u16 ps, pe;
-    u8 ev, kind, al, gap = 0, k;
+    u8 ev, kind, al, gap = 0, k, pet;
     o_start();
     walk_start();
     prev = P_NONE;
@@ -172,14 +180,15 @@ u16 md_export(void) {
         ps = w_pos;
         pe = w_to;
         kind = w_attr & A_KIND;
+        pet = kind == K_CODE ? w_attr & A_PET : 0;
         al = (u8)((w_attr & A_ALIGN) >> A_ALIGN_SHIFT);
         if (kind >= K_CODE) al = 0;
         /* (an empty paragraph: a gap, but an empty line in a code block) */
-        if (pe == ps && (kind != K_CODE || prev != K_CODE || gap)) {
+        if (pe == ps && (kind != K_CODE || prev != K_CODE || pet != ppet || gap)) {
             gap = 1;
             continue;
         }
-        if (!gap && ((kind == prev && kind == K_CODE) || (kind >= K_BULLET && (u8)(prev - K_BULLET) < 2))) {
+        if (!gap && ((kind == prev && kind == K_CODE && pet == ppet) || (kind >= K_BULLET && (u8)(prev - K_BULLET) < 2))) {
             out('\n');
         } else if (!gap && kind == prev && (kind == K_NORMAL || kind == K_QUOTE) && al == pal) {
             outs("\\\n");
@@ -194,7 +203,7 @@ u16 md_export(void) {
                 for (k = kind; k; k--) out('#');
                 out(' ');
             }
-            if (kind == K_CODE) outs("```\n");
+            if (kind == K_CODE) outs(pet ? "```petscii\n" : "```\n");
             pal = al;
         }
         if (kind == K_QUOTE) outs("> ");
@@ -217,8 +226,9 @@ u16 md_export(void) {
             out(' ');
         }
         base = kind_attr[kind];
-        out_para(ps, pe, kind == K_CODE);
+        out_para(ps, pe, kind == K_CODE ? 1 + !!pet : 0);
         prev = kind;
+        ppet = pet;
         gap = 0;
     }
     end_block();

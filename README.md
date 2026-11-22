@@ -108,6 +108,15 @@ ESC leaves it).
   paragraph; the raw view shows a kind as a green tag (`[H1]`, `[Quote]`,
   `[Code]`, `[List]`, `[Num2]`: a list item's level from the second on)
   at the paragraph's start.
+- **PETSCII lines** (issue #11, under way): a code paragraph whose mark
+  has bit 7 (`A_PET`) holds PETSCII codes as typed, for the C64 character
+  set's graphics. The converters carry them now (below: Markdown
+  ```` ```petscii ````, HTML `<pre class="petscii">`, RTF a `PETSCII Code`
+  style), their characters as Unicode by Unicode's own map
+  (`src/petuni.h`: box drawing, block elements and Symbols for Legacy
+  Computing); RETURN in one starts another. Drawing them in the C64 font,
+  typing graphics into them and a raw-view tag wait for room in bank 0;
+  until then they show as code.
 - **Lists**: a bulleted or numbered item is a paragraph, indented by its
   level (four levels). Its bullet (a square, hollow at the second and
   fourth levels) or number is drawn in the indent, not stored as text: a
@@ -197,7 +206,8 @@ the room for it. Two kinds:
 
 - **Run once** (as one job over the document), loaded just before it runs:
   Markdown (`MARKDOWN.OVL` and `MDIN.OVL`, from `src/md.c` and
-  `src/mdin.c`), RTF (`RTF.OVL`, from `src/rtf.c`: the largest, 5.7 KB), HTML (`HTML.OVL`, from `src/html.c`, and `HTMLIN.OVL`, from
+  `src/mdin.c`), RTF (`RTF.OVL`, from `src/rtf.c`: the largest, 6.1 KB, all but
+  17 bytes of `MOD_SIZE`), HTML (`HTML.OVL`, from `src/html.c`, and `HTMLIN.OVL`, from
   `src/htmlin.c`: together more than `MOD_SIZE`); PETSCII graphics, PDF export, find and replace or a word
   count would fit the same way. One can also be called several times in a
   row (a command with `MOD_MORE`: `mod_run` then leaves it and the drawing's
@@ -387,6 +397,7 @@ from elsewhere.
 | Heading 1, 2, 3 | `# `, `## `, `### ` (import: `####` and deeper as Heading 3; setext `===` Heading 1, `---` Heading 2) |
 | Quote | `> ` (quote paragraphs one after another: one quote with hard breaks; import: a `>` line alone ends a paragraph in it, a line without `>` goes on with it) |
 | Code | a fenced code block, a line a paragraph (empty ones too) |
+| PETSCII line | a ```` ```petscii ```` block, its characters as Unicode (import: back to PETSCII, lower case as upper; one the set lacks `?`) |
 | list items | `- ` or `N. ` (its number), four spaces before it a level; items one after another are one list (import: `-`, `*`, `+`, `N.` or `N)`; an item deeper than the one before is a level in, else at the level whose indent it has; a blank line between items keeps the list going, as a loose list; the marker is not kept as text) |
 | bold, italic, underline | `**…**`, `*…*`, `<u>…</u>`, where they differ from the paragraph style's own (a heading's bold is not written) |
 | strikethrough, superscript, subscript | `~~…~~`, `<sup>…</sup>`, `<sub>…</sub>` (import: also `<s>`, `<del>`, `<strike>`, and Pandoc's `^…^` and `~…~`, with no space inside; `^` is escaped on export) |
@@ -420,14 +431,15 @@ writes one UTF-8 page: the document's name as its title, a style sheet
 font, as Writer draws them), then the paragraphs grouped as the Markdown
 export groups them: `<p>` (paragraphs with no empty one between them, of
 the same alignment: one, with `<br>`), `<h1>`-`<h3>`, `<blockquote>`,
-`<pre><code>` (a line a paragraph), and list items as `<li>` in `<ul>` /
+`<pre><code>` (a line a paragraph; an empty last one a line end more, as a browser drops
+one; PETSCII lines `<pre class="petscii">`, their characters as Unicode), and list items as `<li>` in `<ul>` /
 `<ol>` (`start="N"` past 1), each level's list inside the item before it.
 Bold, italic, underline, strikethrough, superscript and subscript (where
 the kind's own style lacks them) are `<b>` `<i>` `<u>` `<s>` `<sup>` `<sub>`; another font in part is `<code>` (Mono) or a `<span>`
 (Serif, Sans, Head); alignment is `text-align`, a page break a `<div>`
 with `page-break-after: always`.
 
-Import (`src/htmlin.c`, in its own module `HTMLIN.OVL`, 4.6 KB) is
+Import (`src/htmlin.c`, in its own module `HTMLIN.OVL`, 5 KB) is
 streamed as RTF's, 1 KB of the file a call, so a page larger than the
 scratch area can be read. It takes back what the export writes, and from
 elsewhere:
@@ -436,7 +448,7 @@ elsewhere:
 |------|--------|
 | `<p>`, `<div>` and the other block elements (`section`, `table`, ...) | paragraphs; an empty one between blocks (not after a heading or a page break, nor between a list's items), as the Markdown import |
 | `<br>` | a paragraph's end |
-| `<h1>`-`<h3>` (`<h4>`-`<h6>`: Heading 3), `<blockquote>`, `<pre>` | the kinds; each line of a `<pre>` a Code paragraph |
+| `<h1>`-`<h3>` (`<h4>`-`<h6>`: Heading 3), `<blockquote>`, `<pre>` | the kinds; each line of a `<pre>` a Code paragraph (`class="petscii"`: a PETSCII line's, its characters back to PETSCII) |
 | `<ul>`, `<ol>`, `<li>` | Bullet, Numbered, nested: the level (up to 4) |
 | `<b>` `<strong>`, `<i>` `<em>` `<cite>`, `<u>` `<ins>`, `<code>` `<tt>` `<kbd>` `<samp>` | bold, italic, underline, Mono |
 | `<s>` `<strike>` `<del>`, `<sup>`, `<sub>` | strikethrough, superscript, subscript (nested: the innermost script) |
@@ -461,7 +473,8 @@ again on the MEGA65, are byte for byte what the host makes.
 ### RTF
 
 Export (`src/rtf.c`, in the module `RTF.OVL`) is lossless for Writer's
-documents: a font table (`\f0` Sans `\fswiss`, `\f1` Serif `\froman`,
+documents (but for PETSCII lines: a `\s8` `PETSCII Code` style, their
+characters as `\uN`, which the import reads as Code with `?` for the graphics): a font table (`\f0` Sans `\fswiss`, `\f1` Serif `\froman`,
 `\f2` Mono `\fmodern`, `\f3` Head `\fswiss` at `\fs36`), `\b` `\i` `\ul`
 `\strike` and `\super` / `\sub` / `\nosupersub` where they change, a stylesheet (`\s0` Normal, `\s1`-`\s3` heading 1-3
 with `\outlinelevel`, `\s4` Quote and `\s5` Code with an indent, `\li`,

@@ -33,7 +33,7 @@ DISK   = $(BUILD)/writer.d81
 
 CSRC    = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/m65.c src/fonts.c
 PORTABLE = src/api.c src/conv.c src/doc.c src/layout.c src/render.c src/md.c src/mdin.c src/rtf.c src/html.c src/htmlin.c src/list.c src/edit.c src/edit_undo.c src/fonts.c
-HEADERS = src/wp.h
+HEADERS = src/wp.h src/petuni.h
 
 # The C half is compiled here (basic45 --link takes the objects): -O2 for
 # the drawing (the most work on every key), -O1 for the rest, layout

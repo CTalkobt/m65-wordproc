@@ -12,7 +12,9 @@
  *                a heading or a page break, nor between a list's items:
  *                as the Markdown import); <br> ends a paragraph
  *   kinds        <h1>-<h3> (<h4>-<h6>: heading 3), <blockquote>, <pre>
- *                (code; its lines are paragraphs), <ul> / <ol> and <li>
+ *                (code; its lines are paragraphs; class="petscii": a
+ *                PETSCII line's, its characters back to PETSCII:
+ *                petuni.h), <ul> / <ol> and <li>
  *                (nested: the level, up to 4)
  *   styles       <b> <strong>, <i> <em> <cite> <var> <dfn>, <u> <ins>,
  *                <code> <tt> <kbd> <samp> (Mono), <s> <strike> <del>,
@@ -32,6 +34,8 @@
  *                a byte that is not UTF-8 as Latin-1
  */
 #include "wp.h"
+#define PET_IN
+#include "petuni.h"
 
 enum {
     S_TEXT, S_LT, S_NAME, S_ATTR, S_ANAME, S_AEQ, S_AVAL0, S_AVAL, S_ENT, S_BANG, S_COMMENT, S_DECL, S_RAW
@@ -46,13 +50,14 @@ static u8 lower(u8 c) { return is_letter(c) ? (u8)(c | 0x20) : c; }
  * value (lower case; quoted with q, 0: not); what the attributes say */
 static char nm[12], an[8], av[64], en[10];
 static u8 nl, closing, anl, avl, q, enl, dash;
-static u8 t_align, t_pb, t_font;
+static u8 t_align, t_pb, t_font, t_pet;
 #define NONE 0xFF
 
 /* the text's context */
 static u8 popen, want_gap, no_gap;      /* a paragraph started; an empty one due before the next; not */
 static u8 pk, pal;                      /* the paragraph's kind (and level), alignment */
 static u8 hk, nq, npre, pre_first;      /* in a heading (its kind); quotes, pre open; just after <pre> */
+static u8 pet;                          /* the <pre> a PETSCII line's (A_PET) */
 static u8 ld, lt[4];                    /* lists open; each one's kind (K_BULLET / K_NUMBER) */
 static u8 n_on[7];                      /* <b> <i> <u> <code> <s> <sup> <sub> (and the like) open */
 static u8 scr;                          /* the script of the innermost <sup> / <sub> open */
@@ -83,7 +88,7 @@ static void begin(void) {
         build_put(CH_CR);
     }
     want_gap = no_gap = 0;
-    if (npre) pk = K_CODE;
+    if (npre) pk = (u8)(K_CODE | pet);
     else if (hk) pk = hk;
     else if (ld) {
         lv = ld > 4 ? 3 : (u8)(ld - 1);
@@ -118,7 +123,8 @@ static void ch(u16 u) {
         sp_nl = 0;
     }
     b_attr = attr();
-    build_uni(u);
+    if (pk & A_PET) build_put(uni_pet(u));
+    else build_uni(u);
 }
 
 /* a byte of the text: white space (as it is in <pre>), UTF-8; a broken
@@ -127,7 +133,7 @@ static void text_byte(u8 c) {
     if (u_need) {
         if ((c & 0xC0) == 0x80) {
             u_val = (u16)((u_val << 6) | (c & 0x3F));
-            if (!--u_need) ch(u_lead >= 0xF0 ? '?' : u_val);
+            if (!--u_need) ch(u_lead > 0xF0 || (u_lead == 0xF0 && (u_val >> 8) != 0xFB) ? '?' : u_val);
             return;
         }
         u_need = 0;
@@ -201,7 +207,7 @@ static u8 has(const char *s) {
 static u8 align_of(void) { return has("center") ? 1 : has("right") ? 2 : has("justify") ? 3 : 0; }
 
 /* an attribute read: style (text-align, a page break), align, class (a
- * <span>'s font: the export's s, r, h) */
+ * <span>'s font: the export's s, r, h; a <pre>'s petscii) */
 static void attr_done(void) {
     u8 k = word_at("style align class ", an);
     av[avl] = 0;
@@ -210,8 +216,9 @@ static void attr_done(void) {
         if ((has("break-after") || has("break-before")) && (has("always") || has("page"))) t_pb = 1;
     } else if (k == 2) {
         t_align = align_of();
-    } else if (k == 3 && avl == 1) {
-        t_font = av[0] == 's' ? F_SANS : av[0] == 'r' ? F_SERIF : av[0] == 'h' ? F_HEAD : NONE;
+    } else if (k == 3) {
+        if (has("petscii")) t_pet = 1;
+        if (avl == 1) t_font = av[0] == 's' ? F_SANS : av[0] == 'r' ? F_SERIF : av[0] == 'h' ? F_HEAD : NONE;
     }
 }
 
@@ -280,7 +287,7 @@ static void tag_end(void) {
         else if (nq) nq--;
     } else if (t == T_PRE) {
         if (!closing) {
-            npre++;
+            if (!npre++) pet = t_pet ? A_PET : 0;
             pre_first = 1;
         } else if (npre) npre--;
     }
@@ -395,7 +402,7 @@ static u8 feed(u8 c) {
         }
         nm[nl] = 0;
         t_align = t_font = NONE;
-        t_pb = 0;
+        t_pb = t_pet = 0;
         st = S_ATTR;
         return 1;
     case S_ATTR:

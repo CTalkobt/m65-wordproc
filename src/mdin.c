@@ -12,9 +12,12 @@
  * separated by an empty paragraph (not after a heading). Emphasis is
  * paired within a paragraph; an unpaired * or _ is text. Also ~~strike~~,
  * Pandoc's ^superscript^ and ~subscript~, and <u> <s> <del> <strike> <sup>
- * <sub>.
+ * <sub>. A ```petscii fence is a PETSCII line's: its characters back to
+ * PETSCII (petuni.h).
  */
 #include "wp.h"
+#define PET_IN
+#include "petuni.h"
 
 #define M_FLAGS (A_UNDER | A_BOLD | A_ITAL | A_STRIKE | A_SCRIPT)
 
@@ -121,17 +124,31 @@ static u8 closer(u8 c, u16 i) {
     }
 }
 
+/* a UTF-8 character from i (or ASCII): uv (U+1FBxx: 0xFBxx; beyond U+FFFF
+ * otherwise, or a stray continuation byte: "?"; broken: 0); its length */
+static u16 uv;
+static u8 utf8_get(u16 i) {
+    u8 c = in(i), n = c < 0xC0 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4, k;
+    uv = c & (n == 2 ? 0x1F : 0x0F);
+    for (k = 1; k < n; k++) {
+        if ((in(i + k) & 0xC0) != 0x80) {
+            uv = 0;
+            return k;
+        }
+        uv = (u16)((uv << 6) | (in(i + k) & 0x3F));
+    }
+    if (n == 1) uv = c < 0x80 ? c : '?';
+    else if (n == 4 && (c != 0xF0 || in(i + 1) != 0x9F || (uv >> 8) != 0xFB)) uv = '?';
+    return n;
+}
+
 /* a UTF-8 character from i as the document's (build_uni); its length */
 static u8 utf8(u16 i) {
-    u8 c = in(i), n = c < 0xC0 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4, k;
-    u16 u = c & (n == 2 ? 0x1F : 0x0F);
-    for (k = 1; k < n; k++) {
-        if ((in(i + k) & 0xC0) != 0x80) return k;   /* broken: dropped */
-        u = (u16)((u << 6) | (in(i + k) & 0x3F));
+    u8 n = utf8_get(i);
+    if (uv) {
+        style();
+        build_uni(uv);
     }
-    if (n == 1 || n == 4) u = '?';                  /* a stray continuation byte; beyond U+FFFF */
-    style();
-    build_uni(u);
     return n;
 }
 
@@ -308,7 +325,7 @@ static void inline_md(u16 i, u16 e) {
  * the document; its length */
 u16 md_import(void) {
     u16 i = 0, ls, le, e, j, t;
-    u8 c, fence = 0, n, q, sp;
+    u8 c, fence = 0, n, q, sp, pet = 0;
     mem_put(SCRATCH_LIN + SCRATCH_MAX - 1, 0);  /* (an end, even for a file that fills it) */
     build_start();
     para_open = after_head = align = hard = flags = code = pk = base_attr = item = 0;
@@ -329,12 +346,15 @@ u16 md_import(void) {
             }
             if (fence == 1) block_start();
             fence = 2;
-            md_para(K_CODE);
+            md_para((u8)(K_CODE | pet));
             code = 1;
             for (e = ls; e < le; e++) {
                 c = in(e);
                 if (c == '\t') puts_("    ");
-                else if (c >= 0x80) e += (u16)(utf8(e) - 1);
+                else if (pet) {
+                    e += (u16)(utf8_get(e) - 1);
+                    if (uv >= ' ') put(uni_pet(uv));
+                } else if (c >= 0x80) e += (u16)(utf8(e) - 1);
                 else if (c >= ' ') put(c);
             }
             end_para();
@@ -348,6 +368,7 @@ u16 md_import(void) {
         if (is_fence(j)) {
             end_para();
             fence = 1;
+            pet = starts(skip(j, c), "petscii") ? A_PET : 0;
             continue;
         }
         if (starts(j, "<div")) {

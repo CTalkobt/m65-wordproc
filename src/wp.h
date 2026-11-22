@@ -114,7 +114,10 @@ typedef uint32_t u32;
 #define A_LEVEL_SHIFT 3
 #define A_ALIGN 0x60            /* 0 left, 1 centre, 2 right, 3 justify */
 #define A_ALIGN_SHIFT 5
-#define A_PARA (A_KIND | A_LEVEL | A_ALIGN)
+#define A_PET   0x80            /* a PETSCII line (its kind K_CODE): its text PETSCII
+                                   codes, shown in the upper-case / graphics set (#11;
+                                   the converters: petuni.h) */
+#define A_PARA (A_KIND | A_LEVEL | A_ALIGN | A_PET)
 #define NFONTS 4
 #define F_SANS 0
 #define F_SERIF 1

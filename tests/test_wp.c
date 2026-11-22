@@ -897,6 +897,38 @@ int main(void) {
         n = rtf_out(m);
         CHECK(strstr(m, "\\strike") && strstr(m, "\\super") && strstr(m, "\\sub") && strstr(m, "\\nosupersub"));
         rtf_round("effects");
+        {
+            /* a PETSCII line (#11): ```petscii and <pre class="petscii">,
+             * its characters Unicode's map (petuni.h) both ways: ─ ♠ (the
+             * shifted letters' graphics), A, b (upper case: the set has no
+             * lower), U+1FB72 (Legacy Computing), £, ▌ (a C= graphic);
+             * then a plain code block */
+            static const char pm[] = "a\n\n```petscii\n"
+                                     "\xe2\x94\x80\xe2\x99\xa0" "Ab\xf0\x9f\xad\xb2\xc2\xa3\xe2\x96\x8c\n\n```\n\n```\nx\n```";
+            static const char pt[] = "a\r\r\xc0\xc1" "AB\xc2\x5c\xa1\r\r\rx\r";
+            md_in(pm);
+            text_of(buf, sizeof buf);
+            CHECK(strcmp(buf, pt) == 0 && sa(1) == K_NORMAL && sa(10) == (K_CODE | A_PET) &&
+                  sa(11) == (K_CODE | A_PET) && sa(14) == K_CODE);
+            md_out(m);
+            CHECK(strcmp(m, "a\n\n```petscii\n"
+                            "\xe2\x94\x80\xe2\x99\xa0" "AB\xf0\x9f\xad\xb2\xc2\xa3\xe2\x96\x8c\n\n```\n\n```\nx\n```\n\n") == 0);
+            md_fixed_point(m, h2, "PETSCII");
+            n = mod_run(MOD_HTML_EXPORT);
+            memcpy(m, MEM + SCRATCH_LIN, n);
+            m[n] = 0;
+            CHECK(strstr(m, "<pre class=\"petscii\"><code>\xe2\x94\x80\xe2\x99\xa0" "AB\xf0\x9f\xad\xb2\xc2\xa3\xe2\x96\x8c\n\n"
+                            "</code></pre>\n<pre><code>x</code></pre>") != NULL);
+            html_in(m);
+            text_of(buf, sizeof buf);
+            CHECK(strcmp(buf, pt) == 0 && sa(10) == (K_CODE | A_PET) && sa(11) == (K_CODE | A_PET) && sa(14) == K_CODE);
+            html_in("<pre class=\"x petscii\">&#x1FB72;&amp;q&#x2660;\xf0\x9f\x98\x80</pre><pre>&#x1FB72;</pre>");
+            text_of(buf, sizeof buf);
+            CHECK(strcmp(buf, "\xc2&Q\xc1?\r\r?\r") == 0 && sa(5) == (K_CODE | A_PET) && sa(8) == K_CODE);
+            md_in(pm);
+            rtf_out(m);
+            CHECK(strstr(m, "PETSCII Code;}") && strstr(m, "\\pard\\s8\\li360\\ql\\f2\\fs24 \\u9472?\\u9824?AB\\u-10178?\\u-8334?\\u163?\\u9612?\\par"));
+        }
         rtf_in("{\\rtf1\\ansi a\\up6 b\\up0 c\\dn4 d\\dn0 e\\par}");
         CHECK(sa(1) == A_SUP && sa(2) == 0 && sa(3) == A_SUB && sa(4) == 0);
         rtf_in("{\\rtf1\\ansi a{\\strike b}\\striked1 c\\striked0 d\\super e\\sub f\\nosupersub g\\par}");

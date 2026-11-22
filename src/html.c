@@ -9,7 +9,9 @@
  *                           one, with <br> between (as Markdown's export)
  *   paragraph kinds         heading 1-3: <h1>-<h3>; quote: <blockquote>
  *                           (with <br> between, as above); code: <pre><code>,
- *                           a line a paragraph; list items: <li> in <ul> or
+ *                           a line a paragraph (a PETSCII line: <pre
+ *                           class="petscii">, its characters as Unicode:
+ *                           petuni.h); list items: <li> in <ul> or
  *                           <ol> (start="N" when it starts past 1), nested
  *                           by their level inside the item before
  *   bold, italic, underline <b>, <i>, <u>, strikethrough <s>, superscript
@@ -24,6 +26,9 @@
  * separate blocks and are not written (in a code block: an empty line).
  */
 #include "wp.h"
+#define PET_OUT
+#define PET_UTF8
+#include "petuni.h"
 
 #define out o_put
 #define outs o_puts
@@ -91,12 +96,24 @@ static void restyle_to(u16 t) {
     open_st = t;
 }
 
-/* the text of paragraph ps..pe-1; code: as it is (in <pre><code>) */
+/* the text of paragraph ps..pe-1; code: as it is (in <pre><code>; 2: a
+ * PETSCII line) */
 static void out_para(u16 ps, u16 pe, u8 code) {
+    u16 u;
+    u8 c;
     open_st = 0;
     for (; ps < pe; ps++) {
         if (!code) restyle_to(h_style(ps));
-        out_ch(txt_at(ps));
+        c = txt_at(ps);
+        if (code > 1) {
+            u = pet_to_uni(c);
+            if (u >= 0x80 || !u) {
+                out_uni(u);
+                continue;
+            }
+            c = (u8)u;
+        }
+        out_ch(c);
     }
     restyle_to(0);
 }
@@ -105,6 +122,8 @@ static void out_para(u16 ps, u16 pe, u8 code) {
 #define P_NONE 0xFF             /* (prev: no block yet; a page break) */
 #define P_BREAK 0xFE
 static u8 prev, pal;            /* the last block's kind; its alignment */
+static u8 ppet;                 /* the last block a PETSCII line (A_PET) */
+static u8 lempty;               /* its last paragraph empty */
 static u8 ld, lt[4];            /* lists open; each one's kind (K_BULLET / K_NUMBER) */
 
 static const char *const align_name[4] = { 0, "center", "right", "justify" };
@@ -151,7 +170,11 @@ static void end_block(void) {
         out((u8)('0' + prev));
         out('>');
     } else if (prev == K_QUOTE) outs("</blockquote>");
-    else if (prev == K_CODE) outs("</code></pre>");
+    else if (prev == K_CODE) {
+        /* (an empty last line: a line end more, as a browser drops one) */
+        if (lempty) out('\n');
+        outs("</code></pre>");
+    }
     else if (prev != P_NONE && prev != P_BREAK) {
         while (ld) list_close();
     }
@@ -185,7 +208,7 @@ static const char style[] =
 /* the document as HTML at SCRATCH_LIN; its size (0: more than fits) */
 u16 html_export(void) {
     u16 ps, pe;
-    u8 ev, kind, al, gap = 0;
+    u8 ev, kind, al, gap = 0, pet;
     const char *t;
     o_start();
     outs(head);
@@ -206,14 +229,15 @@ u16 html_export(void) {
         ps = w_pos;
         pe = w_to;
         kind = w_attr & A_KIND;
+        pet = kind == K_CODE ? w_attr & A_PET : 0;
         al = (u8)((w_attr & A_ALIGN) >> A_ALIGN_SHIFT);
         if (kind >= K_CODE) al = 0;
         /* (an empty paragraph: a gap, but an empty line in a code block) */
-        if (pe == ps && (kind != K_CODE || prev != K_CODE || gap)) {
+        if (pe == ps && (kind != K_CODE || prev != K_CODE || pet != ppet || gap)) {
             gap = 1;
             continue;
         }
-        if (!gap && kind == prev && kind == K_CODE) {
+        if (!gap && kind == prev && kind == K_CODE && pet == ppet) {
             out('\n');
         } else if (!gap && kind >= K_BULLET && (u8)(prev - K_BULLET) < 2) {
             list_item(kind, (u8)((w_attr & A_LEVEL) >> A_LEVEL_SHIFT), ps);
@@ -229,13 +253,15 @@ u16 html_export(void) {
                 h[2] = 0;
                 start_tag(h, al);
             } else if (kind == K_QUOTE) start_tag("blockquote", al);
-            else if (kind == K_CODE) outs("<pre><code>");
+            else if (kind == K_CODE) outs(pet ? "<pre class=\"petscii\"><code>" : "<pre><code>");
             else list_item(kind, (u8)((w_attr & A_LEVEL) >> A_LEVEL_SHIFT), ps);
             pal = al;
         }
         base = kind_attr[kind];
-        out_para(ps, pe, kind == K_CODE);
+        out_para(ps, pe, kind == K_CODE ? 1 + !!pet : 0);
         prev = kind;
+        ppet = pet;
+        lempty = pe == ps;
         gap = 0;
     }
     end_block();
